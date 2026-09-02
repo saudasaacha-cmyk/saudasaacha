@@ -389,8 +389,8 @@ function BrokerCombobox({
                       className={cn(
                         "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
                         isSub
-                          ? "bg-indigo-500/10 text-indigo-500 ring-1 ring-inset ring-indigo-500/30"
-                          : "bg-blue-500/10 text-blue-500 ring-1 ring-inset ring-blue-500/30",
+                          ? "bg-brand-500/10 text-brand-500 ring-1 ring-inset ring-brand-500/30"
+                          : "bg-brand-500/10 text-brand-500 ring-1 ring-inset ring-brand-500/30",
                       )}
                     >
                       {isSub ? "Sub-broker" : "Broker"}

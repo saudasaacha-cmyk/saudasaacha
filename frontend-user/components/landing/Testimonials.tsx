@@ -11,7 +11,7 @@ const testimonials = [
     rating: 5,
     review:
       'SaudaSaacha has completely transformed how I trade. The flat ₹20 brokerage alone saves me thousands every month. The execution speed is unmatched — orders fill in milliseconds.',
-    color: 'bg-navy-600',
+    color: 'bg-brand-600',
     market: 'NSE & Derivatives',
   },
   {
@@ -56,7 +56,7 @@ export default function Testimonials() {
     <section className="py-0">
 
       {/* ── Blue Banner Quote ── */}
-      <div ref={bannerRef} className="scroll-reveal w-full bg-[#1F4677] py-20 px-6 relative overflow-hidden">
+      <div ref={bannerRef} className="scroll-reveal w-full bg-[#C4161C] py-20 px-6 relative overflow-hidden">
         {/* Background grid */}
         <div
           className="absolute inset-0 opacity-10 pointer-events-none"
@@ -90,7 +90,7 @@ export default function Testimonials() {
       {/* ── Dark Testimonials Section ── */}
       <div className="section-dark py-28 px-6 relative overflow-hidden">
         {/* Subtle blue glow */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-navy-600/8 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-brand-600/8 rounded-full blur-[120px] pointer-events-none" />
         {/* Grid pattern */}
         <div
           className="absolute inset-0 opacity-5 pointer-events-none"
@@ -104,7 +104,7 @@ export default function Testimonials() {
 
           {/* Header */}
           <div ref={headerRef} className="scroll-reveal mb-12 text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-navy-500/15 border border-navy-500/30 mb-5">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand-500/15 border border-brand-500/30 mb-5">
               <span className="w-1.5 h-1.5 rounded-full bg-[#E6B839]" />
               <span className="text-xs font-semibold text-gold-400 uppercase tracking-widest">Testimonials</span>
             </div>
@@ -153,7 +153,7 @@ export default function Testimonials() {
             {testimonials.map((t) => (
               <div
                 key={t.name}
-                className="stagger-child group bg-white/5 border border-white/10 rounded-2xl p-7 flex flex-col gap-5 hover:-translate-y-1 hover:border-[#1F4677]/40 hover:bg-white/8 transition-all duration-300 backdrop-blur-sm"
+                className="stagger-child group bg-white/5 border border-white/10 rounded-2xl p-7 flex flex-col gap-5 hover:-translate-y-1 hover:border-[#C4161C]/40 hover:bg-white/8 transition-all duration-300 backdrop-blur-sm"
               >
                 {/* Top */}
                 <div className="flex items-start justify-between">
@@ -166,7 +166,7 @@ export default function Testimonials() {
                       <div className="text-xs text-slate-400">{t.role}</div>
                     </div>
                   </div>
-                  <span className="text-[10px] font-semibold text-[#1F4677] bg-navy-500/15 border border-navy-500/25 px-2 py-1 rounded-full">
+                  <span className="text-[10px] font-semibold text-[#C4161C] bg-brand-500/15 border border-brand-500/25 px-2 py-1 rounded-full">
                     {t.market}
                   </span>
                 </div>

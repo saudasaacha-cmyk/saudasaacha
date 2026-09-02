@@ -59,7 +59,7 @@ export function BrandLogo({ href = "/dashboard", size = "md", showAdminBadge = t
       : role === "BROKER"
         ? {
             label: isSubBroker ? "Sub-broker" : "Broker",
-            cls: "bg-blue-500/15 font-bold text-blue-500",
+            cls: "bg-brand-500/15 font-bold text-brand-500",
           }
         : { label: "Admin", cls: "bg-destructive/15 text-destructive" };
 

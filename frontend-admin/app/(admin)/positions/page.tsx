@@ -54,7 +54,7 @@ const CLOSE_REASON_META: Record<
   string,
   { label: string; cls: string }
 > = {
-  USER: { label: "User", cls: "bg-blue-500/10 text-blue-400 ring-blue-500/30" },
+  USER: { label: "User", cls: "bg-brand-500/10 text-brand-400 ring-brand-500/30" },
   SL_HIT: {
     label: "Stop Loss",
     cls: "bg-destructive/10 text-destructive ring-destructive/30",
@@ -1079,7 +1079,7 @@ function AdminPositionsInner() {
                   e.stopPropagation();
                   setEditing(r);
                 }}
-                className="h-7 gap-1 rounded-md bg-blue-600 px-2.5 text-xs font-semibold text-white hover:bg-blue-700"
+                className="h-7 gap-1 rounded-md bg-brand-600 px-2.5 text-xs font-semibold text-white hover:bg-brand-700"
               >
                 <Pencil className="size-3.5" /> Edit
               </Button>
@@ -1109,7 +1109,7 @@ function AdminPositionsInner() {
                 }}
                 aria-label="Edit closed trade"
                 title="Edit realised P&L / close reason"
-                className="h-7 gap-1 rounded-md bg-blue-600 px-2.5 text-xs font-semibold text-white hover:bg-blue-700"
+                className="h-7 gap-1 rounded-md bg-brand-600 px-2.5 text-xs font-semibold text-white hover:bg-brand-700"
               >
                 <Pencil className="size-3.5" /> Edit
               </Button>
@@ -2040,7 +2040,7 @@ function PositionMobileCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-8 flex-1 gap-1 border-blue-500/40 text-blue-500 hover:bg-blue-500 hover:text-white"
+              className="h-8 flex-1 gap-1 border-brand-500/40 text-brand-500 hover:bg-brand-500 hover:text-white"
               onClick={onEdit}
             >
               <Pencil className="size-3" /> Edit
@@ -2060,7 +2060,7 @@ function PositionMobileCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-8 flex-1 gap-1 border-blue-500/40 text-blue-500 hover:bg-blue-500 hover:text-white"
+              className="h-8 flex-1 gap-1 border-brand-500/40 text-brand-500 hover:bg-brand-500 hover:text-white"
               onClick={onEdit}
             >
               <Pencil className="size-3" /> Edit

@@ -49,19 +49,19 @@ function FAQItem({ faq, isOpen, onToggle }: FAQItemProps) {
   return (
     <div
       className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-        isOpen ? 'border-[#1F4677] bg-navy-50/30' : 'border-slate-200 bg-white hover:border-navy-200'
+        isOpen ? 'border-[#C4161C] bg-brand-50/30' : 'border-slate-200 bg-white hover:border-brand-200'
       }`}
     >
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left gap-4"
         onClick={onToggle}
       >
-        <span className={`text-sm font-semibold font-manrope transition-colors ${isOpen ? 'text-[#1F4677]' : 'text-slate-800'}`}>
+        <span className={`text-sm font-semibold font-manrope transition-colors ${isOpen ? 'text-[#C4161C]' : 'text-slate-800'}`}>
           {faq.q}
         </span>
         <ChevronDown
           size={16}
-          className={`shrink-0 transition-all duration-300 ${isOpen ? 'rotate-180 text-[#1F4677]' : 'text-slate-400'}`}
+          className={`shrink-0 transition-all duration-300 ${isOpen ? 'rotate-180 text-[#C4161C]' : 'text-slate-400'}`}
         />
       </button>
       <div
@@ -73,7 +73,7 @@ function FAQItem({ faq, isOpen, onToggle }: FAQItemProps) {
         }}
       >
         <div className="px-5 pb-4">
-          <div className="h-px bg-navy-100 mb-3" />
+          <div className="h-px bg-brand-100 mb-3" />
           <p className="text-sm text-slate-600 leading-relaxed">{faq.a}</p>
         </div>
       </div>
@@ -90,7 +90,7 @@ export default function FAQ() {
   return (
     <section className="py-28 px-6 bg-white relative overflow-hidden">
       {/* Decorative */}
-      <div className="absolute top-0 left-0 w-72 h-72 bg-navy-500/4 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-0 left-0 w-72 h-72 bg-brand-500/4 rounded-full blur-[100px] pointer-events-none" />
 
       <div className="max-w-7xl mx-auto">
 
@@ -102,7 +102,7 @@ export default function FAQ() {
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight font-manrope mb-4">
             Frequently Asked{' '}
-            <span className="text-[#1F4677] gold-underline">Questions</span>
+            <span className="text-[#C4161C] gold-underline">Questions</span>
           </h2>
           <p className="text-lg text-slate-500 font-light">
             Everything you need to know about SaudaSaacha.
@@ -128,7 +128,7 @@ export default function FAQ() {
           <div ref={rightRef} className="scroll-reveal-right flex flex-col gap-5">
 
             {/* Still have questions card */}
-            <div className="bg-[#1F4677] rounded-2xl p-7 text-white relative overflow-hidden">
+            <div className="bg-[#C4161C] rounded-2xl p-7 text-white relative overflow-hidden">
               {/* Pattern */}
               <div
                 className="absolute inset-0 opacity-10 pointer-events-none"
@@ -142,12 +142,12 @@ export default function FAQ() {
                   <HelpCircle size={22} className="text-white" />
                 </div>
                 <h3 className="text-lg font-bold font-manrope mb-2">More Questions?</h3>
-                <p className="text-navy-100 text-sm leading-relaxed mb-6">
+                <p className="text-brand-100 text-sm leading-relaxed mb-6">
                   Our support team is available 24/7 to help you with any queries about trading, accounts, or funds.
                 </p>
                 <a
                   href="#contact"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-[#1F4677] text-sm font-bold hover:bg-navy-50 transition-all"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-[#C4161C] text-sm font-bold hover:bg-brand-50 transition-all"
                 >
                   Contact Support
                 </a>
@@ -159,8 +159,8 @@ export default function FAQ() {
               <div className="text-sm font-bold text-slate-700 font-manrope mb-2">Reach us directly</div>
               {[
                 { icon: Phone, label: 'Phone Support', value: '+91 98765 43210', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-                { icon: Mail, label: 'Email Support', value: 'support@sachchasauda.com', color: 'text-navy-600', bg: 'bg-navy-50', border: 'border-navy-100' },
-                { icon: MessageCircle, label: 'Live Chat', value: 'Available 24/7', color: 'text-[#1F4677]', bg: 'bg-navy-50', border: 'border-navy-100' },
+                { icon: Mail, label: 'Email Support', value: 'support@sachchasauda.com', color: 'text-brand-600', bg: 'bg-brand-50', border: 'border-brand-100' },
+                { icon: MessageCircle, label: 'Live Chat', value: 'Available 24/7', color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
               ].map((item) => {
                 const Icon = item.icon;
                 return (

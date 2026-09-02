@@ -6,7 +6,7 @@ export default function OptibizHero() {
     <section
       id="home"
       className="relative overflow-hidden text-white min-h-screen flex items-center"
-      style={{ background: 'linear-gradient(160deg, #0f2238 0%, #16314f 55%, #1F4677 100%)' }}
+      style={{ background: 'linear-gradient(160deg, #0d0d0d 0%, #1a1a1a 55%, #C4161C 100%)' }}
     >
       {/* Animated gradient background — themed navy + gold */}
       <BackgroundGradientAnimation
@@ -47,7 +47,7 @@ export default function OptibizHero() {
         </p>
 
         {/* Active traders badge */}
-        <div className="inline-flex items-center gap-2.5 bg-[#E6B839] text-[#1F4677] rounded-full px-5 py-2.5 shadow-lg">
+        <div className="inline-flex items-center gap-2.5 bg-[#E6B839] text-[#C4161C] rounded-full px-5 py-2.5 shadow-lg">
           <span className="text-xl font-bold font-manrope leading-none">150K+</span>
           <span className="text-sm font-semibold">Active Traders</span>
         </div>

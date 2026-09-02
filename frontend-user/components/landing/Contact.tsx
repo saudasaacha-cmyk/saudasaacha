@@ -12,9 +12,9 @@ const contactMethods = [
     desc: 'Talk to our trading experts directly',
     value: '+91 1800-123-4567',
     sub: 'Mon–Sat, 9AM–6PM IST',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-100',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-100',
     action: 'Call Now',
   },
   {
@@ -23,9 +23,9 @@ const contactMethods = [
     desc: 'Get detailed answers to your queries',
     value: 'support@sachchasauda.com',
     sub: 'Response within 2 hours',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-100',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-100',
     action: 'Send Email',
   },
   {
@@ -34,9 +34,9 @@ const contactMethods = [
     desc: 'Instant help from our support team',
     value: 'Chat with us now',
     sub: 'Available 24/7',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-100',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-100',
     action: 'Start Chat',
   },
   {
@@ -45,9 +45,9 @@ const contactMethods = [
     desc: 'Quick support on WhatsApp',
     value: '+91 98765 43210',
     sub: 'Mon–Sat, 9AM–9PM IST',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-100',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-100',
     action: 'Message Us',
   },
 ];
@@ -68,7 +68,7 @@ export default function Contact() {
 
   return (
     <section id="contact" className="py-24 md:py-28 px-6 bg-[#f7f9fc] relative overflow-hidden">
-      <div className="absolute bottom-0 left-0 w-72 h-72 bg-navy-500/4 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-72 h-72 bg-brand-500/4 rounded-full blur-[100px] pointer-events-none" />
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div ref={headerRef} className="scroll-reveal mb-16 text-center max-w-3xl mx-auto">
@@ -78,7 +78,7 @@ export default function Contact() {
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight font-manrope mb-4">
             Need Help? Contact Our{' '}
-            <span className="text-[#1F4677] gold-underline">Support Team</span>
+            <span className="text-[#C4161C] gold-underline">Support Team</span>
           </h2>
           <p className="text-lg text-slate-500 font-light">
             We're here to help you 24/7. Reach out through any channel that works best for you.
@@ -91,7 +91,7 @@ export default function Contact() {
             const Icon = method.icon;
             return (
               <div key={method.title} className="stagger-child card-light group p-6 flex flex-col gap-4">
-                <div className={`w-12 h-12 rounded-2xl ${method.bg} border ${method.border} flex items-center justify-center group-hover:scale-110 group-hover:bg-[#1F4677] group-hover:border-[#1F4677] transition-all`}>
+                <div className={`w-12 h-12 rounded-2xl ${method.bg} border ${method.border} flex items-center justify-center group-hover:scale-110 group-hover:bg-[#C4161C] group-hover:border-[#C4161C] transition-all`}>
                   <Icon size={22} className={`${method.color} group-hover:text-white transition-colors`} />
                 </div>
                 <div>
@@ -137,7 +137,7 @@ export default function Contact() {
                       placeholder="Rahul Sharma"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                       required
                     />
                   </div>
@@ -148,7 +148,7 @@ export default function Contact() {
                       placeholder="rahul@example.com"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                       required
                     />
                   </div>
@@ -159,7 +159,7 @@ export default function Contact() {
                   <select
                     value={formData.subject}
                     onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                     required
                   >
                     <option value="">Select a topic</option>
@@ -178,14 +178,14 @@ export default function Contact() {
                     placeholder="Describe your query in detail..."
                     value={formData.message}
                     onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all resize-none"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all resize-none"
                     required
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full py-4 rounded-xl bg-[#1F4677] text-white font-bold text-sm hover:bg-navy-800 transition-all shadow-lg shadow-navy-100 flex items-center justify-center gap-2"
+                  className="w-full py-4 rounded-xl bg-[#C4161C] text-white font-bold text-sm hover:bg-brand-800 transition-all shadow-lg shadow-brand-100 flex items-center justify-center gap-2"
                 >
                   <Send size={16} />
                   Send Message
@@ -197,10 +197,10 @@ export default function Contact() {
           {/* Office Info */}
           <div ref={infoRef} className="scroll-reveal-right flex flex-col gap-5">
             {/* Office Card */}
-            <div className="soft-card rounded-3xl p-6 hover:-translate-y-1 hover:border-navy-200 transition-all duration-300">
+            <div className="soft-card rounded-3xl p-6 hover:-translate-y-1 hover:border-brand-200 transition-all duration-300">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-navy-50 border border-navy-100 flex items-center justify-center">
-                  <MapPin size={18} className="text-[#1F4677]" />
+                <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center">
+                  <MapPin size={18} className="text-[#C4161C]" />
                 </div>
                 <div className="text-sm font-bold text-slate-900 font-manrope">Our Office</div>
               </div>
@@ -222,10 +222,10 @@ export default function Contact() {
             />
 
             {/* Hours Card */}
-            <div className="soft-card rounded-3xl p-6 hover:-translate-y-1 hover:border-navy-200 transition-all duration-300">
+            <div className="soft-card rounded-3xl p-6 hover:-translate-y-1 hover:border-brand-200 transition-all duration-300">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-navy-50 border border-navy-100 flex items-center justify-center">
-                  <Clock size={18} className="text-[#1F4677]" />
+                <div className="w-10 h-10 rounded-xl bg-brand-50 border border-brand-100 flex items-center justify-center">
+                  <Clock size={18} className="text-[#C4161C]" />
                 </div>
                 <div className="text-sm font-bold text-slate-900 font-manrope">Support Hours</div>
               </div>

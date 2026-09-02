@@ -24,7 +24,7 @@ export default function ServicesGrid() {
             </span>
             <h2 className="text-3xl md:text-5xl font-bold text-slate-900 font-manrope tracking-tight leading-[1.1]">
               Markets To Grow And{' '}
-              <span className="text-[#1F4677] gold-underline">Secure Your Wealth</span>
+              <span className="text-[#C4161C] gold-underline">Secure Your Wealth</span>
             </h2>
           </div>
           <div className="lg:pb-2">
@@ -61,10 +61,10 @@ export default function ServicesGrid() {
                 {/* Bottom overlay */}
                 <div
                   className="absolute inset-x-0 bottom-0 p-6 pt-16"
-                  style={{ background: 'linear-gradient(to top, #0f2238 0%, rgba(15,34,56,0.92) 55%, transparent 100%)' }}
+                  style={{ background: 'linear-gradient(to top, #0d0d0d 0%, rgba(15,34,56,0.92) 55%, transparent 100%)' }}
                 >
                   <div className="w-12 h-12 rounded-full bg-[#E6B839] flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                    <Icon size={22} className="text-[#1F4677]" />
+                    <Icon size={22} className="text-[#C4161C]" />
                   </div>
                   <h3 className="text-xl font-bold text-white font-manrope mb-1.5">{s.title}</h3>
                   <p className="text-sm text-slate-300 leading-relaxed">{s.desc}</p>

@@ -139,7 +139,7 @@ const CLOSE_REASON_META: Record<
   string,
   { label: string; cls: string }
 > = {
-  USER: { label: "User", cls: "bg-blue-500/10 text-blue-400 ring-blue-500/30" },
+  USER: { label: "User", cls: "bg-brand-500/10 text-brand-400 ring-brand-500/30" },
   SL_HIT: {
     label: "Stop Loss",
     cls: "bg-sell/10 text-sell ring-sell/30",

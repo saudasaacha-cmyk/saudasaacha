@@ -752,7 +752,7 @@ function PlaceOrderModal({
                 className={cn(
                   "h-10 rounded-md border text-sm font-medium transition-colors",
                   productType === "MIS"
-                    ? "border-blue-500 bg-blue-500/15 text-blue-400"
+                    ? "border-brand-500 bg-brand-500/15 text-brand-400"
                     : "border-border text-muted-foreground hover:bg-accent",
                 )}
               >
@@ -764,7 +764,7 @@ function PlaceOrderModal({
                 className={cn(
                   "h-10 rounded-md border text-sm font-medium transition-colors",
                   productType === "NRML"
-                    ? "border-blue-500 bg-blue-500/15 text-blue-400"
+                    ? "border-brand-500 bg-brand-500/15 text-brand-400"
                     : "border-border text-muted-foreground hover:bg-accent",
                 )}
               >

@@ -14,11 +14,23 @@ const config: Config = {
     },
     extend: {
       colors: {
-        // SaudaSaacha logo red. Brand identity only (mark + wordmark) —
-        // NEVER for trading semantics, where red still means sell/loss.
-        // Single source for the red; public/*.svg + the icon generator
-        // repeat the literal because they render outside Tailwind.
-        brand: "#E31E24",
+        // SaudaSaacha logo red, as a full scale. Brand identity + platform
+        // accent only — NEVER for trading semantics, where red still means
+        // sell/loss. Single source for the red; public/*.svg and the icon
+        // generator repeat the literals because they render outside Tailwind.
+        brand: {
+          50: "#FEF2F2",
+          100: "#FDE0E1",
+          200: "#FAC2C4",
+          300: "#F5959A",
+          400: "#EE5F66",
+          500: "#E31E24",
+          600: "#C4161C",
+          700: "#A11117",
+          800: "#7D0E13",
+          900: "#5A0A0E",
+          DEFAULT: "#E31E24",
+        },
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },

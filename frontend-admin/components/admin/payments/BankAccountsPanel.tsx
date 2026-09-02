@@ -168,7 +168,7 @@ export function BankAccountsPanel() {
                 <div className="flex flex-wrap justify-end gap-1">
                   {b.editable === false && (
                     <span
-                      className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] text-blue-500"
+                      className="rounded-full bg-brand-500/15 px-2 py-0.5 text-[10px] text-brand-500"
                       title="From your admin's pool — read-only here. Add your own banks below to override for your users."
                     >
                       INHERITED

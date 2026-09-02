@@ -48,10 +48,10 @@ const TONES: Record<ToneKey, { card: string; badge: string; icon: string; value:
     value: "text-emerald-700 dark:text-emerald-300",
   },
   sky: {
-    card: "bg-gradient-to-br from-sky-50 via-card to-card ring-1 ring-sky-500/20 hover:ring-sky-500/40 dark:from-sky-500/10",
-    badge: "bg-sky-500/15",
-    icon: "text-sky-600 dark:text-sky-400",
-    value: "text-sky-700 dark:text-sky-300",
+    card: "bg-gradient-to-br from-brand-50 via-card to-card ring-1 ring-brand-500/20 hover:ring-brand-500/40 dark:from-brand-500/10",
+    badge: "bg-brand-500/15",
+    icon: "text-brand-600 dark:text-brand-400",
+    value: "text-brand-700 dark:text-brand-300",
   },
   violet: {
     card: "bg-gradient-to-br from-violet-50 via-card to-card ring-1 ring-violet-500/20 hover:ring-violet-500/40 dark:from-violet-500/10",
@@ -72,10 +72,10 @@ const TONES: Record<ToneKey, { card: string; badge: string; icon: string; value:
     value: "text-rose-700 dark:text-rose-300",
   },
   indigo: {
-    card: "bg-gradient-to-br from-indigo-50 via-card to-card ring-1 ring-indigo-500/20 hover:ring-indigo-500/40 dark:from-indigo-500/10",
-    badge: "bg-indigo-500/15",
-    icon: "text-indigo-600 dark:text-indigo-400",
-    value: "text-indigo-700 dark:text-indigo-300",
+    card: "bg-gradient-to-br from-brand-50 via-card to-card ring-1 ring-brand-500/20 hover:ring-brand-500/40 dark:from-brand-500/10",
+    badge: "bg-brand-500/15",
+    icon: "text-brand-600 dark:text-brand-400",
+    value: "text-brand-700 dark:text-brand-300",
   },
 };
 

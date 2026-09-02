@@ -28,7 +28,7 @@ function fmtPrice(value: number | string | null | undefined): string {
 // place, an auto stop-out / SL / TP, or an admin force-close.
 const REASON_META: Record<string, { label: string; cls: string }> = {
   USER: { label: "User", cls: "bg-muted/40 text-muted-foreground ring-border" },
-  ADMIN: { label: "Admin", cls: "bg-blue-500/10 text-blue-400 ring-blue-500/30" },
+  ADMIN: { label: "Admin", cls: "bg-brand-500/10 text-brand-400 ring-brand-500/30" },
   ADMIN_CLOSE: { label: "Admin close", cls: "bg-amber-500/10 text-amber-400 ring-amber-500/30" },
   STOP_OUT: { label: "Stop-out", cls: "bg-amber-500/10 text-amber-400 ring-amber-500/30" },
   SL_HIT: { label: "Stop loss", cls: "bg-red-500/10 text-red-400 ring-red-500/30" },

@@ -50,8 +50,8 @@ const footerLinks = {
 };
 
 const socialLinks = [
-  { icon: Twitter, label: 'Twitter', href: '#', color: 'hover:text-sky-500' },
-  { icon: Linkedin, label: 'LinkedIn', href: '#', color: 'hover:text-navy-600' },
+  { icon: Twitter, label: 'Twitter', href: '#', color: 'hover:text-brand-500' },
+  { icon: Linkedin, label: 'LinkedIn', href: '#', color: 'hover:text-brand-600' },
   { icon: Instagram, label: 'Instagram', href: '#', color: 'hover:text-pink-500' },
   { icon: Youtube, label: 'YouTube', href: '#', color: 'hover:text-red-500' },
   { icon: Github, label: 'GitHub', href: '#', color: 'hover:text-slate-900' },
@@ -75,11 +75,11 @@ export default function Footer() {
             <input
               type="email"
               placeholder="Enter your email"
-              className="flex-1 md:w-64 px-5 py-3 rounded-full bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#1F4677] transition-all"
+              className="flex-1 md:w-64 px-5 py-3 rounded-full bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#C4161C] transition-all"
             />
             <button
               type="submit"
-              className="px-6 py-3 rounded-full bg-[#1F4677] text-white font-bold text-sm hover:bg-navy-800 transition-all flex items-center gap-2 shrink-0"
+              className="px-6 py-3 rounded-full bg-[#C4161C] text-white font-bold text-sm hover:bg-brand-800 transition-all flex items-center gap-2 shrink-0"
             >
               Subscribe <ArrowRight size={14} />
             </button>
@@ -109,7 +109,7 @@ export default function Footer() {
                     key={s.label}
                     href={s.href}
                     aria-label={s.label}
-                    className={`w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 ${s.color} hover:border-navy-200 hover:-translate-y-0.5 transition-all duration-300`}
+                    className={`w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 ${s.color} hover:border-brand-200 hover:-translate-y-0.5 transition-all duration-300`}
                   >
                     <Icon size={14} />
                   </a>

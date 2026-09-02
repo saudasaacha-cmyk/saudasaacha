@@ -25,8 +25,8 @@ import {
 
 const OWNER_TONE: Record<string, string> = {
   Broker: "bg-violet-500/10 text-violet-400 ring-violet-500/30",
-  "Sub-broker": "bg-indigo-500/10 text-indigo-400 ring-indigo-500/30",
-  Admin: "bg-blue-500/10 text-blue-400 ring-blue-500/30",
+  "Sub-broker": "bg-brand-500/10 text-brand-400 ring-brand-500/30",
+  Admin: "bg-brand-500/10 text-brand-400 ring-brand-500/30",
   Direct: "bg-muted/50 text-muted-foreground ring-border",
 };
 

@@ -13,7 +13,7 @@ export default function TradingViewLegalNotice() {
       className="mb-8 p-5 rounded-xl bg-slate-50 border-2 border-slate-200 scroll-mt-24"
     >
       <div className="flex items-start gap-3">
-        <BarChart3 size={18} className="text-[#1F4677] shrink-0 mt-0.5" aria-hidden />
+        <BarChart3 size={18} className="text-[#C4161C] shrink-0 mt-0.5" aria-hidden />
         <div>
           <div className="text-xs font-bold text-slate-800 mb-1.5 uppercase tracking-wide">
             Charts & Widgets by TradingView
@@ -23,7 +23,7 @@ export default function TradingViewLegalNotice() {
               href="https://www.tradingview.com/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#1F4677] font-semibold hover:underline"
+              className="text-[#C4161C] font-semibold hover:underline"
             >
               Stock Heatmap by TradingView
             </a>
@@ -43,7 +43,7 @@ export default function TradingViewLegalNotice() {
               href="https://www.tradingview.com/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#1F4677] font-medium hover:underline"
+              className="text-[#C4161C] font-medium hover:underline"
             >
               TradingView.com
             </a>
@@ -52,7 +52,7 @@ export default function TradingViewLegalNotice() {
               href="https://www.tradingview.com/policies/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#1F4677] font-medium hover:underline"
+              className="text-[#C4161C] font-medium hover:underline"
             >
               Policies &amp; terms
             </a>
@@ -61,7 +61,7 @@ export default function TradingViewLegalNotice() {
               href="https://www.tradingview.com/widget/"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#1F4677] font-medium hover:underline"
+              className="text-[#C4161C] font-medium hover:underline"
             >
               Widgets
             </a>

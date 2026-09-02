@@ -62,8 +62,8 @@ export function OwnerBadge({
     const label = row.assigned_broker_name || `…${row.assigned_broker_id.slice(-6)}`;
     const isSub = !!row.assigned_broker_is_sub;
     const cls = isSub
-      ? "bg-indigo-500/10 text-indigo-400 ring-indigo-500/30"
-      : "bg-blue-500/10 text-blue-400 ring-blue-500/30";
+      ? "bg-brand-700/15 text-brand-300 ring-brand-500/30"
+      : "bg-brand-500/10 text-brand-400 ring-brand-500/30";
     const subChip = (
       <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${cls}`}>
         <span className="text-[10px] uppercase tracking-wide opacity-70">
@@ -80,7 +80,7 @@ export function OwnerBadge({
         <span className="inline-flex flex-wrap items-center gap-1">
           {subChip}
           <ChevronRight className="size-3 text-muted-foreground" />
-          <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-medium text-blue-400 ring-1 ring-inset ring-blue-500/30">
+          <span className="inline-flex items-center gap-1 rounded-full bg-brand-500/10 px-2 py-0.5 text-[11px] font-medium text-brand-400 ring-1 ring-inset ring-brand-500/30">
             <span className="text-[10px] uppercase tracking-wide opacity-70">Broker</span>
             <span>{parentLabel}</span>
           </span>

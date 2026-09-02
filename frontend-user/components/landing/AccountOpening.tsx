@@ -6,16 +6,16 @@ import { useScrollAnimation, useStaggerAnimation } from './hooks/useScrollAnimat
 import ImageBox from './ImageBox';
 
 const benefits = [
-  { icon: Zap,          text: 'Instant digital KYC verification',    color: 'text-[#1F4677]', bg: 'bg-navy-50',  border: 'border-navy-100' },
-  { icon: Shield,       text: 'Bank-grade security & encryption',     color: 'text-[#1F4677]', bg: 'bg-navy-50',  border: 'border-navy-100' },
-  { icon: Clock,        text: 'Account active in under 10 minutes',   color: 'text-[#1F4677]', bg: 'bg-navy-50',  border: 'border-navy-100' },
-  { icon: CheckCircle2, text: 'Zero account opening charges',         color: 'text-[#1F4677]', bg: 'bg-navy-50',  border: 'border-navy-100' },
+  { icon: Zap,          text: 'Instant digital KYC verification',    color: 'text-[#C4161C]', bg: 'bg-brand-50',  border: 'border-brand-100' },
+  { icon: Shield,       text: 'Bank-grade security & encryption',     color: 'text-[#C4161C]', bg: 'bg-brand-50',  border: 'border-brand-100' },
+  { icon: Clock,        text: 'Account active in under 10 minutes',   color: 'text-[#C4161C]', bg: 'bg-brand-50',  border: 'border-brand-100' },
+  { icon: CheckCircle2, text: 'Zero account opening charges',         color: 'text-[#C4161C]', bg: 'bg-brand-50',  border: 'border-brand-100' },
 ];
 
 const paymentMethods = [
-  { icon: Smartphone,  label: 'UPI',         sub: 'Instant transfer',  color: 'text-[#1F4677]', bg: 'bg-navy-50', border: 'border-navy-100' },
-  { icon: Building2,   label: 'Net Banking', sub: 'All major banks',   color: 'text-[#1F4677]', bg: 'bg-navy-50', border: 'border-navy-100' },
-  { icon: CreditCard,  label: 'Debit Card',  sub: 'Visa / Mastercard', color: 'text-[#1F4677]', bg: 'bg-navy-50', border: 'border-navy-100' },
+  { icon: Smartphone,  label: 'UPI',         sub: 'Instant transfer',  color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
+  { icon: Building2,   label: 'Net Banking', sub: 'All major banks',   color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
+  { icon: CreditCard,  label: 'Debit Card',  sub: 'Visa / Mastercard', color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
 ];
 
 const steps = [
@@ -23,25 +23,25 @@ const steps = [
     step: '01',
     title: 'Register Your Account',
     desc: 'Enter your mobile number, email, and basic details. Verify with OTP in seconds.',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-200',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-200',
   },
   {
     step: '02',
     title: 'Add Funds Securely',
     desc: 'Deposit funds via UPI, Net Banking, or Debit Card. Instant credit to your trading account.',
-    color: 'text-[#1F4677]',
-    bg: 'bg-navy-50',
-    border: 'border-navy-200',
+    color: 'text-[#C4161C]',
+    bg: 'bg-brand-50',
+    border: 'border-brand-200',
   },
   {
     step: '03',
     title: 'Start Trading Instantly',
     desc: 'Access all markets, place your first trade, and start building your portfolio right away.',
-    color: 'text-[#1F4677]',
-    bg: 'bg-[#1F4677]',
-    border: 'border-[#1F4677]',
+    color: 'text-[#C4161C]',
+    bg: 'bg-[#C4161C]',
+    border: 'border-[#C4161C]',
   },
 ];
 
@@ -54,7 +54,7 @@ export default function AccountOpening() {
 
   return (
     <section id="account" className="py-24 md:py-28 px-6 bg-white relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-80 h-80 bg-navy-500/4 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-0 right-0 w-80 h-80 bg-brand-500/4 rounded-full blur-[100px] pointer-events-none" />
       <div className="max-w-7xl mx-auto">
 
         {/* Top: Account Opening CTA */}
@@ -67,7 +67,7 @@ export default function AccountOpening() {
             </div>
             <h2 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight font-manrope mb-5 leading-tight">
               Open Your Account in{' '}
-              <span className="text-[#1F4677] gold-underline">Under 10 Seconds</span>
+              <span className="text-[#C4161C] gold-underline">Under 10 Seconds</span>
             </h2>
             <p className="text-lg text-slate-500 mb-8 leading-relaxed">
               Simple digital onboarding with instant verification and secure KYC process.
@@ -79,7 +79,7 @@ export default function AccountOpening() {
               {benefits.map((b) => {
                 const Icon = b.icon;
                 return (
-                  <div key={b.text} className={`flex items-center gap-3 p-3 rounded-2xl ${b.bg} border ${b.border} hover:-translate-y-1 hover:border-navy-200 transition-all duration-300`}>
+                  <div key={b.text} className={`flex items-center gap-3 p-3 rounded-2xl ${b.bg} border ${b.border} hover:-translate-y-1 hover:border-brand-200 transition-all duration-300`}>
                     <Icon size={16} className={b.color} />
                     <span className="text-sm text-slate-700 font-medium">{b.text}</span>
                   </div>
@@ -94,7 +94,7 @@ export default function AccountOpening() {
                 {paymentMethods.map((pm) => {
                   const Icon = pm.icon;
                   return (
-                    <div key={pm.label} className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl border ${pm.border} ${pm.bg} hover:-translate-y-1 hover:border-navy-200 transition-all duration-300`}>
+                    <div key={pm.label} className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl border ${pm.border} ${pm.bg} hover:-translate-y-1 hover:border-brand-200 transition-all duration-300`}>
                       <Icon size={16} className={pm.color} />
                       <div>
                         <div className="text-xs font-bold text-slate-800">{pm.label}</div>
@@ -121,7 +121,7 @@ export default function AccountOpening() {
                   <input
                     type="text"
                     placeholder="Rahul"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                   />
                 </div>
                 <div>
@@ -129,7 +129,7 @@ export default function AccountOpening() {
                   <input
                     type="text"
                     placeholder="Sharma"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                   />
                 </div>
               </div>
@@ -141,7 +141,7 @@ export default function AccountOpening() {
                   <input
                     type="tel"
                     placeholder="9876543210"
-                    className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                    className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                   />
                 </div>
               </div>
@@ -151,7 +151,7 @@ export default function AccountOpening() {
                 <input
                   type="email"
                   placeholder="rahul@example.com"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all"
                 />
               </div>
 
@@ -160,13 +160,13 @@ export default function AccountOpening() {
                 <input
                   type="text"
                   placeholder="ABCDE1234F"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#1F4677] focus:bg-white transition-all uppercase"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:outline-none focus:border-[#C4161C] focus:bg-white transition-all uppercase"
                 />
               </div>
 
               <Link
                 href="/register"
-                className="w-full py-4 rounded-xl bg-[#1F4677] text-white font-bold text-sm hover:bg-navy-800 transition-all shadow-lg shadow-navy-100 flex items-center justify-center gap-2 glow-btn"
+                className="w-full py-4 rounded-xl bg-[#C4161C] text-white font-bold text-sm hover:bg-brand-800 transition-all shadow-lg shadow-brand-100 flex items-center justify-center gap-2 glow-btn"
               >
                 Open Free Account
                 <ArrowRight size={16} />
@@ -174,9 +174,9 @@ export default function AccountOpening() {
 
               <p className="text-center text-[11px] text-slate-400">
                 By registering, you agree to our{' '}
-                <Link href="/terms" className="text-[#1F4677] hover:underline">Terms & Conditions</Link>{' '}
+                <Link href="/terms" className="text-[#C4161C] hover:underline">Terms & Conditions</Link>{' '}
                 and{' '}
-                <Link href="/privacy-policy" className="text-[#1F4677] hover:underline">Privacy Policy</Link>
+                <Link href="/privacy-policy" className="text-[#C4161C] hover:underline">Privacy Policy</Link>
               </p>
             </form>
           </div>
@@ -196,19 +196,19 @@ export default function AccountOpening() {
         <div ref={stepsHdr} className="scroll-reveal text-center mb-12">
           <h2 className="text-3xl md:text-5xl font-bold text-slate-900 tracking-tight font-manrope mb-3">
             Start Trading in{' '}
-            <span className="text-[#1F4677] gold-underline">3 Easy Steps</span>
+            <span className="text-[#C4161C] gold-underline">3 Easy Steps</span>
           </h2>
           <p className="text-slate-500">Simple, fast, and completely digital.</p>
         </div>
 
         <div ref={stepsRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
           {/* Connector line */}
-          <div className="hidden md:block absolute top-12 left-1/3 right-1/3 h-px bg-gradient-to-r from-navy-200 via-navy-300 to-navy-200" />
+          <div className="hidden md:block absolute top-12 left-1/3 right-1/3 h-px bg-gradient-to-r from-brand-200 via-brand-300 to-brand-200" />
 
           {steps.map((step, i) => (
             <div key={step.step} className="stagger-child card-light p-8 text-center flex flex-col items-center gap-4 relative">
               {/* Step number */}
-              <div className={`w-16 h-16 rounded-2xl ${i === 2 ? 'bg-[#1F4677]' : step.bg} border ${step.border} flex items-center justify-center`}>
+              <div className={`w-16 h-16 rounded-2xl ${i === 2 ? 'bg-[#C4161C]' : step.bg} border ${step.border} flex items-center justify-center`}>
                 <span className={`text-2xl font-bold font-manrope ${i === 2 ? 'text-white' : step.color}`}>{step.step}</span>
               </div>
 
@@ -229,7 +229,7 @@ export default function AccountOpening() {
         <div ref={ctaRef} className="scroll-reveal mt-12 text-center">
           <Link
             href="/register"
-            className="inline-flex items-center gap-2 px-10 py-4 rounded-full bg-[#1F4677] text-white font-bold text-base hover:bg-navy-800 transition-all shadow-xl shadow-navy-100 hover:shadow-navy-200 glow-btn"
+            className="inline-flex items-center gap-2 px-10 py-4 rounded-full bg-[#C4161C] text-white font-bold text-base hover:bg-brand-800 transition-all shadow-xl shadow-brand-100 hover:shadow-brand-200 glow-btn"
           >
             Create Account Now
             <ArrowRight size={18} />

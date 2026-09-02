@@ -7,9 +7,9 @@
 
 /* ── CSS Variables ────────────────────────────────────────────────────────── */
 :root {
-  --accent: #1F4677;
-  --accent-dark: #173251;
-  --dark: #0f172a;
+  --accent: #C4161C;
+  --accent-dark: #7D0E13;
+  --dark: #0f0f0f;
   --light: #f8fafc;
 }
 
@@ -149,24 +149,24 @@
   gap: 0.5rem;
   padding: 0.375rem 0.875rem;
   border-radius: 9999px;
-  background: #eff6ff;
-  border: 1px solid #dbeafe;
+  background: #FEF2F2;
+  border: 1px solid #FDE0E1;
 }
 
 /* ── Dark section (navy) ──────────────────────────────────────────────────── */
 .landing-page .section-dark {
-  background: linear-gradient(180deg, #16314f 0%, #0f2238 100%);
+  background: linear-gradient(180deg, #1a1a1a 0%, #0d0d0d 100%);
 }
 
 /* ── Stat band (navy → gold-tinted) ───────────────────────────────────────── */
 .landing-page .stat-band {
-  background: linear-gradient(135deg, #112744 0%, #1F4677 55%, #264e7e 100%);
+  background: linear-gradient(135deg, #141414 0%, #C4161C 55%, #E3444A 100%);
 }
 
 /* ── Gold secondary button ────────────────────────────────────────────────── */
 .landing-page .btn-gold {
   background: #E6B839;
-  color: #1F4677;
+  color: #C4161C;
   transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
 }
 .landing-page .btn-gold:hover {
@@ -318,5 +318,5 @@ html {
 /* ── Selection color ──────────────────────────────────────────────────────── */
 .landing-page ::selection {
   background: rgba(31,70,119, 0.2);
-  color: #1F4677;
+  color: #C4161C;
 }

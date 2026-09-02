@@ -590,7 +590,7 @@ function PermissionRow({
 }) {
   const levels: Array<{ k: PermissionLevel; tone: string }> = [
     { k: "OFF", tone: "bg-muted text-foreground" },
-    { k: "VIEW", tone: "bg-blue-500/15 text-blue-500" },
+    { k: "VIEW", tone: "bg-brand-500/15 text-brand-500" },
     { k: "EDIT", tone: "bg-primary text-primary-foreground" },
   ];
   return (
@@ -845,7 +845,7 @@ function CreateBrokerDialog({
                 <div className="text-sm font-medium">Permissions</div>
                 <div className="text-xs text-muted-foreground">
                   <span className="font-semibold text-foreground">OFF</span> = hidden ·{" "}
-                  <span className="font-semibold text-blue-500">VIEW</span> = read-only ·{" "}
+                  <span className="font-semibold text-brand-500">VIEW</span> = read-only ·{" "}
                   <span className="font-semibold text-primary">EDIT</span> = full access
                 </div>
               </div>
@@ -971,7 +971,7 @@ function EditBrokerDialog({
                 <div className="text-sm font-medium">Permissions</div>
                 <div className="text-xs text-muted-foreground">
                   <span className="font-semibold text-foreground">OFF</span> = hidden ·{" "}
-                  <span className="font-semibold text-blue-500">VIEW</span> = read-only ·{" "}
+                  <span className="font-semibold text-brand-500">VIEW</span> = read-only ·{" "}
                   <span className="font-semibold text-primary">EDIT</span> = full access
                 </div>
               </div>

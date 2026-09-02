@@ -40,7 +40,7 @@ export function FloatingHeader() {
             <a
               key={l.label}
               href={l.href}
-              className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#1F4677] hover:bg-slate-100 transition-colors"
+              className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:text-[#C4161C] hover:bg-slate-100 transition-colors"
             >
               {l.label}
             </a>
@@ -51,7 +51,7 @@ export function FloatingHeader() {
         <div className="flex items-center gap-2">
           <Link
             href="/login"
-            className="hidden sm:inline-flex items-center rounded-md px-4 py-2 text-sm font-semibold text-[#1F4677] border border-[#1F4677]/25 hover:bg-[#1F4677]/5 transition-colors"
+            className="hidden sm:inline-flex items-center rounded-md px-4 py-2 text-sm font-semibold text-[#C4161C] border border-[#C4161C]/25 hover:bg-[#C4161C]/5 transition-colors"
           >
             Login
           </Link>
@@ -63,7 +63,7 @@ export function FloatingHeader() {
           </Link>
           <button
             type="button"
-            className="lg:hidden inline-flex items-center justify-center rounded-md p-2 text-[#1F4677] hover:bg-slate-100"
+            className="lg:hidden inline-flex items-center justify-center rounded-md p-2 text-[#C4161C] hover:bg-slate-100"
             onClick={() => setOpen(!open)}
             aria-label="Toggle menu"
           >
@@ -91,7 +91,7 @@ export function FloatingHeader() {
             <Link
               href="/login"
               onClick={() => setOpen(false)}
-              className="flex-1 text-center rounded-md px-4 py-2 text-sm font-semibold text-[#1F4677] border border-[#1F4677]/25 hover:bg-[#1F4677]/5"
+              className="flex-1 text-center rounded-md px-4 py-2 text-sm font-semibold text-[#C4161C] border border-[#C4161C]/25 hover:bg-[#C4161C]/5"
             >
               Login
             </Link>

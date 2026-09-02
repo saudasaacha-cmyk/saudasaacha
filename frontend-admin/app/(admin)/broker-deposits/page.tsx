@@ -240,7 +240,7 @@ function BrokerCard({
           <span
             className={cn(
               "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ring-1 ring-inset",
-              broker.is_sub ? "bg-indigo-500/10 text-indigo-400 ring-indigo-500/30" : "bg-violet-500/10 text-violet-400 ring-violet-500/30",
+              broker.is_sub ? "bg-brand-500/10 text-brand-400 ring-brand-500/30" : "bg-violet-500/10 text-violet-400 ring-violet-500/30",
             )}
           >
             {broker.is_sub ? "Sub-broker" : "Broker"}

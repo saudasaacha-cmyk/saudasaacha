@@ -30,7 +30,7 @@ export default function AboutStats() {
               className="w-full h-[300px] md:h-[360px] premium-shadow"
             />
             <div className="mt-8 flex items-start gap-4">
-              <div className="w-12 h-12 rounded-full bg-[#1F4677] flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-full bg-[#C4161C] flex items-center justify-center shrink-0">
                 <Compass size={22} className="text-[#E6B839]" />
               </div>
               <div>
@@ -52,11 +52,11 @@ export default function AboutStats() {
 
             <h2 className="text-3xl md:text-5xl font-bold text-slate-900 font-manrope tracking-tight leading-[1.1] mb-8">
               India&apos;s Modern{' '}
-              <span className="text-[#1F4677] gold-underline">Multi-Market Broker</span>
+              <span className="text-[#C4161C] gold-underline">Multi-Market Broker</span>
             </h2>
 
             <div className="flex items-start gap-4 mb-8">
-              <div className="w-12 h-12 rounded-full bg-[#1F4677] flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-full bg-[#C4161C] flex items-center justify-center shrink-0">
                 <Target size={22} className="text-[#E6B839]" />
               </div>
               <div>
@@ -72,7 +72,7 @@ export default function AboutStats() {
             {/* Dark CTA banner */}
             <div
               className="flex flex-col sm:flex-row items-center gap-4 rounded-2xl px-6 py-5 premium-shadow"
-              style={{ background: 'linear-gradient(135deg, #1F4677 0%, #16314f 100%)' }}
+              style={{ background: 'linear-gradient(135deg, #C4161C 0%, #1a1a1a 100%)' }}
             >
               <div className="flex items-start gap-3 flex-1">
                 <CheckCircle2 size={20} className="text-[#E6B839] shrink-0 mt-0.5" />
@@ -98,7 +98,7 @@ export default function AboutStats() {
             <div key={s.value}>
               <div className="w-10 h-1.5 rounded-full bg-[#E6B839] mb-5" />
               <div className="flex items-start">
-                <span className="text-4xl md:text-5xl font-bold text-[#1F4677] font-manrope leading-none">
+                <span className="text-4xl md:text-5xl font-bold text-[#C4161C] font-manrope leading-none">
                   {s.value}
                 </span>
               </div>

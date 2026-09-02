@@ -30,27 +30,27 @@ const variantStyles: Record<
 > = {
   light: {
     surface:
-      'bg-gradient-to-br from-navy-50 via-white to-navy-50 border-navy-200',
+      'bg-gradient-to-br from-brand-50 via-white to-brand-50 border-brand-200',
     grid: 'rgba(31,70,119,0.07)',
-    chip: 'bg-white border-navy-200 shadow-sm',
-    icon: 'text-[#1F4677]',
-    label: 'text-navy-700',
-    sub: 'text-navy-400',
+    chip: 'bg-white border-brand-200 shadow-sm',
+    icon: 'text-[#C4161C]',
+    label: 'text-brand-700',
+    sub: 'text-brand-400',
     tag: 'bg-gold-100 border-gold-300 text-gold-800',
   },
   blue: {
     surface:
-      'bg-gradient-to-br from-navy-50 via-navy-100/70 to-navy-200/50 border-navy-300',
+      'bg-gradient-to-br from-brand-50 via-brand-100/70 to-brand-200/50 border-brand-300',
     grid: 'rgba(31,70,119,0.10)',
-    chip: 'bg-white border-navy-200 shadow-sm',
-    icon: 'text-[#1F4677]',
-    label: 'text-navy-800',
-    sub: 'text-navy-600',
+    chip: 'bg-white border-brand-200 shadow-sm',
+    icon: 'text-[#C4161C]',
+    label: 'text-brand-800',
+    sub: 'text-brand-600',
     tag: 'bg-gold-100 border-gold-300 text-gold-800',
   },
   dark: {
     surface:
-      'bg-gradient-to-br from-navy-800 via-navy-900 to-navy-800 border-white/10',
+      'bg-gradient-to-br from-brand-800 via-brand-900 to-brand-800 border-white/10',
     grid: 'rgba(230,184,57,0.08)',
     chip: 'bg-white/10 border-gold-400/40',
     icon: 'text-gold-400',
