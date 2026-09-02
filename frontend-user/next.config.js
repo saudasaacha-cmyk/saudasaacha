@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Build into a staging dir so a deploy never serves from a half-written
+  // .next. scripts/deploy.sh builds with NEXT_DIST_DIR=.next-build and only
+  // then swaps it in, cutting the broken window from the whole build down
+  // to a single reload.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,

@@ -106,10 +106,16 @@ if [ "$user_changed" = "1" ]; then
     npm ci --no-audit --no-fund
   fi
   echo "  building…"
-  rm -rf .next
-  npm run build
+  # Build beside the live .next, then swap. Deleting .next first left the
+  # running server serving a folder that no longer existed for the whole
+  # build — every asset 404'd and the site rendered unstyled.
+  rm -rf .next-build .next-old
+  NEXT_DIST_DIR=.next-build npm run build
+  mv .next .next-old 2>/dev/null || true
+  mv .next-build .next
   echo "  reloading PM2 saudasaacha-user…"
   pm2 reload saudasaacha-user --update-env
+  rm -rf .next-old
 fi
 
 # ── 4) Frontend admin ──────────────────────────────────────────────
@@ -121,10 +127,16 @@ if [ "$admin_changed" = "1" ]; then
     npm ci --no-audit --no-fund
   fi
   echo "  building…"
-  rm -rf .next
-  npm run build
+  # Build beside the live .next, then swap. Deleting .next first left the
+  # running server serving a folder that no longer existed for the whole
+  # build — every asset 404'd and the site rendered unstyled.
+  rm -rf .next-build .next-old
+  NEXT_DIST_DIR=.next-build npm run build
+  mv .next .next-old 2>/dev/null || true
+  mv .next-build .next
   echo "  reloading PM2 saudasaacha-admin…"
   pm2 reload saudasaacha-admin --update-env
+  rm -rf .next-old
 fi
 
 # ── 5) Nginx config sync (if tracked nginx config changed) ─────────
