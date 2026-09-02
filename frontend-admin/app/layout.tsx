@@ -4,8 +4,8 @@ import { PwaRegister } from "@/components/common/PwaRegister";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "SaudaSaacha Broker Admin", template: "%s · SaudaSaacha Broker Admin" },
-  description: "Super-admin control panel for the SaudaSaacha Broker trading platform.",
+  title: { default: "SachchaSauda Broker Admin", template: "%s · SachchaSauda Broker Admin" },
+  description: "Super-admin control panel for the SachchaSauda Broker trading platform.",
   icons: { icon: "/icon.svg" },
   // Dynamic manifest — served by app/manifest.webmanifest/route.ts.
   // AdminBrandingChrome rewrites this <link>'s href at runtime to

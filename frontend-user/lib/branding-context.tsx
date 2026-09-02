@@ -56,10 +56,10 @@ type BrandingContextValue = {
   branding: Branding | null;
   loading: boolean;
   /** True ONLY once the client has confirmed we're on the platform host
-   *  (sachchasauda.com / localhost). The super-admin "SaudaSaacha" default
+   *  (sachchasauda.com / localhost). The super-admin "SachchaSauda" default
    *  logo + wordmark may render ONLY when this is true — never during SSR,
    *  never on a tenant's branded domain, never before the host is known.
-   *  This is what stops SaudaSaacha flashing on `broker.example.com`. */
+   *  This is what stops SachchaSauda flashing on `broker.example.com`. */
   showPlatformDefault: boolean;
   /** True once the client has confirmed we're on a tenant custom domain. */
   onBrandedHost: boolean;
@@ -92,7 +92,7 @@ function isPlatformHost(host: string): boolean {
   // NOTE: do NOT auto-include `window.location.hostname` here. Doing so
   // makes every tenant custom domain (e.g. stockcafe.live) self-classify
   // as platform, which silently skips the /branding/by-domain fetch and
-  // falls the page back to the default "SaudaSaacha Broker" wordmark —
+  // falls the page back to the default "SachchaSauda Broker" wordmark —
   // exactly the bug where admins set a logo + brand name but their own
   // branded host kept rendering the platform default.
   return /\.(vercel|netlify|fly)\.(app|dev)$/.test(h);
@@ -158,7 +158,7 @@ async function fetchMyBranding(token: string): Promise<{
 // White-label flicker fix: a custom-domain visitor's brand is resolved by a
 // network round-trip (/branding/by-domain). When the API/server is slow that
 // fetch can take seconds, and until it lands the header renders the platform
-// default ("SaudaSaacha Broker" — the super admin's brand). Stashing the last
+// default ("SachchaSauda Broker" — the super admin's brand). Stashing the last
 // resolved brand per host lets us repaint it INSTANTLY on the next load while
 // the live fetch refreshes in the background — the operator's "super admin ka
 // naam flash hota hai jab server slow hai" report.
@@ -188,7 +188,7 @@ function applyBrandingChrome(
   allowPlatformDefault = true,
 ): void {
   if (typeof document === "undefined") return;
-  // Title — fall back to the platform default ("SaudaSaacha") ONLY on the
+  // Title — fall back to the platform default ("SachchaSauda") ONLY on the
   // platform host. On a tenant's branded domain we must never reveal the
   // super-admin's name, so leave the title untouched when the tenant brand
   // hasn't resolved yet (keeps the last value / the neutral SSR title).
@@ -294,7 +294,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   const [branding, setBranding] = useState<Branding | null>(null);
   const [loading, setLoading] = useState(true);
   // "unknown" until the client resolves the host (SSR + first paint). The
-  // SaudaSaacha default is gated on this being "platform", so it can never
+  // SachchaSauda default is gated on this being "platform", so it can never
   // render server-side or on a branded domain — killing the flash.
   const [hostKind, setHostKind] = useState<"unknown" | "platform" | "branded">(
     "unknown",
@@ -319,7 +319,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
       const ref = searchParams?.get("ref");
       const host = window.location.hostname;
       const platform = isPlatformHost(host);
-      // Record the host kind so components know whether the SaudaSaacha
+      // Record the host kind so components know whether the SachchaSauda
       // default is allowed to render. A ?ref= link on the platform host is
       // still the platform host (branding resolves to the referred admin).
       setHostKind(platform ? "platform" : "branded");
@@ -327,7 +327,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
 
       // Repaint the last-known brand for this host IMMEDIATELY so a slow
       // /branding/by-domain round-trip never flashes the platform default
-      // ("SaudaSaacha Broker") first. The live fetch below refreshes it.
+      // ("SachchaSauda Broker") first. The live fetch below refreshes it.
       if (onCustomDomain) {
         const cached = readCachedBranding(host);
         if (cached) {

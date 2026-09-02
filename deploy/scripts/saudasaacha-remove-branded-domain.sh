@@ -28,7 +28,7 @@ if ! [[ "$DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{2,251}[A-Za-z0-9]$ ]]; then
 fi
 
 DOMAIN="${DOMAIN,,}"
-CONF_NAME="saudasaacha-branded-${DOMAIN}.conf"
+CONF_NAME="sachchasauda-branded-${DOMAIN}.conf"
 CONF_PATH="/etc/nginx/sites-available/${CONF_NAME}"
 SYMLINK_PATH="/etc/nginx/sites-enabled/${CONF_NAME}"
 

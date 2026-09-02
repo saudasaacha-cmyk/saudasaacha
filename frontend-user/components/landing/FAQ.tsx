@@ -11,7 +11,7 @@ const faqs = [
   },
   {
     q: 'Is there any brokerage charge?',
-    a: 'SaudaSaacha keeps brokerage simple and transparent — a flat fee of ₹20 per order for intraday and F&O trades, regardless of trade size. No hidden charges, ever.',
+    a: 'SachchaSauda keeps brokerage simple and transparent — a flat fee of ₹20 per order for intraday and F&O trades, regardless of trade size. No hidden charges, ever.',
   },
   {
     q: 'How can I withdraw funds?',
@@ -30,7 +30,7 @@ const faqs = [
     a: 'Yes! Our mobile app is available on both Android (Google Play) and iOS (App Store). It offers the full trading experience including charts, order placement, portfolio tracking, and fund management.',
   },
   {
-    q: 'What markets can I trade on SaudaSaacha?',
+    q: 'What markets can I trade on SachchaSauda?',
     a: 'You can trade NSE & BSE equities, derivatives (F&O), commodities (MCX), forex currency pairs, US stocks & ETFs, and cryptocurrencies — all from a single unified account.',
   },
   {
@@ -105,7 +105,7 @@ export default function FAQ() {
             <span className="text-[#C4161C] gold-underline">Questions</span>
           </h2>
           <p className="text-lg text-slate-500 font-light">
-            Everything you need to know about SaudaSaacha.
+            Everything you need to know about SachchaSauda.
           </p>
         </div>
 

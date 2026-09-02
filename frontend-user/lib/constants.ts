@@ -1,4 +1,4 @@
-export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SaudaSaacha Broker";
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SachchaSauda Broker";
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 /** WebSocket origin for the live tick feed (`/ws/marketdata`) and the

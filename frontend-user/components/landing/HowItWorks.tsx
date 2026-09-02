@@ -20,7 +20,7 @@ export default function HowItWorks() {
           {/* Background image */}
           <img
             src="/image1.png"
-            alt="How SaudaSaacha works"
+            alt="How SachchaSauda works"
             className="absolute inset-0 w-full h-full object-cover"
           />
           {/* Dark gradient overlay so the heading + link stay readable over the photo */}

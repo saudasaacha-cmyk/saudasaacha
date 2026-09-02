@@ -1,7 +1,7 @@
 import type { SVGProps } from "react";
 
 /**
- * SaudaSaacha brand mark — red chevron over a diamond. Geometry is the
+ * SachchaSauda brand mark — red chevron over a diamond. Geometry is the
  * 512px mark in `public/icon.svg` scaled to lucide's 24x24 box, so it
  * drops into every place an icon sat (same `className` sizing).
  *

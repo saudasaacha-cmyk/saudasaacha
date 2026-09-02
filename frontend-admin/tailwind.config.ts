@@ -15,7 +15,7 @@ const config: Config = {
     },
     extend: {
       colors: {
-        // SaudaSaacha logo red, as a full scale. Brand identity + platform
+        // SachchaSauda logo red, as a full scale. Brand identity + platform
         // accent only — NEVER for trading semantics, where red still means
         // sell/loss. Single source for the red; public/*.svg and the icon
         // generator repeat the literals because they render outside Tailwind.

@@ -1,4 +1,4 @@
-/* SaudaSaacha Admin — minimal notification-only service worker.
+/* SachchaSauda Admin — minimal notification-only service worker.
  *
  * Why this file exists: Android Chrome installed PWAs refuse to show
  * `new Notification(...)` in the system tray. They require a service
@@ -40,7 +40,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data || {};
   if (data.type !== "notify") return;
-  const title = String(data.title || "SaudaSaacha");
+  const title = String(data.title || "SachchaSauda");
   const body = String(data.body || "");
   const tag = data.tag || undefined;
   const url = data.url || "/";
@@ -60,7 +60,7 @@ self.addEventListener("message", (event) => {
 // via VAPID. This is the path that wakes the SW even when the PWA
 // has been force-stopped and the phone is locked.
 self.addEventListener("push", (event) => {
-  let payload = { title: "SaudaSaacha", body: "", url: "/", tag: undefined };
+  let payload = { title: "SachchaSauda", body: "", url: "/", tag: undefined };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch {

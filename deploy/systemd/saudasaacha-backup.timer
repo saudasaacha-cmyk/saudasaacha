@@ -13,7 +13,7 @@
 #                       the next boot so a day is never silently skipped.
 # ─────────────────────────────────────────────────────────────────────
 [Unit]
-Description=Run SaudaSaacha MongoDB → Atlas backup daily at 23:50 IST (post market close)
+Description=Run SachchaSauda MongoDB → Atlas backup daily at 23:50 IST (post market close)
 
 [Timer]
 OnCalendar=*-*-* 23:50:00 Asia/Kolkata

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  SaudaSaacha Broker — production deploy script
+#  SachchaSauda Broker — production deploy script
 #  Runs on the EC2 host. Invoked by GitHub Actions over SSH; can also
 #  be run manually:
 #      cd /opt/saudasaacha && bash scripts/deploy.sh
@@ -20,7 +20,7 @@ VENV="$BACKEND_DIR/.venv"
 cd "$REPO_DIR"
 
 echo "═══════════════════════════════════════════════════════════════"
-echo "  SaudaSaacha deploy — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+echo "  SachchaSauda deploy — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "═══════════════════════════════════════════════════════════════"
 
 # ── 1) Pull latest ─────────────────────────────────────────────────

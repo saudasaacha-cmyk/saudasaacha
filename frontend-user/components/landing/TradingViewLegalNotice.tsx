@@ -31,9 +31,9 @@ export default function TradingViewLegalNotice() {
             direct link to TradingView as required for embedded widgets.
           </p>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Advanced charts, Stock Heatmap, and related market widgets on SaudaSaacha are{' '}
+            Advanced charts, Stock Heatmap, and related market widgets on SachchaSauda are{' '}
             <strong>provided by TradingView</strong> and are subject to TradingView&apos;s terms,
-            policies, and technical requirements. TradingView is a third-party service; SaudaSaacha is
+            policies, and technical requirements. TradingView is a third-party service; SachchaSauda is
             not responsible for TradingView&apos;s data, availability, or chart behaviour. Use of
             these charts and widgets constitutes acceptance of TradingView&apos;s applicable terms.
           </p>

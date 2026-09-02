@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-#  SaudaSaacha — DISASTER RECOVERY: Atlas → local MongoDB
+#  SachchaSauda — DISASTER RECOVERY: Atlas → local MongoDB
 #
 #  Run this on a FRESH VPS (or after a wipe) to pull the latest Atlas
 #  warm-standby copy back into the local MongoDB the app talks to. It is the

@@ -56,7 +56,7 @@ export function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
   // Branded tenant domains are login portals — the bare domain opens /login,
-  // not the SaudaSaacha marketing site. Login / register / the app are untouched.
+  // not the SachchaSauda marketing site. Login / register / the app are untouched.
   if (isBrandedHost(host) && path === "/") {
     const url = req.nextUrl.clone();
     url.pathname = "/login";

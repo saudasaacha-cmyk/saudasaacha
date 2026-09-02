@@ -13,7 +13,7 @@ import { InstallPwaButton } from "@/components/common/InstallPwaButton";
  * resolves the SAME branding server-side so the Open Graph link preview
  * (WhatsApp / Telegram / iMessage) shows the tenant's brand — crawlers don't
  * run this client fetch, so without the server metadata every shared link
- * fell back to the platform default ("SaudaSaacha") logo + name.
+ * fell back to the platform default ("SachchaSauda") logo + name.
  */
 type Branding = {
   brand_name: string | null;
@@ -63,7 +63,7 @@ function DownloadInner() {
       if (ref) b = await fetchBranding(`/branding/by-code/${encodeURIComponent(ref)}`);
       if (!b && typeof window !== "undefined") {
         const host = window.location.hostname;
-        const isPlatform = /(^|\.)saudasaacha\.com$/i.test(host) ||
+        const isPlatform = /(^|\.)sachchasauda\.com$/i.test(host) ||
           host === "localhost" || host === "127.0.0.1" ||
           /\.(vercel|netlify|fly)\.(app|dev)$/i.test(host);
         if (!isPlatform) {

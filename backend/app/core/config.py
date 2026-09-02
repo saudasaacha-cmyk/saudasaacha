@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # ── Application ──────────────────────────────────────────────────
-    APP_NAME: str = "SaudaSaacha Broker"
+    APP_NAME: str = "SachchaSauda Broker"
     # Public support address surfaced by /user/support and the apk/web
     # "Contact support" affordance. Seeded into the `platform.support_email`
     # PlatformSetting on first boot (admins can then edit it in Platform

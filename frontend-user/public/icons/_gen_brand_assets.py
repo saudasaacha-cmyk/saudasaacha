@@ -1,4 +1,4 @@
-"""Single source for the SaudaSaacha mark — emits every raster + vector asset.
+"""Single source for the SachchaSauda mark — emits every raster + vector asset.
 
     py frontend-user/public/icons/_gen_brand_assets.py
 
@@ -110,10 +110,10 @@ def wordmark_svg(ink: str, *, suffix: str = "") -> str:
     apps. In-app the `Wordmark` component renders the same thing with real
     text so it picks up the bundled Space Grotesk."""
     mw = 58.0
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" width="340" height="64" role="img" aria-label="SaudaSaacha">
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" width="340" height="64" role="img" aria-label="SachchaSauda">
   {mark_svg(4, (64 - mw * ASPECT) / 2, mw, ink)}
   <text x="74" y="43" font-family="{FONT}" font-size="31" font-weight="700" letter-spacing="-0.8">
-    <tspan fill="{ink}">Sauda</tspan><tspan fill="{RED}">Saacha</tspan>{suffix}
+    <tspan fill="{ink}">Sachcha</tspan><tspan fill="{RED}">Sauda</tspan>{suffix}
   </text>
 </svg>
 '''

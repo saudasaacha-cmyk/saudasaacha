@@ -182,7 +182,7 @@ async def find_platform_super_admin() -> User | None:
 
     Without this, the platform host (sachchasauda.com) had no
     branding source at all — BrandingProvider stayed null and the
-    auth screens fell back to the hard-coded SaudaSaacha glyph.
+    auth screens fell back to the hard-coded SachchaSauda glyph.
     Picking the OLDEST active SUPER_ADMIN matches the bootstrap
     seed's single-super-admin assumption while still being safe in
     multi-super-admin deployments (the founding row wins).

@@ -1,4 +1,4 @@
-# Security hardening — SaudaSaacha backend
+# Security hardening — SachchaSauda backend
 
 Practical, do-this-before-production checklist. Ordered by impact. The app
 already has solid defaults (bcrypt passwords, JWT + refresh rotation,
@@ -23,8 +23,8 @@ internet, and must require authentication.
    // mongosh — create an admin user, then an app user scoped to the DB
    use admin
    db.createUser({ user: "mpadmin", pwd: "<STRONG_RANDOM>", roles: ["root"] })
-   use saudasaacha
-   db.createUser({ user: "mpapp", pwd: "<STRONG_RANDOM>", roles: [{ role: "readWrite", db: "saudasaacha" }] })
+   use sachchasauda
+   db.createUser({ user: "mpapp", pwd: "<STRONG_RANDOM>", roles: [{ role: "readWrite", db: "sachchasauda" }] })
    ```
    Start `mongod` with `--auth` (or `security.authorization: enabled` in
    `mongod.conf`), then point the backend at it:

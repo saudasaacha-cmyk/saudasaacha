@@ -29,7 +29,7 @@ export function FloatingHeader() {
         <Link
           href="#home"
           className="flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-slate-100 transition-colors"
-          aria-label="SaudaSaacha home"
+          aria-label="SachchaSauda home"
         >
           <Wordmark markClassName="size-7" textClassName="text-xl" className="text-slate-900" />
         </Link>

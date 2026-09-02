@@ -51,7 +51,7 @@ export default function AdminLoginPage() {
           </div>
           <CardTitle className="text-2xl">Admin Login</CardTitle>
           <CardDescription>
-            SaudaSaacha Broker control panel — sign in with your admin credentials.
+            SachchaSauda Broker control panel — sign in with your admin credentials.
           </CardDescription>
         </CardHeader>
         <CardContent>

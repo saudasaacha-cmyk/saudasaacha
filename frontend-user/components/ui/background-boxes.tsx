@@ -7,7 +7,7 @@ export const BoxesCore = ({ className, ...rest }: { className?: string }) => {
   const rows = new Array(150).fill(1);
   const cols = new Array(100).fill(1);
 
-  // Single-hue palette — shades of the SaudaSaacha brand green only
+  // Single-hue palette — shades of the SachchaSauda brand green only
   // (#16A34A / #22C55E family), so the grid stays on-theme instead of
   // flashing rainbow colors on hover.
   const colors = [

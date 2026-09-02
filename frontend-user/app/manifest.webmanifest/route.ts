@@ -28,10 +28,10 @@ export const revalidate = 0;
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
 const PLATFORM_DEFAULT = {
-  name: "SaudaSaacha Broker",
-  short_name: "SaudaSaacha",
+  name: "SachchaSauda Broker",
+  short_name: "SachchaSauda",
   description:
-    "Trade Indian stocks, F&O, commodities, currencies, and crypto with SaudaSaacha Broker.",
+    "Trade Indian stocks, F&O, commodities, currencies, and crypto with SachchaSauda Broker.",
   start_url: "/dashboard",
   scope: "/",
   display: "standalone",

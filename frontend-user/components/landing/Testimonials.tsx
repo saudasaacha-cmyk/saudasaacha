@@ -10,7 +10,7 @@ const testimonials = [
     avatar: 'VN',
     rating: 5,
     review:
-      'SaudaSaacha has completely transformed how I trade. The flat ₹20 brokerage alone saves me thousands every month. The execution speed is unmatched — orders fill in milliseconds.',
+      'SachchaSauda has completely transformed how I trade. The flat ₹20 brokerage alone saves me thousands every month. The execution speed is unmatched — orders fill in milliseconds.',
     color: 'bg-brand-600',
     market: 'NSE & Derivatives',
   },
@@ -20,7 +20,7 @@ const testimonials = [
     avatar: 'EJ',
     rating: 5,
     review:
-      'I have tried many platforms but SaudaSaacha stands out for its clean interface and tight spreads on forex pairs. The mobile app is incredibly smooth and reliable.',
+      'I have tried many platforms but SachchaSauda stands out for its clean interface and tight spreads on forex pairs. The mobile app is incredibly smooth and reliable.',
     color: 'bg-violet-600',
     market: 'Forex & Crypto',
   },
@@ -30,7 +30,7 @@ const testimonials = [
     avatar: 'LM',
     rating: 5,
     review:
-      'As a beginner, I was worried about complexity. SaudaSaacha made it so easy to start. The educational resources and daily market insights helped me grow my portfolio by 28% in 6 months.',
+      'As a beginner, I was worried about complexity. SachchaSauda made it so easy to start. The educational resources and daily market insights helped me grow my portfolio by 28% in 6 months.',
     color: 'bg-emerald-600',
     market: 'Stocks & ETFs',
   },
@@ -73,7 +73,7 @@ export default function Testimonials() {
           </div>
           <Quote size={40} className="text-white/20 mx-auto mb-4" />
           <h3 className="text-2xl md:text-4xl font-bold text-white font-manrope leading-tight mb-8">
-            "SaudaSaacha has completely transformed how we trade. What used to take hours of analysis now takes minutes. The platform is fast, reliable, and genuinely transparent on pricing."
+            "SachchaSauda has completely transformed how we trade. What used to take hours of analysis now takes minutes. The platform is fast, reliable, and genuinely transparent on pricing."
           </h3>
           <div className="flex items-center justify-center gap-4">
             <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-white font-bold text-sm border border-white/30">
@@ -113,7 +113,7 @@ export default function Testimonials() {
               <span className="text-[#E6B839]">Clients Say</span>
             </h2>
             <p className="text-lg text-slate-400 font-light">
-              Real feedback from real traders who use SaudaSaacha every day.
+              Real feedback from real traders who use SachchaSauda every day.
             </p>
           </div>
 

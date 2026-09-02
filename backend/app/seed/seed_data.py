@@ -79,7 +79,7 @@ async def seed_company_bank() -> None:
     # Placeholder row so the deposit screen renders on a fresh install — the
     # operator replaces every field with real bank details in admin →
     # Payments. Brand comes from APP_NAME so a new deploy never stamps the
-    # old `SaudaSaacha` name into the account holder / UPI handle.
+    # old `SachchaSauda` name into the account holder / UPI handle.
     await CompanyBankAccount(
         bank_name="HDFC Bank",
         account_holder=f"{settings.APP_NAME} Pvt Ltd",
@@ -105,7 +105,7 @@ async def seed_platform_settings() -> None:
         # Branding + support contact come from config (env-tunable), NOT a
         # hard-coded literal. These are seeded into PlatformSetting on first
         # boot and are editable afterwards in admin → Platform Settings, so a
-        # literal here silently stamped the old `SaudaSaacha` branding /
+        # literal here silently stamped the old `SachchaSauda` branding /
         # `support@sachchasauda.com` into every fresh deploy's DB even when the
         # .env already carried the correct brand. SUPPORT_EMAIL defaults to
         # empty — the support UI then hides the email option instead of

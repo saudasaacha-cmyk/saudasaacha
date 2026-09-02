@@ -169,7 +169,7 @@ export default function Footer() {
 
         {/* Bottom Bar */}
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <p>© 2026 SaudaSaacha All rights reserved.</p>
+          <p>© 2026 SachchaSauda All rights reserved.</p>
           <div className="flex flex-wrap gap-4 justify-center">
             <Link href="/terms" className="hover:text-slate-600 transition-colors">Terms & Conditions</Link>
             <Link href="/privacy-policy" className="hover:text-slate-600 transition-colors">Privacy Policy</Link>
@@ -181,7 +181,7 @@ export default function Footer() {
       {/* Huge Watermark Text */}
       <div className="flex justify-center items-center py-6 overflow-hidden pointer-events-none select-none">
         <h1 className="text-[12vw] leading-none font-bold font-manrope tracking-tighter text-slate-200 whitespace-nowrap">
-          SAUDASAACHA
+          SACHCHASAUDA
         </h1>
       </div>
     </footer>

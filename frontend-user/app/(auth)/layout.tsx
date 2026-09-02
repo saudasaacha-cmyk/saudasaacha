@@ -71,10 +71,10 @@ function AuthLayoutInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || "";
   const { branding, showPlatformDefault } = useBranding();
   const tenantName = (branding?.brand_name ?? "").trim();
-  // On a tenant's branded domain the super-admin "SaudaSaacha" name/logo must
+  // On a tenant's branded domain the super-admin "SachchaSauda" name/logo must
   // never appear. Use it only on the confirmed platform host; elsewhere fall
   // back to empty / a neutral glyph until the tenant brand resolves.
-  const platformName = showPlatformDefault ? "SaudaSaacha" : "";
+  const platformName = showPlatformDefault ? "SachchaSauda" : "";
   // Tenant logo uploaded by admin / super-admin via /settings/branding.
   // Mirrors BrandLogo.tsx: paths are server-relative, so prefix API_URL.
   // Falls back to the default brand glyph when no logo is configured.
@@ -137,11 +137,11 @@ function AuthLayoutInner({ children }: { children: React.ReactNode }) {
           </span>
         </>
       ) : showPlatformDefault ? (
-        // Platform host only — the super-admin's SaudaSaacha lockup.
+        // Platform host only — the super-admin's SachchaSauda lockup.
         <Wordmark className="text-foreground" />
       ) : (
         // Branded domain (or brand not resolved yet) — neutral glyph tile,
-        // NEVER the SaudaSaacha logo. The tenant logo replaces it once the
+        // NEVER the SachchaSauda logo. The tenant logo replaces it once the
         // /branding/by-domain fetch (or its per-host cache) lands.
         <BrandTile logoSrc={null} alt="" size="sm" />
       )}

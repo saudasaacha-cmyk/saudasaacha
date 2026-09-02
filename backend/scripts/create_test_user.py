@@ -30,7 +30,7 @@ logger = logging.getLogger("create_test_user")
 # ── Test user spec ───────────────────────────────────────────────────────
 TEST_EMAIL = "test@sachchasauda.com"
 TEST_MOBILE = "9000000001"
-TEST_PASSWORD = "Test@SaudaSaacha2026!"
+TEST_PASSWORD = "Test@SachchaSauda2026!"
 TEST_FULL_NAME = "Test Trader"
 # Starting wallet credit so the user can immediately place trades.
 TEST_OPENING_BALANCE = 100_000  # ₹1 lakh demo funds

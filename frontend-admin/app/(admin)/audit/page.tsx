@@ -498,7 +498,7 @@ function AuditLogsInner() {
 function shortDevice(ua: string | null | undefined): string {
   if (!ua) return "—";
   const s = ua;
-  if (/SaudaSaacha[-\s]?Mobile|saudasaacha.+Capacitor|saudasaacha.+Cordova/i.test(s)) {
+  if (/SachchaSauda[-\s]?Mobile|sachchasauda.+Capacitor|sachchasauda.+Cordova/i.test(s)) {
     if (/iPhone|iPad|iOS/i.test(s)) return "iOS app";
     if (/Android/i.test(s)) return "Android app";
     return "Mobile app";

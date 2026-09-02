@@ -158,7 +158,7 @@ function SupportShortcut() {
   const { data: support } = useSupportContacts();
   const waUrl = buildWhatsappUrl(
     support?.whatsapp,
-    "Hi, I need help with my SaudaSaacha account",
+    "Hi, I need help with my SachchaSauda account",
   );
   if (!waUrl) return null;
   return (

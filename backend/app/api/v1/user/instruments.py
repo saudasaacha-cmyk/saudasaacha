@@ -919,7 +919,7 @@ async def _fetch_yahoo_chart(
     params = {"interval": ya_interval, "range": ya_range, "includePrePost": "false"}
     headers = {
         # Yahoo blocks the default httpx UA — any real-looking UA passes.
-        "User-Agent": "Mozilla/5.0 (compatible; SaudaSaachaBot/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; SachchaSaudaBot/1.0)",
     }
     try:
         async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:

@@ -1,4 +1,4 @@
-# SaudaSaacha — Scaling Notes (1000–2000 concurrent users)
+# SachchaSauda — Scaling Notes (1000–2000 concurrent users)
 
 > Purpose: honest mental model of where the platform scales, where it
 > bottlenecks, and the correct order of fixes. This is a planning doc,

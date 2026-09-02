@@ -402,7 +402,7 @@ export default function WalletPage() {
                   the banner below. */}
               {formatINR(Math.max(0, Number(summary?.available_balance ?? 0)))}
             </div>
-            <div className="text-[11px] opacity-80">Wallet · {selectedBank?.account_holder ?? "SaudaSaacha Broker"}</div>
+            <div className="text-[11px] opacity-80">Wallet · {selectedBank?.account_holder ?? "SachchaSauda Broker"}</div>
           </div>
           <div className="hidden gap-2 sm:flex">
             <button
@@ -1482,10 +1482,10 @@ function DepositSupportButton() {
   const { data: support } = useSupportContacts();
   const waUrl = buildWhatsappUrl(
     support?.whatsapp,
-    "Hi, I need help adding funds to my SaudaSaacha account",
+    "Hi, I need help adding funds to my SachchaSauda account",
   );
   const mailUrl = buildMailtoUrl(support?.email, {
-    subject: "SaudaSaacha deposit help",
+    subject: "SachchaSauda deposit help",
   });
   if (!waUrl && !mailUrl) return null;
   const target = waUrl ?? mailUrl!;

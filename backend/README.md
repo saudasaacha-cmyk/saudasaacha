@@ -1,6 +1,6 @@
-# SaudaSaacha Broker Backend
+# SachchaSauda Broker Backend
 
-Production-grade FastAPI backend for the **SaudaSaacha Broker** Indian B-Book stock trading platform.
+Production-grade FastAPI backend for the **SachchaSauda Broker** Indian B-Book stock trading platform.
 
 ## Stack
 - Python 3.11+ / FastAPI (async)

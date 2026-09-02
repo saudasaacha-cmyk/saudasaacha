@@ -58,7 +58,7 @@ export function ReportPdfButton({ kind, params, label = "Download PDF" }: Props)
       const disp = res.headers.get("Content-Disposition") || "";
       const match = /filename="?([^"]+)"?/i.exec(disp);
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const filename = match?.[1] ?? `saudasaacha_${kind}_${stamp}.pdf`;
+      const filename = match?.[1] ?? `sachchasauda_${kind}_${stamp}.pdf`;
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

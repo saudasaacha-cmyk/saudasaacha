@@ -10,7 +10,7 @@ auto-SSL custom domains feature to production.
 * Feature is gated by `BRANDING_ENABLED=false` (default) — code is
   inert until the flag is flipped.
 * APK + existing web payloads are byte-identical (verified against
-  `saudasaacha_apk/src/features/auth/api/auth.api.ts`).
+  `sachchasauda_apk/src/features/auth/api/auth.api.ts`).
 
 ## 1. Backend deploy (any of the 4 phases)
 
@@ -82,10 +82,10 @@ pip install dnspython==2.6.1
 deactivate
 
 # 3. Allow the backend OS user to run certbot + nginx without password.
-#    Replace `saudasaacha` with the actual UNIX user running uvicorn /
+#    Replace `sachchasauda` with the actual UNIX user running uvicorn /
 #    celery (run `id -un` while su'd as that user).
 sudo tee /etc/sudoers.d/saudasaacha-branding > /dev/null <<'EOF'
-saudasaacha ALL=(root) NOPASSWD: /usr/bin/certbot, /usr/sbin/nginx
+sachchasauda ALL=(root) NOPASSWD: /usr/bin/certbot, /usr/sbin/nginx
 EOF
 sudo chmod 0440 /etc/sudoers.d/saudasaacha-branding
 sudo visudo -c    # must print "/etc/sudoers.d/saudasaacha-branding: parsed OK"

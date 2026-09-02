@@ -19,9 +19,9 @@ from app.utils.time_utils import now_utc
 def _brand_slug() -> str:
     """Filename-safe brand prefix taken from APP_NAME.
 
-    Downloaded report filenames were hard-coded to `saudasaacha_…`, so every user
+    Downloaded report filenames were hard-coded to `sachchasauda_…`, so every user
     on the current brand still received files stamped with the OLD one. Derive
-    it from config instead: "SaudaSaacha Broker" → "saudasaacha".
+    it from config instead: "SachchaSauda Broker" → "sachchasauda".
     """
     raw = (settings.APP_NAME or "").strip().lower()
     slug = "".join(c if c.isalnum() else "_" for c in raw).strip("_")
@@ -130,7 +130,7 @@ async def _pnl_payload(user, from_date: datetime | None, to_date: datetime | Non
         "net_pnl": net,
         "by_symbol": by_symbol_rows,
         # APK-facing field names — match the PnlReport TypeScript schema in
-        # saudasaacha-ind_apk/src/features/reports/api/reports.api.ts. Without
+        # sachchasauda-ind_apk/src/features/reports/api/reports.api.ts. Without
         # these the mobile P&L screen reads `undefined` for every total
         # and renders all ₹0.00 even when trades exist.
         "rows": [

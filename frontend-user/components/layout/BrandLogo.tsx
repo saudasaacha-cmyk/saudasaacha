@@ -19,7 +19,7 @@ interface BrandLogoProps {
 //   name. The logo image is given the same size budget as the default
 //   icon so layout doesn't shift.
 // - When no branding is loaded, we fall back to the default
-//   "🌱 SaudaSaacha Broker" wordmark — keeping the existing UX byte-
+//   "🌱 SachchaSauda Broker" wordmark — keeping the existing UX byte-
 //   identical for the bulk of traffic that isn't on a branded link.
 export function BrandLogo({ href = "/dashboard", size = "md", iconOnly = false, className }: BrandLogoProps) {
   const { branding, showPlatformDefault } = useBranding();
@@ -53,11 +53,11 @@ export function BrandLogo({ href = "/dashboard", size = "md", iconOnly = false, 
         customName ? (
           <span className="text-foreground">{customName}</span>
         ) : showPlatformDefault ? (
-          // Super-admin "SaudaSaacha Broker" wordmark — ONLY on the platform
+          // Super-admin "SachchaSauda Broker" wordmark — ONLY on the platform
           // host. On a tenant's branded domain (or before the host/brand has
-          // resolved) we show just the glyph, never SaudaSaacha.
+          // resolved) we show just the glyph, never SachchaSauda.
           <span className="text-foreground">
-            Sauda<span className="text-brand">Saacha</span> Broker
+            Sachcha<span className="text-brand">Sauda</span> Broker
           </span>
         ) : null
       )}

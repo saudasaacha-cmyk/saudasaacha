@@ -24,7 +24,7 @@ redis-server --port 6379                              # or: brew services start 
 brew services start mongodb-community                 # only if installed via brew
 
 # Terminal 3: Backend
-cd /Users/tarundewangan/Downloads/Projects/saudasaacha/backend
+cd /Users/tarundewangan/Downloads/Projects/sachchasauda/backend
 source .venv/bin/activate
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 

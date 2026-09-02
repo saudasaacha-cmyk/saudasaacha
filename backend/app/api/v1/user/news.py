@@ -158,7 +158,7 @@ async def _fetch_one(client: httpx.AsyncClient, source: str, url: str) -> list[d
     try:
         r = await client.get(
             url,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; SaudaSaachaBot/1.0)"},
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SachchaSaudaBot/1.0)"},
             timeout=_FETCH_TIMEOUT,
         )
         if r.status_code != 200:

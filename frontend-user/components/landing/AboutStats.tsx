@@ -26,7 +26,7 @@ export default function AboutStats() {
               ratio="auto"
               variant="light"
               src="/image2.png"
-              alt="The SaudaSaacha team at work"
+              alt="The SachchaSauda team at work"
               className="w-full h-[300px] md:h-[360px] premium-shadow"
             />
             <div className="mt-8 flex items-start gap-4">

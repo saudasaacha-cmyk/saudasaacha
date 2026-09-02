@@ -14,7 +14,7 @@ const config: Config = {
     },
     extend: {
       colors: {
-        // SaudaSaacha logo red, as a full scale. Brand identity + platform
+        // SachchaSauda logo red, as a full scale. Brand identity + platform
         // accent only — NEVER for trading semantics, where red still means
         // sell/loss. Single source for the red; public/*.svg and the icon
         // generator repeat the literals because they render outside Tailwind.
@@ -51,7 +51,7 @@ const config: Config = {
         info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
         atm: { DEFAULT: "hsl(var(--atm))", foreground: "hsl(var(--atm-foreground))" },
 
-        // ── SaudaSaacha marketing palette (LOCKED design system) ──────────
+        // ── SachchaSauda marketing palette (LOCKED design system) ──────────
         // Scoped to the marketing pages via `.mp-scope` (light default) and
         // flipped to the dark palette inside `.mp-dark` sections. Stored as
         // space-separated RGB channels so Tailwind's `/<alpha>` modifier

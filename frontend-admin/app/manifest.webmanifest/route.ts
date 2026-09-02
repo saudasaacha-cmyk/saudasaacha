@@ -23,9 +23,9 @@ export const revalidate = 0;
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
 const PLATFORM_DEFAULT = {
-  name: "SaudaSaacha Broker Admin",
+  name: "SachchaSauda Broker Admin",
   short_name: "MP Admin",
-  description: "Super-admin control panel for the SaudaSaacha Broker platform.",
+  description: "Super-admin control panel for the SachchaSauda Broker platform.",
   start_url: "/dashboard",
   scope: "/",
   // Standalone gives the installed app its own window without browser

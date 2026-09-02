@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  check_user.sh  — SaudaSaacha support investigation tool
+#  check_user.sh  — SachchaSauda support investigation tool
 #  Usage:  ./check_user.sh <USER_CODE> [date YYYY-MM-DD]
 #  Example: ./check_user.sh CL65758646
 #           ./check_user.sh CL65758646 2026-06-18
@@ -27,7 +27,7 @@ fi
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║        SaudaSaacha — User Investigation Report               ║"
+echo "║        SachchaSauda — User Investigation Report               ║"
 echo "║  User: $USER_CODE   Date: $DATE_LABEL"
 echo "╚══════════════════════════════════════════════════════════════╝"
 

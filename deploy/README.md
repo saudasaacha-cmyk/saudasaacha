@@ -34,7 +34,7 @@ Without a TTY, sudo will block waiting for a password. Allow the `ubuntu`
 user to run only those commands without a password:
 
 ```bash
-sudo visudo -f /etc/sudoers.d/saudasaacha-deploy
+sudo visudo -f /etc/sudoers.d/sachchasauda-deploy
 ```
 
 Paste:
@@ -56,7 +56,7 @@ If you haven't already:
 ```bash
 sudo mkdir -p /opt/saudasaacha
 sudo chown ubuntu:ubuntu /opt/saudasaacha
-git clone https://github.com/shivammacoss/saudasaacha_ind.git /opt/saudasaacha
+git clone https://github.com/shivammacoss/sachchasauda_ind.git /opt/saudasaacha
 chmod +x /opt/saudasaacha/scripts/deploy.sh
 ```
 
@@ -190,5 +190,5 @@ sudo certbot delete --cert-name mybroker.com
 |---|---|---|
 | `helper_missing` in admin UI | Scripts not deployed to /usr/local/bin | Re-run step 2 above |
 | `sudo: a password is required` | Sudoers rule wrong / not chmod 0440 | Re-run step 3 + `visudo -c` |
-| `Could not automatically find a matching server block` | Helper script not run before certbot | Should not happen — worker now uses helper. If seen, check `/etc/nginx/sites-enabled/saudasaacha-branded-<domain>.conf` exists |
-| Cert obtained but admin UI shows FAILED | API/worker can't reach itself / status update path broken | Check Celery worker logs: `pm2 logs saudasaacha-celery-worker` |
+| `Could not automatically find a matching server block` | Helper script not run before certbot | Should not happen — worker now uses helper. If seen, check `/etc/nginx/sites-enabled/sachchasauda-branded-<domain>.conf` exists |
+| Cert obtained but admin UI shows FAILED | API/worker can't reach itself / status update path broken | Check Celery worker logs: `pm2 logs sachchasauda-celery-worker` |

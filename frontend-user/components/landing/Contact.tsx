@@ -205,7 +205,7 @@ export default function Contact() {
                 <div className="text-sm font-bold text-slate-900 font-manrope">Our Office</div>
               </div>
               <p className="text-sm text-slate-500 leading-relaxed">
-                SaudaSaacha<br />
+                SachchaSauda<br />
                 14th Floor, Infinity Tower,<br />
                 Bandra Kurla Complex,<br />
                 Mumbai – 400 051, Maharashtra

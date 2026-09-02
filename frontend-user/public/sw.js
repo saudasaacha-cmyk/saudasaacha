@@ -1,4 +1,4 @@
-/* SaudaSaacha PWA service worker — offline-shell v2.
+/* SachchaSauda PWA service worker — offline-shell v2.
  *
  * Why we have one:
  *   • A live trading app must NEVER serve stale prices/orders, so
@@ -32,7 +32,7 @@
  * regression ships. NEVER reuse an old version string.
  */
 
-const VERSION = "saudasaacha-pwa-v9";
+const VERSION = "sachchasauda-pwa-v9";
 // How long a navigation waits for the network before it paints the last
 // cached shell instead. Short enough to feel instant on weak networks,
 // long enough that a healthy connection almost always wins the race and
@@ -261,7 +261,7 @@ self.addEventListener("message", (event) => {
     return;
   }
   if (data.type === "notify") {
-    const title = String(data.title || "SaudaSaacha");
+    const title = String(data.title || "SachchaSauda");
     const body = String(data.body || "");
     // renotify:true REQUIRES a non-empty tag — passing renotify with an
     // empty/undefined tag makes showNotification throw a TypeError and the
@@ -285,7 +285,7 @@ self.addEventListener("message", (event) => {
 // via VAPID. This is the path that wakes the SW even when the PWA
 // has been force-stopped and the phone is locked.
 self.addEventListener("push", (event) => {
-  let payload = { title: "SaudaSaacha", body: "", url: "/", tag: undefined };
+  let payload = { title: "SachchaSauda", body: "", url: "/", tag: undefined };
   try {
     if (event.data) payload = { ...payload, ...event.data.json() };
   } catch {
@@ -300,7 +300,7 @@ self.addEventListener("push", (event) => {
   // device). Fall back to a unique per-message tag when the payload has none.
   const tag = payload.tag || `mp-${Date.now()}`;
   event.waitUntil(
-    self.registration.showNotification(payload.title || "SaudaSaacha", {
+    self.registration.showNotification(payload.title || "SachchaSauda", {
       body: payload.body || "",
       icon: "/icons/icon-192.png",
       badge: "/icons/icon-192.png",

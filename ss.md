@@ -9,9 +9,9 @@ repo - cd /opt/saudasaacha
 
 5. sudo systemctl restart saudasaacha-backend
 
-6- cd /root/saudasaacha/frontend-user && npm install && npm run build && pm2 restart saudasaacha-user
-cd /root/saudasaacha/frontend-admin && npm install && npm run build && pm2 restart saudasaacha-admin
-cd /root/saudasaacha && sudo systemctl restart saudasaacha-backend
+6- cd /root/sachchasauda/frontend-user && npm install && npm run build && pm2 restart saudasaacha-user
+cd /root/sachchasauda/frontend-admin && npm install && npm run build && pm2 restart saudasaacha-admin
+cd /root/sachchasauda && sudo systemctl restart saudasaacha-backend
 
 
 journalctl -u saudasaacha-backend --since "1 min ago" --no-pager | grep -E "risk_enforcer_perf|tick_overrun" | grep -oE '"total_ms": [0-9.]+|"sweep_ms": [0-9.]+' | paste - - | tail -8; \

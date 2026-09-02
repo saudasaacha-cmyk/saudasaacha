@@ -49,7 +49,7 @@ function parseDate(v: string | Date | null | undefined): Date | null {
 }
 
 // Color + label for the close_reason chip. Legal tags come from
-// Position.close_reason in saudasaacha_ind/backend/app/models/position.py.
+// Position.close_reason in sachchasauda_ind/backend/app/models/position.py.
 const CLOSE_REASON_META: Record<
   string,
   { label: string; cls: string }

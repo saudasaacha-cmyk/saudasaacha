@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────
-#  SaudaSaacha — local MongoDB → Atlas warm-standby backup (oneshot)
+#  SachchaSauda — local MongoDB → Atlas warm-standby backup (oneshot)
 #
 #  Triggered by saudasaacha-backup.timer every 15 minutes. Streams a full
 #  mongodump of local Mongo into mongorestore --drop against Atlas, so the
@@ -7,13 +7,13 @@
 #  talks to Atlas — it stays on fast local Mongo; Atlas is the restore-from
 #  copy for when this VPS dies.
 #
-#  ⚠️  PATHS assume the repo lives at /root/saudasaacha. Adjust if yours is
+#  ⚠️  PATHS assume the repo lives at /root/sachchasauda. Adjust if yours is
 #      under /opt/saudasaacha (match scripts/deploy.sh / `systemctl cat
 #      saudasaacha-backend`). Needs mongodump + mongorestore on PATH
 #      (apt-get install -y mongodb-database-tools).
 # ─────────────────────────────────────────────────────────────────────
 [Unit]
-Description=SaudaSaacha MongoDB → Atlas warm-standby backup
+Description=SachchaSauda MongoDB → Atlas warm-standby backup
 After=network-online.target
 Wants=network-online.target
 
@@ -21,8 +21,8 @@ Wants=network-online.target
 Type=oneshot
 User=root
 # Point the script at the live backend .env (source + Atlas URIs live there).
-Environment=ENV_FILE=/root/saudasaacha/backend/.env
-ExecStart=/usr/bin/env bash /root/saudasaacha/backend/scripts/backup_to_atlas.sh
+Environment=ENV_FILE=/root/sachchasauda/backend/.env
+ExecStart=/usr/bin/env bash /root/sachchasauda/backend/scripts/backup_to_atlas.sh
 # Don't let a stuck dump run forever — a 15-min cadence means a >10-min run
 # is already abnormal; kill it so the next tick gets a clean slate.
 TimeoutStartSec=600

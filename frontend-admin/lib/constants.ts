@@ -1,4 +1,4 @@
-export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SaudaSaacha Broker Admin";
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SachchaSauda Broker Admin";
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 /** Derive WS origin from `API_URL` when `NEXT_PUBLIC_WS_URL` is unset —

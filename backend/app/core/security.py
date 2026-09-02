@@ -102,7 +102,7 @@ def generate_totp_secret() -> str:
     return pyotp.random_base32()
 
 
-def totp_provisioning_uri(secret: str, *, account_name: str, issuer: str = "SaudaSaacha Broker") -> str:
+def totp_provisioning_uri(secret: str, *, account_name: str, issuer: str = "SachchaSauda Broker") -> str:
     return pyotp.totp.TOTP(secret).provisioning_uri(name=account_name, issuer_name=issuer)
 
 

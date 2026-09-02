@@ -268,7 +268,7 @@ export default function ProfilePage() {
       <SignOutRow />
 
       <p className="px-1 pb-4 pt-2 text-center text-[10px] text-muted-foreground">
-        SaudaSaacha Broker · v1.0.0
+        SachchaSauda Broker · v1.0.0
       </p>
     </div>
   );
@@ -701,7 +701,7 @@ function SupportLinks() {
   const { data: support } = useSupportContacts();
   const waUrl = buildWhatsappUrl(
     support?.whatsapp,
-    "Hi, I need help with my SaudaSaacha account",
+    "Hi, I need help with my SachchaSauda account",
   );
   if (!waUrl) {
     return (

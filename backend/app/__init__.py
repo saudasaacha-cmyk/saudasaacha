@@ -1,3 +1,3 @@
-"""SaudaSaacha Broker — Indian B-Book stock trading platform."""
+"""SachchaSauda Broker — Indian B-Book stock trading platform."""
 
 __version__ = "1.0.0"

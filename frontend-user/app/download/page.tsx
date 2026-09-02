@@ -14,7 +14,7 @@ import { DownloadClient } from "./DownloadClient";
  * branding server-side and emit the correct Open Graph tags — WhatsApp /
  * Telegram / iMessage crawlers read the rendered <head> WITHOUT running JS,
  * so the client-side brand fetch alone never reached the link preview and
- * every shared link fell back to the platform default ("SaudaSaacha") logo +
+ * every shared link fell back to the platform default ("SachchaSauda") logo +
  * name. The visible UI still hydrates via <DownloadClient>.
  */
 type Branding = {
@@ -41,7 +41,7 @@ async function fetchBranding(path: string): Promise<Branding | null> {
 function isPlatformHost(host: string): boolean {
   const h = host.toLowerCase().split(":")[0];
   return (
-    /(^|\.)saudasaacha\.com$/.test(h) ||
+    /(^|\.)sachchasauda\.com$/.test(h) ||
     h === "localhost" ||
     h === "127.0.0.1" ||
     /\.(vercel|netlify|fly)\.(app|dev)$/.test(h)

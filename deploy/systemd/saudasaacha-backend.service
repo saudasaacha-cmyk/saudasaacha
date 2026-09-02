@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────
-#  SaudaSaacha backend — multi-worker systemd unit (gunicorn + uvicorn)
+#  SachchaSauda backend — multi-worker systemd unit (gunicorn + uvicorn)
 #
 #  WHY gunicorn instead of a single `uvicorn` process:
 #    A single asyncio worker serialises EVERY request, WebSocket frame,
@@ -33,7 +33,7 @@
 #      and edit WorkingDirectory + the gunicorn path to match your venv.
 # ─────────────────────────────────────────────────────────────────────
 [Unit]
-Description=SaudaSaacha FastAPI backend (gunicorn/uvicorn, multi-worker)
+Description=SachchaSauda FastAPI backend (gunicorn/uvicorn, multi-worker)
 After=network.target
 Wants=network-online.target
 

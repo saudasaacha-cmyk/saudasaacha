@@ -134,7 +134,7 @@ function expiryChip(row: any): string | null {
 
 // Compact pill that translates Position.close_reason into a human label
 // with a tone-matching color. Same legal set as
-// saudasaacha_ind/backend/app/models/position.py:close_reason.
+// sachchasauda_ind/backend/app/models/position.py:close_reason.
 const CLOSE_REASON_META: Record<
   string,
   { label: string; cls: string }

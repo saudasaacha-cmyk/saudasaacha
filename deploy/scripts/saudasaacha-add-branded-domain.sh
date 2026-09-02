@@ -38,10 +38,10 @@ if ! [[ "$DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{2,251}[A-Za-z0-9]$ ]]; then
 fi
 
 DOMAIN="${DOMAIN,,}"  # lowercase
-UPSTREAM_PORT="${SAUDASAACHA_USER_PORT:-3000}"
+UPSTREAM_PORT="${SACHCHASAUDA_USER_PORT:-3000}"
 NGINX_AVAIL_DIR="/etc/nginx/sites-available"
 NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
-CONF_NAME="saudasaacha-branded-${DOMAIN}.conf"
+CONF_NAME="sachchasauda-branded-${DOMAIN}.conf"
 CONF_PATH="${NGINX_AVAIL_DIR}/${CONF_NAME}"
 SYMLINK_PATH="${NGINX_ENABLED_DIR}/${CONF_NAME}"
 
@@ -80,9 +80,9 @@ EOF
 ln -sf "$CONF_PATH" "$SYMLINK_PATH"
 
 # ── 2. Test + reload nginx ──────────────────────────────────────────
-if ! nginx -t 2>/tmp/saudasaacha-nginx-test.err; then
+if ! nginx -t 2>/tmp/sachchasauda-nginx-test.err; then
   echo "ERROR: nginx -t failed after writing ${CONF_NAME}" >&2
-  cat /tmp/saudasaacha-nginx-test.err >&2
+  cat /tmp/sachchasauda-nginx-test.err >&2
   # Roll back the broken config so nginx stays clean.
   rm -f "$SYMLINK_PATH" "$CONF_PATH"
   nginx -t >/dev/null 2>&1 || true
@@ -105,13 +105,13 @@ certbot --nginx \
   -m "$EMAIL" \
   -d "$DOMAIN" \
   -d "www.${DOMAIN}" \
-  2>/tmp/saudasaacha-certbot.err
+  2>/tmp/sachchasauda-certbot.err
 CERTBOT_RC=$?
 set -e
 
 if [[ $CERTBOT_RC -ne 0 ]]; then
   echo "ERROR: certbot failed (rc=${CERTBOT_RC}) for ${DOMAIN}" >&2
-  cat /tmp/saudasaacha-certbot.err >&2 || true
+  cat /tmp/sachchasauda-certbot.err >&2 || true
   # Tear down the unencrypted block so we don't keep serving the app
   # over plaintext HTTP for a domain that failed to provision.
   rm -f "$SYMLINK_PATH" "$CONF_PATH"
