@@ -1219,11 +1219,17 @@ async def get_quotes(tokens: list[str]) -> list[dict[str, Any]]:
     # token. With 5 instruments on the OrderPanel that was a ~10 s worst-
     # case for a single batch request. asyncio.gather fans them out in
     # parallel so the total wait drops to the slowest single overlay.
+    # Delegate to get_quote() rather than repeating its body: this path was
+    # missing the cold-path `mdlive` short-circuit, so on a multi-worker
+    # deploy a NON-leader worker served 0.0 for every symbol-keyed feed
+    # (crypto / forex / metals) — those have no Zerodha REST to fall back
+    # on, so `_overlay_all` returned an empty quote. Single quotes were fine
+    # because get_quote() reads the leader's snapshot; the batch endpoint
+    # behind Market Watch and the order panel did not, so roughly half the
+    # requests showed a frozen 0.00. get_quote() is a strict superset of the
+    # old body (cache + mdlive, then the same ensure/overlay/persist/attach).
     async def _one(t: str) -> dict[str, Any]:
-        q = await _ensure_quote(t)
-        out = await _overlay_all(t, q)
-        await _persist_last_quote(t, out)
-        return await _attach_last_quote(t, out)
+        return await get_quote(t)
 
     return list(await asyncio.gather(*[_one(t) for t in tokens]))
 
