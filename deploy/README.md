@@ -19,7 +19,7 @@ GitHub Action over SSH but can also be run by hand on the EC2.
 | Secret | Value |
 |--------|-------|
 | `EC2_HOST` | `100.48.201.136` (or whatever your elastic IP is) |
-| `EC2_USER` | `ubuntu` |
+| `EC2_USER` | `sauda` |
 | `EC2_SSH_KEY` | paste the full contents of `sachchasauda.com.pem` (the PRIVATE key, including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines) |
 | `EC2_PORT` | `22` (optional — defaults to 22) |
 
@@ -40,10 +40,10 @@ sudo visudo -f /etc/sudoers.d/saudasaacha-deploy
 Paste:
 
 ```
-ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl restart saudasaacha-backend
-ubuntu ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
-ubuntu ALL=(root) NOPASSWD: /usr/sbin/nginx -t
-ubuntu ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/saudasaacha
+sauda ALL=(root) NOPASSWD: /usr/bin/systemctl restart saudasaacha-backend
+sauda ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
+sauda ALL=(root) NOPASSWD: /usr/sbin/nginx -t
+sauda ALL=(root) NOPASSWD: /usr/bin/cp * /etc/nginx/sites-available/saudasaacha
 ```
 
 Save (`Ctrl+O`, `Enter`, `Ctrl+X`). visudo will syntax-check before
@@ -137,27 +137,27 @@ sudo apt update
 sudo apt install -y certbot python3-certbot-nginx
 
 # 2. Deploy helper scripts to /usr/local/bin/ (run from the repo root)
-sudo install -m 0755 deploy/scripts/marginplant-add-branded-domain.sh \
-  /usr/local/bin/marginplant-add-branded-domain
-sudo install -m 0755 deploy/scripts/marginplant-remove-branded-domain.sh \
-  /usr/local/bin/marginplant-remove-branded-domain
+sudo install -m 0755 deploy/scripts/saudasaacha-add-branded-domain.sh \
+  /usr/local/bin/saudasaacha-add-branded-domain
+sudo install -m 0755 deploy/scripts/saudasaacha-remove-branded-domain.sh \
+  /usr/local/bin/saudasaacha-remove-branded-domain
 
 # 3. Allow the backend's OS user to run the helpers + certbot + nginx
 #    passwordless. Replace the file content (NOT append) every redeploy
 #    so the rules stay tight.
-sudo tee /etc/sudoers.d/marginplant-branding > /dev/null <<'EOF'
-root ALL=(root) NOPASSWD: /usr/local/bin/marginplant-add-branded-domain
-root ALL=(root) NOPASSWD: /usr/local/bin/marginplant-remove-branded-domain
+sudo tee /etc/sudoers.d/saudasaacha-branding > /dev/null <<'EOF'
+root ALL=(root) NOPASSWD: /usr/local/bin/saudasaacha-add-branded-domain
+root ALL=(root) NOPASSWD: /usr/local/bin/saudasaacha-remove-branded-domain
 root ALL=(root) NOPASSWD: /usr/bin/certbot
 root ALL=(root) NOPASSWD: /usr/sbin/nginx
 EOF
-sudo chmod 0440 /etc/sudoers.d/marginplant-branding
+sudo chmod 0440 /etc/sudoers.d/saudasaacha-branding
 
 # 4. Verify sudoers parses (CRITICAL — broken sudoers locks you out)
 sudo visudo -c
 
 # 5. Smoke test the helper from the backend's user shell:
-sudo -n /usr/local/bin/marginplant-add-branded-domain --help 2>/dev/null \
+sudo -n /usr/local/bin/saudasaacha-add-branded-domain --help 2>/dev/null \
   || echo "(script ignores --help; expected non-zero exit, that's fine)"
 ```
 
@@ -179,7 +179,7 @@ The admin UI exposes a "Disconnect" action (or the admin can clear
 `custom_domain` on their profile). To free nginx capacity:
 
 ```bash
-sudo /usr/local/bin/marginplant-remove-branded-domain mybroker.com
+sudo /usr/local/bin/saudasaacha-remove-branded-domain mybroker.com
 # Optional — drop the cert too:
 sudo certbot delete --cert-name mybroker.com
 ```
@@ -190,5 +190,5 @@ sudo certbot delete --cert-name mybroker.com
 |---|---|---|
 | `helper_missing` in admin UI | Scripts not deployed to /usr/local/bin | Re-run step 2 above |
 | `sudo: a password is required` | Sudoers rule wrong / not chmod 0440 | Re-run step 3 + `visudo -c` |
-| `Could not automatically find a matching server block` | Helper script not run before certbot | Should not happen — worker now uses helper. If seen, check `/etc/nginx/sites-enabled/marginplant-branded-<domain>.conf` exists |
-| Cert obtained but admin UI shows FAILED | API/worker can't reach itself / status update path broken | Check Celery worker logs: `pm2 logs marginplant-celery-worker` |
+| `Could not automatically find a matching server block` | Helper script not run before certbot | Should not happen — worker now uses helper. If seen, check `/etc/nginx/sites-enabled/saudasaacha-branded-<domain>.conf` exists |
+| Cert obtained but admin UI shows FAILED | API/worker can't reach itself / status update path broken | Check Celery worker logs: `pm2 logs saudasaacha-celery-worker` |

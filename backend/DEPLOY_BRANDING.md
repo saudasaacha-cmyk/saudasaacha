@@ -84,11 +84,11 @@ deactivate
 # 3. Allow the backend OS user to run certbot + nginx without password.
 #    Replace `saudasaacha` with the actual UNIX user running uvicorn /
 #    celery (run `id -un` while su'd as that user).
-sudo tee /etc/sudoers.d/marginplant-branding > /dev/null <<'EOF'
+sudo tee /etc/sudoers.d/saudasaacha-branding > /dev/null <<'EOF'
 saudasaacha ALL=(root) NOPASSWD: /usr/bin/certbot, /usr/sbin/nginx
 EOF
-sudo chmod 0440 /etc/sudoers.d/marginplant-branding
-sudo visudo -c    # must print "/etc/sudoers.d/marginplant-branding: parsed OK"
+sudo chmod 0440 /etc/sudoers.d/saudasaacha-branding
+sudo visudo -c    # must print "/etc/sudoers.d/saudasaacha-branding: parsed OK"
 
 # 4. Confirm the existing nginx config has a catch-all server block
 #    (server_name _;) that proxies to the FastAPI upstream. Certbot

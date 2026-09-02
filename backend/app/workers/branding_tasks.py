@@ -2,7 +2,7 @@
 
 Single task: ``provision_ssl(admin_id)`` orchestrates the full custom
 domain provisioning pipeline by shelling out to the deploy helper
-script ``marginplant-add-branded-domain.sh`` which:
+script ``saudasaacha-add-branded-domain.sh`` which:
 
   1. Writes a per-tenant nginx server block proxying to the user
      frontend (port 3000).
@@ -21,11 +21,11 @@ Server prerequisites (see ``deploy/README.md``):
 * ``certbot`` and ``python3-certbot-nginx`` installed.
 * The provisioning helper scripts deployed to ``/usr/local/bin/``:
 
-    /usr/local/bin/marginplant-add-branded-domain
-    /usr/local/bin/marginplant-remove-branded-domain
+    /usr/local/bin/saudasaacha-add-branded-domain
+    /usr/local/bin/saudasaacha-remove-branded-domain
 
 * The backend's OS user has passwordless sudo for those two scripts
-  via ``/etc/sudoers.d/marginplant-branding``.
+  via ``/etc/sudoers.d/saudasaacha-branding``.
 * ``settings.PLATFORM_PUBLIC_IP`` set in ``.env`` — admins point
   their A records here.
 
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 CERTBOT_TIMEOUT_SEC: Final[int] = 180
 CERTBOT_EMAIL_DEFAULT: Final[str] = "ops@sachchasauda.com"
-PROVISION_SCRIPT: Final[str] = "/usr/local/bin/marginplant-add-branded-domain"
+PROVISION_SCRIPT: Final[str] = "/usr/local/bin/saudasaacha-add-branded-domain"
 
 
 def _script_exists(path: str) -> bool:
@@ -108,7 +108,7 @@ def provision_ssl(self, admin_id: str) -> dict:
                 await branding_service.mark_domain_failed(
                     user.id,
                     f"Provisioning helper not found at {PROVISION_SCRIPT}. "
-                    "Deploy `deploy/scripts/marginplant-add-branded-domain.sh` "
+                    "Deploy `deploy/scripts/saudasaacha-add-branded-domain.sh` "
                     "and update sudoers (see deploy/README.md).",
                 )
                 return {"ok": False, "error": "helper_missing"}

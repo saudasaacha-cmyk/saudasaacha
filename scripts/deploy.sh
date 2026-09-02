@@ -3,7 +3,7 @@
 #  SaudaSaacha Broker — production deploy script
 #  Runs on the EC2 host. Invoked by GitHub Actions over SSH; can also
 #  be run manually:
-#      cd /opt/marginplant && bash scripts/deploy.sh
+#      cd /opt/saudasaacha && bash scripts/deploy.sh
 #
 #  Smart-rebuild: figures out what actually changed between the previous
 #  HEAD and the new origin/main, then rebuilds only the affected piece.
@@ -11,7 +11,7 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_DIR="/opt/marginplant"
+REPO_DIR="/opt/saudasaacha"
 BACKEND_DIR="$REPO_DIR/backend"
 USER_DIR="$REPO_DIR/frontend-user"
 ADMIN_DIR="$REPO_DIR/frontend-admin"
@@ -82,8 +82,8 @@ if [ "$backend_changed" = "1" ]; then
     # Deps (or the systemd unit / env) changed → full restart so the new
     # packages + ExecStart/Environment are actually loaded. A reload won't
     # pick those up.
-    echo "  restarting marginplant-backend.service (deps changed)…"
-    sudo systemctl restart marginplant-backend
+    echo "  restarting saudasaacha-backend.service (deps changed)…"
+    sudo systemctl restart saudasaacha-backend
   else
     # Code-only change → graceful ROLLING reload (gunicorn SIGHUP via the
     # unit's ExecReload). Gunicorn re-imports the app, spins up fresh
@@ -92,8 +92,8 @@ if [ "$backend_changed" = "1" ]; then
     # leader:feed lock hands off to a standby within its TTL. Falls back to
     # a hard restart if the unit has no ExecReload yet (first deploy of the
     # gunicorn unit).
-    echo "  reloading marginplant-backend.service (rolling, code-only)…"
-    sudo systemctl reload marginplant-backend || sudo systemctl restart marginplant-backend
+    echo "  reloading saudasaacha-backend.service (rolling, code-only)…"
+    sudo systemctl reload saudasaacha-backend || sudo systemctl restart saudasaacha-backend
   fi
 fi
 
@@ -108,8 +108,8 @@ if [ "$user_changed" = "1" ]; then
   echo "  building…"
   rm -rf .next
   npm run build
-  echo "  reloading PM2 marginplant-user…"
-  pm2 reload marginplant-user --update-env
+  echo "  reloading PM2 saudasaacha-user…"
+  pm2 reload saudasaacha-user --update-env
 fi
 
 # ── 4) Frontend admin ──────────────────────────────────────────────
@@ -123,14 +123,14 @@ if [ "$admin_changed" = "1" ]; then
   echo "  building…"
   rm -rf .next
   npm run build
-  echo "  reloading PM2 marginplant-admin…"
-  pm2 reload marginplant-admin --update-env
+  echo "  reloading PM2 saudasaacha-admin…"
+  pm2 reload saudasaacha-admin --update-env
 fi
 
 # ── 5) Nginx config sync (if tracked nginx config changed) ─────────
-if [ "$nginx_changed" = "1" ] && [ -f "$REPO_DIR/deploy/nginx/marginplant.conf" ]; then
+if [ "$nginx_changed" = "1" ] && [ -f "$REPO_DIR/deploy/nginx/saudasaacha.conf" ]; then
   echo "── Nginx config ──"
-  sudo cp "$REPO_DIR/deploy/nginx/marginplant.conf" /etc/nginx/sites-available/marginplant
+  sudo cp "$REPO_DIR/deploy/nginx/saudasaacha.conf" /etc/nginx/sites-available/saudasaacha
   sudo nginx -t
   sudo systemctl reload nginx
 fi
@@ -144,7 +144,7 @@ if [ "$backend_code" = "401" ] || [ "$backend_code" = "200" ]; then
 else
   echo "  ✗ backend FAIL ($backend_code)"
   echo "  Last 20 log lines:"
-  sudo journalctl -u marginplant-backend --no-pager -n 20 | sed 's/^/    /'
+  sudo journalctl -u saudasaacha-backend --no-pager -n 20 | sed 's/^/    /'
   exit 1
 fi
 

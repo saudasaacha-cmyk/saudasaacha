@@ -48,7 +48,7 @@ Output looks like: `KqB8...PnQ=` (44 chars).
 ### 2.2 Add it to the production .env
 
 ```bash
-sudo nano /etc/marginplant/.env   # or wherever your prod env lives
+sudo nano /etc/saudasaacha/.env   # or wherever your prod env lives
 ```
 
 Add this line (paste the key generated above):
@@ -60,14 +60,14 @@ ZERODHA_CREDS_KEY=KqB8...PnQ=
 Save and exit. **Do not commit this key to git.** Verify file permissions are 600:
 
 ```bash
-sudo chmod 600 /etc/marginplant/.env
-sudo chown <backend-user>:<backend-user> /etc/marginplant/.env
+sudo chmod 600 /etc/saudasaacha/.env
+sudo chown <backend-user>:<backend-user> /etc/saudasaacha/.env
 ```
 
 ### 2.3 Install Python deps
 
 ```bash
-cd /path/to/marginplant_ind_web/backend
+cd /path/to/saudasaacha_ind_web/backend
 sudo -u <backend-user> .venv/bin/pip install -r requirements.txt
 ```
 
@@ -107,8 +107,8 @@ Should print `crypto roundtrip: test`.
 ### 2.6 Restart the backend service
 
 ```bash
-sudo systemctl restart marginplant-backend
-sudo journalctl -u marginplant-backend -f --since '1 minute ago'
+sudo systemctl restart saudasaacha-backend
+sudo journalctl -u saudasaacha-backend -f --since '1 minute ago'
 ```
 
 Look for these log lines on startup:
@@ -271,7 +271,7 @@ sudo systemctl restart systemd-timesyncd
 ### Tail backend logs during a test login
 
 ```bash
-sudo journalctl -u marginplant-backend -f | grep -E 'zerodha_auto_login|zerodha_scheduler|callback'
+sudo journalctl -u saudasaacha-backend -f | grep -E 'zerodha_auto_login|zerodha_scheduler|callback'
 ```
 
 You should see, in order:

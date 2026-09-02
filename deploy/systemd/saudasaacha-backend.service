@@ -27,9 +27,9 @@
 #      The other workers serve HTTP/WebSocket traffic and read prices from
 #      the leader's `mdlive:{token}` Redis snapshot — that's the scaling win.
 #
-#  ⚠️  PATHS BELOW ASSUME the repo lives at /opt/marginplant (matches
+#  ⚠️  PATHS BELOW ASSUME the repo lives at /opt/saudasaacha (matches
 #      scripts/deploy.sh). BEFORE applying, confirm your CURRENT unit's
-#      paths with:   systemctl cat marginplant-backend
+#      paths with:   systemctl cat saudasaacha-backend
 #      and edit WorkingDirectory + the gunicorn path to match your venv.
 # ─────────────────────────────────────────────────────────────────────
 [Unit]
@@ -39,17 +39,17 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/opt/marginplant/backend
+User=sauda
+Group=sauda
+WorkingDirectory=/opt/saudasaacha/backend
 
 # 8 vCPU box → 4 workers leaves headroom for the Next.js PM2 apps + nginx.
 # gunicorn reads WEB_CONCURRENCY automatically when --workers is omitted.
 Environment=WEB_CONCURRENCY=4
 # Load the application secrets/config.
-EnvironmentFile=/opt/marginplant/backend/.env
+EnvironmentFile=/opt/saudasaacha/backend/.env
 
-ExecStart=/opt/marginplant/backend/.venv/bin/gunicorn app.main:app \
+ExecStart=/opt/saudasaacha/backend/.venv/bin/gunicorn app.main:app \
     --worker-class uvicorn.workers.UvicornWorker \
     --bind 127.0.0.1:8000 \
     --timeout 120 \

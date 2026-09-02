@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────
-#  Runs marginplant-backup.service ONCE A DAY at 23:50 IST — i.e. after the
+#  Runs saudasaacha-backup.service ONCE A DAY at 23:50 IST — i.e. after the
 #  Indian market has closed for the day. Backing up post-close means the
 #  full day's trading (orders/trades/positions/wallets) is captured, and the
 #  ~10-min M0-throttled dump runs when there is zero live trading load, so it
@@ -19,7 +19,7 @@ Description=Run SaudaSaacha MongoDB → Atlas backup daily at 23:50 IST (post ma
 OnCalendar=*-*-* 23:50:00 Asia/Kolkata
 Persistent=true
 RandomizedDelaySec=60
-Unit=marginplant-backup.service
+Unit=saudasaacha-backup.service
 
 [Install]
 WantedBy=timers.target

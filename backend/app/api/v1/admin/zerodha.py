@@ -227,7 +227,7 @@ async def disconnect_ws(admin: CurrentAdmin):
 async def force_reconnect_ws(admin: CurrentAdmin):
     """Operator-friendly "act like backend restart" reconnect.
 
-    Same effect as `systemctl restart marginplant-backend` for the
+    Same effect as `systemctl restart saudasaacha-backend` for the
     Zerodha ticker — stops the live ticker, resets the self-heal
     failure counter (so the next reconnect uses the base 30 s cadence
     instead of the 5 min cap), refreshes the captured event loop, and
