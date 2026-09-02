@@ -535,15 +535,15 @@ export default function BrandingPage() {
   const userCode = meQuery.data?.user_code ?? "";
   const domainSaved = (meQuery.data?.custom_domain ?? "").trim();
   // Branded links are CLIENT-FACING (signup / login) — they must point
-  // at the END-USER frontend (e.g. https://saudasaacha.com), NOT the
-  // admin panel host (admin.saudasaacha.com). Resolution order:
+  // at the END-USER frontend (e.g. https://sachchasauda.com), NOT the
+  // admin panel host (admin.sachchasauda.com). Resolution order:
   //   1. NEXT_PUBLIC_USER_APP_URL  (explicit override, recommended)
   //   2. Strip a leading "admin." subdomain off the current origin
-  //   3. Hard fallback to https://saudasaacha.com (SSR / mis-config)
+  //   3. Hard fallback to https://sachchasauda.com (SSR / mis-config)
   const platformOrigin = useMemo(() => {
     const fromEnv = (process.env.NEXT_PUBLIC_USER_APP_URL || "").trim();
     if (fromEnv) return fromEnv.replace(/\/+$/, "").replace(/^http:/, "https:");
-    if (typeof window === "undefined") return "https://saudasaacha.com";
+    if (typeof window === "undefined") return "https://sachchasauda.com";
     const url = new URL(window.location.origin);
     url.protocol = "https:";
     if (url.hostname.startsWith("admin.")) {

@@ -28,7 +28,7 @@ logger = logging.getLogger("create_test_user")
 
 
 # ── Test user spec ───────────────────────────────────────────────────────
-TEST_EMAIL = "test@saudasaacha.com"
+TEST_EMAIL = "test@sachchasauda.com"
 TEST_MOBILE = "9000000001"
 TEST_PASSWORD = "Test@SaudaSaacha2026!"
 TEST_FULL_NAME = "Test Trader"

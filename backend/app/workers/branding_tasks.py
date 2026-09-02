@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 CERTBOT_TIMEOUT_SEC: Final[int] = 180
-CERTBOT_EMAIL_DEFAULT: Final[str] = "ops@saudasaacha.com"
+CERTBOT_EMAIL_DEFAULT: Final[str] = "ops@sachchasauda.com"
 PROVISION_SCRIPT: Final[str] = "/usr/local/bin/marginplant-add-branded-domain"
 
 

@@ -65,7 +65,7 @@ One-shot maintenance scripts, run with `python -m scripts.<name>` from `backend/
 - `reset_user_margins.py` — clear margin state on a user (manual recovery).
 - `backfill_position_opened_side.py`, `fix_bogus_proceeds_credits.py` — historical data-fix migrations; check the docstring before running.
 
-MongoDB **replica set is required for transactions** in Phase 4+; a single node works for Phase 1. Default super admin: `admin@saudasaacha.com` / `Admin@123` — admin login requires 2FA, so enroll via the user app first.
+MongoDB **replica set is required for transactions** in Phase 4+; a single node works for Phase 1. Default super admin: `admin@sachchasauda.com` / `Admin@123` — admin login requires 2FA, so enroll via the user app first.
 
 ### Frontends ([frontend-user/](frontend-user/), [frontend-admin/](frontend-admin/))
 

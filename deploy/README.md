@@ -20,7 +20,7 @@ GitHub Action over SSH but can also be run by hand on the EC2.
 |--------|-------|
 | `EC2_HOST` | `100.48.201.136` (or whatever your elastic IP is) |
 | `EC2_USER` | `ubuntu` |
-| `EC2_SSH_KEY` | paste the full contents of `saudasaacha.com.pem` (the PRIVATE key, including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines) |
+| `EC2_SSH_KEY` | paste the full contents of `sachchasauda.com.pem` (the PRIVATE key, including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines) |
 | `EC2_PORT` | `22` (optional — defaults to 22) |
 
 > Use a deploy-only SSH key in production. The current key gives full sudo
@@ -74,7 +74,7 @@ Push to `main` (any commit, even a README touch). Watch
 ## Manual deploy (no GitHub)
 
 ```bash
-ssh -i saudasaacha.com.pem ubuntu@100.48.201.136
+ssh -i sachchasauda.com.pem ubuntu@100.48.201.136
 cd /opt/saudasaacha
 bash scripts/deploy.sh
 ```

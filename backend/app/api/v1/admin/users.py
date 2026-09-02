@@ -1188,7 +1188,7 @@ async def impersonate(user_id: str, admin: CurrentAdmin):
     # to the platform origin for non-branded / platform users.
     #
     # CORS_USER_ORIGIN may hold comma-separated origins (e.g.
-    # "https://saudasaacha.com,https://www.saudasaacha.com") — take the FIRST canonical
+    # "https://sachchasauda.com,https://www.sachchasauda.com") — take the FIRST canonical
     # origin only, otherwise the comma lands in the URL and the browser tries
     # to resolve the whole string as a hostname (DNS_PROBE_FINISHED_NXDOMAIN).
     user_app_url = cfg.CORS_USER_ORIGIN.split(",")[0].strip()

@@ -53,7 +53,7 @@ def main() -> None:
     print(f"VAPID_PUBLIC_KEY={_b64url(pub_bytes)}")
     print(f"VAPID_PRIVATE_KEY={_b64url(priv_bytes)}")
     print("# Optional — your operations contact:")
-    print("VAPID_SUBJECT=mailto:admin@saudasaacha.com")
+    print("VAPID_SUBJECT=mailto:admin@sachchasauda.com")
     print()
     print("# Then restart the backend so the new keys load.")
 

@@ -2,7 +2,7 @@
  * White-label cross-origin session handoff helpers.
  *
  * When a user who originally signed up via a branded URL lands on the
- * platform host (`saudasaacha.com`) and logs in, the BrandingProvider
+ * platform host (`sachchasauda.com`) and logs in, the BrandingProvider
  * builds a `#wl=<base64>` hash and redirects them to the admin's
  * `custom_domain`. The destination page consumes the hash on first
  * paint, writes the tokens into localStorage, strips the hash from

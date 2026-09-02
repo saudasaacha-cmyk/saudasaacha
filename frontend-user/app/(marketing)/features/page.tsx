@@ -82,7 +82,7 @@ const MOBILE = [
 
 const PLATFORM = [
   { title: "9 ms median order latency",      body: "p99 stays under 28 ms during peak NIFTY hours. Real numbers — published, not promised." },
-  { title: "99.97% uptime over 6 months",    body: "Public status page at status.saudasaacha.com. Every incident has a public post-mortem." },
+  { title: "99.97% uptime over 6 months",    body: "Public status page at status.sachchasauda.com. Every incident has a public post-mortem." },
   { title: "256-bit TLS end-to-end",         body: "HSTS preload, cert pinning on mobile, no plain-HTTP listener anywhere in production." },
   { title: "ap-south-1 primary, Singapore DR", body: "India-resident data in AWS Mumbai. Singapore replica for global feeds. Failover tested quarterly." },
   { title: "Mandatory 2FA for admin paths",  body: "Every internal action is JWT + IP allowlist + TOTP. No engineer logs into the matching engine alone." },

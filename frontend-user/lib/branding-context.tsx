@@ -16,7 +16,7 @@
  *   2. POST-LOGIN REDIRECT (gated, never fires for legacy users) —
  *      A user whose `signup_origin` is BRANDED_REFERRAL or
  *      CUSTOM_DOMAIN AND whose admin has a READY custom_domain gets
- *      redirected from `saudasaacha.com/dashboard` to
+ *      redirected from `sachchasauda.com/dashboard` to
  *      `https://<admin.custom_domain>/dashboard#wl=<session>`.
  *      Existing 10k users have `signup_origin = null` → this path is
  *      physically unreachable for them.
@@ -56,7 +56,7 @@ type BrandingContextValue = {
   branding: Branding | null;
   loading: boolean;
   /** True ONLY once the client has confirmed we're on the platform host
-   *  (saudasaacha.com / localhost). The super-admin "SaudaSaacha" default
+   *  (sachchasauda.com / localhost). The super-admin "SaudaSaacha" default
    *  logo + wordmark may render ONLY when this is true — never during SSR,
    *  never on a tenant's branded domain, never before the host is known.
    *  This is what stops SaudaSaacha flashing on `broker.example.com`. */
@@ -77,8 +77,8 @@ const Ctx = createContext<BrandingContextValue>({
 
 const PLATFORM_HOSTS = new Set<string>(
   [
-    "saudasaacha.com",
-    "www.saudasaacha.com",
+    "sachchasauda.com",
+    "www.sachchasauda.com",
     "localhost",
     "127.0.0.1",
   ].map((h) => h.toLowerCase()),
@@ -125,7 +125,7 @@ async function fetchBrandingByDomain(domain: string): Promise<Branding | null> {
 }
 
 /** Fetch the platform-default branding (super admin's logo +
- *  brand_name).  Used on the platform host (saudasaacha.com) where
+ *  brand_name).  Used on the platform host (sachchasauda.com) where
  *  there's no tenant referral or custom domain to resolve against —
  *  without this fall-back the auth pages would render the generic
  *  built-in glyph even though the super admin has uploaded a logo. */
@@ -363,7 +363,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
           brand = me?.branding ?? null;
         }
         // Anonymous platform-host visitor (e.g. login / register on
-        // saudasaacha.com) OR logged-in user whose admin has no
+        // sachchasauda.com) OR logged-in user whose admin has no
         // branding — fall back to the super admin's branding so the
         // auth + dashboard screens render the platform owner's logo +
         // favicon instead of the generic glyph.

@@ -12,17 +12,17 @@ import {
 const CHANNELS = [
   {
     label: "Support",
-    email: "support@saudasaacha.com",
+    email: "support@sachchasauda.com",
     note: "for account, payout, and platform issues. Have your account ID ready.",
   },
   {
     label: "Affiliates & partnerships",
-    email: "partners@saudasaacha.com",
+    email: "partners@sachchasauda.com",
     note: "for referrals, partnerships, and volume deals.",
   },
   {
     label: "Press / general",
-    email: "hello@saudasaacha.com",
+    email: "hello@sachchasauda.com",
     note: "for everything else.",
   },
 ];

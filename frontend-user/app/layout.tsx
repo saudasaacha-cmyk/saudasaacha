@@ -43,8 +43,8 @@ const plexMono = IBM_Plex_Mono({
 
 // Hosts that are the platform itself (not a tenant's branded domain).
 const PLATFORM_METADATA_HOSTS = new Set([
-  "saudasaacha.com",
-  "www.saudasaacha.com",
+  "sachchasauda.com",
+  "www.sachchasauda.com",
   "localhost",
   "127.0.0.1",
 ]);

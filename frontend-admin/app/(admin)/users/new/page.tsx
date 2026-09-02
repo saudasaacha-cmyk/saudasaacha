@@ -94,7 +94,7 @@ export default function NewUserPage() {
     const payload: any = {
       ...rest,
       role: "CLIENT",
-      email: `${v.mobile}@noemail.saudasaacha.com`,
+      email: `${v.mobile}@noemail.sachchasauda.com`,
     };
     if (assign_to_broker_id) payload.assign_to_broker_id = assign_to_broker_id;
     try {
