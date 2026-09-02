@@ -30,6 +30,8 @@ backend/.venv/
 # ─── Node / Next.js ──────────────────────────────────────────────────
 node_modules/
 .next/
+.next-build/
+.next-old/
 out/
 *.tsbuildinfo
 next-env.d.ts
