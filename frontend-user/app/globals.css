@@ -29,16 +29,16 @@
     --input: 220 13% 91%;
 
     /* Brand indigo — #4338CA (indigo-700) */
-    --ring: 243 75% 50%;
-    --primary: 243 75% 50%;               /* #4338CA — deep indigo */
-    --primary-foreground: 0 0% 100%;      /* white on blue */
+    --ring: 358 78% 50%;
+    --primary: 358 78% 50%;               /* #E31E24 — logo red */
+    --primary-foreground: 0 0% 100%;      /* white on red */
 
-    --secondary: 243 30% 96%;             /* faint indigo chip bg */
-    --secondary-foreground: 243 75% 50%;
+    --secondary: 358 60% 97%;             /* faint red chip bg */
+    --secondary-foreground: 358 78% 45%;
     --destructive: 0 72% 51%;             /* red-600 */
     --destructive-foreground: 0 0% 100%;
-    --accent: 243 30% 96%;
-    --accent-foreground: 243 75% 50%;
+    --accent: 358 60% 97%;
+    --accent-foreground: 358 78% 45%;
 
     /* Trading-domain semantic colors — Zerodha-tuned */
     --buy: 142 65% 38%;                   /* #25a25a */
@@ -73,16 +73,16 @@
     --border: 224 20% 18%;
     --input: 224 20% 18%;
 
-    --ring: 243 75% 65%;
-    --primary: 243 75% 65%;               /* lighter indigo for dark */
+    --ring: 358 80% 62%;
+    --primary: 358 80% 62%;               /* lighter logo red for dark */
     --primary-foreground: 224 71% 4%;
 
     --secondary: 224 30% 18%;
-    --secondary-foreground: 243 75% 80%;
+    --secondary-foreground: 358 80% 78%;
     --destructive: 0 72% 58%;
     --destructive-foreground: 0 0% 100%;
     --accent: 224 30% 18%;
-    --accent-foreground: 243 75% 80%;
+    --accent-foreground: 358 80% 78%;
 
     --buy: 142 60% 50%;
     --sell: 354 78% 62%;
