@@ -37,33 +37,13 @@ function isBrandedHost(host: string): boolean {
   return !/\.(vercel\.app|netlify\.app|fly\.dev)$/.test(host);
 }
 
-// The `(marketing)` route group — the ONLY paths that get hidden. Login,
-// register, and every authenticated app route are deliberately absent.
+// The public site — the ONLY paths that get hidden. Login, register, and
+// every authenticated app route are deliberately absent. The landing page
+// itself is `/`, handled in isMarketingPath below.
 const MARKETING_PREFIXES = [
-  "/about",
-  "/blog",
-  "/commodities",
-  "/contact",
-  "/copy-trading",
-  "/demo",
-  "/education",
-  "/equity",
-  "/faq",
-  "/features",
-  "/futures-options",
-  "/how-it-works",
-  "/ib-management",
-  "/indices",
-  "/instruments",
-  "/learn",
-  "/legal",
-  "/markets",
-  "/pricing",
-  "/privacy",
-  "/pro",
-  "/security",
-  "/standard",
-  "/web-terminal",
+  "/terms",
+  "/privacy-policy",
+  "/refund-policy",
 ];
 
 function isMarketingPath(path: string): boolean {
