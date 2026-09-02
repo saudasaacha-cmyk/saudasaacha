@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MpContainer } from "./mp-ui";
 import { useBranding } from "@/lib/branding-context";
 import { API_URL } from "@/lib/constants";
+import { Wordmark } from "@/components/layout/Wordmark";
 
 // Broker sitemap — Trading markets, Platforms, Company and Support/Legal.
 const COLS: { title: string; links: { href: string; label: string }[] }[] = [
