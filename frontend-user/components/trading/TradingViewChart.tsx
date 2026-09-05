@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, memo } from "react";
 import { CustomDatafeed, pushLiveQuote } from "@/lib/tradingview-datafeed";
+import { InstrumentAPI } from "@/lib/api";
 
 interface TradingViewChartProps {
   token: string;
@@ -293,6 +294,82 @@ function TradingViewChartInner({
         }
       });
     } catch {}
+  }, [token]);
+
+  // ── Admin-defined price lines ─────────────────────────────────────
+  // The admin uploads price + colour per instrument from the admin panel;
+  // each one is drawn here as a horizontal line in that colour. Redrawn on
+  // every token change, and the previous instrument's lines are removed
+  // first — TradingView keeps shapes on the chart across a setSymbol(), so
+  // without this the last symbol's levels stay floating over the new one.
+  const levelShapesRef = useRef<any[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+
+    const clear = () => {
+      const w = widgetRef.current;
+      if (!w) return;
+      for (const id of levelShapesRef.current) {
+        try {
+          w.activeChart().removeEntity(id);
+        } catch {
+          // Entity already gone (symbol switch, widget rebuild) — nothing to do.
+        }
+      }
+      levelShapesRef.current = [];
+    };
+
+    const draw = async () => {
+      const w = widgetRef.current;
+      if (!w || !token) return;
+      let levels: { price: number; color: string; label: string | null }[] = [];
+      try {
+        levels = (await InstrumentAPI.chartLevels(token)) ?? [];
+      } catch {
+        return; // no lines configured, or the call failed — draw nothing
+      }
+      if (cancelled || !levels.length) return;
+      try {
+        w.onChartReady(() => {
+          if (cancelled) return;
+          clear();
+          const chart = w.activeChart();
+          for (const lv of levels) {
+            if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
+            try {
+              const id = chart.createShape(
+                { time: chart.getVisibleRange().from, price: lv.price },
+                {
+                  shape: "horizontal_line",
+                  lock: true,          // an admin level is not the user's to drag
+                  disableSelection: true,
+                  disableSave: true,
+                  text: lv.label || "",
+                  overrides: {
+                    linecolor: lv.color,
+                    linewidth: 2,
+                    linestyle: 0,
+                    showLabel: !!lv.label,
+                    textcolor: lv.color,
+                    horzLabelsAlign: "right",
+                    vertLabelsAlign: "bottom",
+                  },
+                },
+              );
+              if (id) levelShapesRef.current.push(id);
+            } catch (e) {
+              console.error("chart level draw failed", lv, e);
+            }
+          }
+        });
+      } catch {}
+    };
+
+    void draw();
+    return () => {
+      cancelled = true;
+      clear();
+    };
   }, [token]);
 
   // Handle interval changes

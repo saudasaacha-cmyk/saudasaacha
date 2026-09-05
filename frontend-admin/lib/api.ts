@@ -605,6 +605,40 @@ export type CryptoConfig = {
   webhook_url: string;
 };
 
+export type ChartLevelRow = {
+  token: string;
+  symbol: string;
+  segment: string;
+  levels: { price: number; color: string; label: string | null }[];
+};
+
+export const ChartLevelsAPI = {
+  segments: () => unwrap<string[]>(api.get("/admin/chart-levels/segments")),
+  list: (segment?: string) =>
+    unwrap<ChartLevelRow[]>(
+      api.get("/admin/chart-levels", { params: segment ? { segment } : {} }),
+    ),
+  /** Returns the .xlsx bytes — the caller saves it. */
+  template: async (segment: string) => {
+    const res = await api.get("/admin/chart-levels/template", {
+      params: { segment },
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
+  import: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return unwrap<{ updated: number; cleared: number; errors: string[] }>(
+      api.post("/admin/chart-levels/import", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }),
+    );
+  },
+  clear: (token: string) =>
+    unwrap<{ cleared: boolean }>(api.delete(`/admin/chart-levels/${token}`)),
+};
+
 export const CryptoConfigAPI = {
   get: () => unwrap<CryptoConfig>(api.get("/admin/crypto-config")),
   update: (body: {

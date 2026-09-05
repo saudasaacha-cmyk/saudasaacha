@@ -51,6 +51,7 @@ def _document_models() -> list[type["Document"]]:
     from app.models.bonus_transaction import BonusTransaction
     from app.models.brokerage_plan import BrokeragePlan
     from app.models.crypto_config import AdminCryptoConfig
+    from app.models.chart_level import ChartLevel
     from app.models.user_bonus import UserBonus
     from app.models.holding import Holding
     from app.models.holiday import TradingHoliday
@@ -130,6 +131,7 @@ def _document_models() -> list[type["Document"]]:
         CompanyBankAccount,
         UserBankAccount,
         AdminCryptoConfig,
+        ChartLevel,
         BrokeragePlan,
         # Bonus Management (gated by BONUSES_ENABLED; models always registered)
         BonusTemplate,

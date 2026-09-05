@@ -1,0 +1,109 @@
+"""Admin chart lines — Excel round-trip.
+
+Download a template for a segment, fill in up to four price/colour pairs per
+instrument, upload it back. Each price becomes a horizontal line on that
+instrument's chart, in the colour given, for the users under this admin.
+
+Rows are owned per admin tier (super-admin / admin / broker), same cascade as
+crypto configs and company banks.
+"""
+
+from __future__ import annotations
+
+import re
+from urllib.parse import quote
+
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
+
+from app.core.dependencies import CurrentAdmin
+from app.models._base import ALL_SEGMENTS
+from app.schemas.common import APIResponse
+from app.services import chart_level_service
+
+router = APIRouter(prefix="/chart-levels", tags=["admin-chart-levels"])
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# 2 MB. A template for the largest segment is a few tens of KB; anything this
+# size is not one of our sheets and shouldn't reach the parser.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+
+_SEGMENTS = {str(s) for s in ALL_SEGMENTS}
+
+
+def _check_segment(segment: str) -> str:
+    if segment not in _SEGMENTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown segment '{segment}'.",
+        )
+    return segment
+
+
+@router.get("/segments", response_model=APIResponse[list])
+async def segments(admin: CurrentAdmin):
+    """Segments the picker offers — the platform's own list, so it can never
+    drift from what the template builder accepts."""
+    return APIResponse(data=sorted(_SEGMENTS))
+
+
+@router.get("/template")
+async def download_template(admin: CurrentAdmin, segment: str = Query(...)):
+    """XLSX of every instrument in `segment`, pre-filled with what is already
+    saved so an edit is a round-trip rather than a retype."""
+    _check_segment(segment)
+    data = await chart_level_service.build_template(admin, segment)
+    filename = f"chart-levels-{segment}.xlsx"
+    return Response(
+        content=data,
+        media_type=XLSX_MIME,
+        headers={
+            # RFC 5987 form as well, so a segment name never breaks the header.
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"; '
+                f"filename*=UTF-8''{quote(filename)}"
+            )
+        },
+    )
+
+
+@router.post("/import", response_model=APIResponse[dict])
+async def import_levels(admin: CurrentAdmin, file: UploadFile = File(...)):
+    """Upload a filled template. Replaces each listed instrument's lines."""
+    name = (file.filename or "").lower()
+    if not name.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload the .xlsx template downloaded from this page.",
+        )
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File is larger than 2 MB — that isn't one of our templates.",
+        )
+    try:
+        result = await chart_level_service.import_workbook(admin, data)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return APIResponse(data=result)
+
+
+@router.get("", response_model=APIResponse[list])
+async def list_levels(admin: CurrentAdmin, segment: str | None = Query(default=None)):
+    if segment:
+        _check_segment(segment)
+    return APIResponse(data=await chart_level_service.list_for_admin(admin, segment))
+
+
+@router.delete("/{token}", response_model=APIResponse[dict])
+async def clear_levels(token: str, admin: CurrentAdmin):
+    # Tokens are opaque ids; keep the route from becoming a path-traversal
+    # shaped lookup even though Beanie would only ever do an equality match.
+    if not re.fullmatch(r"[A-Za-z0-9_:.\-]{1,64}", token):
+        raise HTTPException(status_code=400, detail="Invalid token.")
+    removed = await chart_level_service.clear_for_admin(admin, token)
+    return APIResponse(data={"cleared": removed})

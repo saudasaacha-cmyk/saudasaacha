@@ -504,6 +504,11 @@ export const InstrumentAPI = {
       }),
     ),
   detail: (token: string) => unwrap<any>(api.get(`/user/instruments/${token}`)),
+  /** Admin-defined horizontal price lines for this instrument's chart. */
+  chartLevels: (token: string) =>
+    unwrap<{ price: number; color: string; label: string | null }[]>(
+      api.get(`/user/instruments/${token}/chart-levels`),
+    ),
   quote: (token: string) => unwrap<any>(api.get(`/user/instruments/${token}/quote`)),
   quotesBatch: (tokens: string[]) =>
     unwrap<any[]>(api.get("/user/instruments/quotes/batch", { params: { tokens: tokens.join(",") } })),

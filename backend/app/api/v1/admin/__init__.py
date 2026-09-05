@@ -8,6 +8,7 @@ from app.api.v1.admin import (
     bonuses,
     branding,
     brokerage,
+    chart_levels,
     crypto_config,
     brokers,
     dashboard,
@@ -46,6 +47,7 @@ router.include_router(netting.router)
 router.include_router(trading.router)
 router.include_router(payin_out.router)
 router.include_router(brokerage.router)
+router.include_router(chart_levels.router)
 router.include_router(crypto_config.router)
 router.include_router(bonuses.router)
 router.include_router(instruments.router)
