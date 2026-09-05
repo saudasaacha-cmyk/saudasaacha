@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { CustomDatafeed, pushLiveQuote } from "@/lib/tradingview-datafeed";
 import { InstrumentAPI } from "@/lib/api";
 
@@ -25,6 +25,12 @@ function TradingViewChartInner({
 }: TradingViewChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<any>(null);
+  // Flips once the widget exists AND its chart is ready. The widget is
+  // built asynchronously (script load → widget init → onChartReady), so an
+  // effect that merely reads `widgetRef.current` runs BEFORE it exists and,
+  // having no reason to re-run, never draws anything. Anything that has to
+  // talk to the chart depends on this instead.
+  const [chartReady, setChartReady] = useState(0);
   // Latest token always available to the build effect via ref — that way the
   // build effect only depends on `theme`, and a token change never tears the
   // widget down. (See the dedicated `[token]` effect below.)
@@ -185,6 +191,10 @@ function TradingViewChartInner({
         // grows AFTER the widget mounted.
         try {
           widgetRef.current.onChartReady?.(() => {
+            // Bumped (not set true) so a widget REBUILD — theme switch tears
+            // the widget down and makes a new one — re-runs the dependants
+            // even though the previous value was already "ready".
+            setChartReady((n) => n + 1);
             try {
               widgetRef.current.activeChart().setRightOffset(5);
             } catch {}
@@ -334,11 +344,20 @@ function TradingViewChartInner({
           if (cancelled) return;
           clear();
           const chart = w.activeChart();
+          // A horizontal line still needs a time coordinate. The visible
+          // range can be empty on the first ready tick, which makes
+          // createShape throw — fall back to "now" so the line is placed
+          // either way (the time is irrelevant once it spans the pane).
+          let anchor = Math.floor(Date.now() / 1000);
+          try {
+            const vr = chart.getVisibleRange?.();
+            if (vr && Number.isFinite(vr.from) && vr.from > 0) anchor = vr.from;
+          } catch {}
           for (const lv of levels) {
             if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
             try {
               const id = chart.createShape(
-                { time: chart.getVisibleRange().from, price: lv.price },
+                { time: anchor, price: lv.price },
                 {
                   shape: "horizontal_line",
                   lock: true,          // an admin level is not the user's to drag
@@ -365,12 +384,12 @@ function TradingViewChartInner({
       } catch {}
     };
 
-    void draw();
+    if (chartReady > 0) void draw();
     return () => {
       cancelled = true;
       clear();
     };
-  }, [token]);
+  }, [token, chartReady]);
 
   // Handle interval changes
   useEffect(() => {
