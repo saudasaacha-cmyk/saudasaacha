@@ -393,7 +393,18 @@ export class CustomDatafeed {
       }
       this.symbolCache.set(token, inst);
       const tickSize = parseFloat(inst.tick_size) || 0.05;
-      const pricescale = Math.round(1 / tickSize);
+      // TradingView's pricescale is "price units per whole" and must be a
+      // POWER OF TEN — it decides how many decimals the chart renders. The
+      // old `Math.round(1 / tickSize)` gave 20 for a 0.05 tick, which quantises
+      // every price to 0.05 steps: DOGE at 0.0812 and POL at 0.0906 collapsed
+      // onto the same two levels and the candles rendered as flat blocks.
+      // Round UP to the next power of ten so a 0.05 tick renders 2 decimals
+      // and a 0.0001 tick renders 4.
+      const rawScale = tickSize > 0 ? 1 / tickSize : 20;
+      const pricescale = Math.pow(
+        10,
+        Math.min(8, Math.max(0, Math.ceil(Math.log10(rawScale)))),
+      );
       const crypto = isCryptoSymbol(token, inst);
       const extended = isExtendedHoursSymbol(token, inst);
       const is24h = crypto || extended;

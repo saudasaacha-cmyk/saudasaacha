@@ -43,6 +43,13 @@ export function toPublicTvSymbol(
   // Indian exchanges → keep the licensed chart (our exact datafeed).
   if (INDIAN_EXCH.has(ex)) return null;
 
+  // Crypto and forex → licensed chart too. Both now have real history on our
+  // own backend (Binance klines for crypto, Yahoo for FX) and crypto has a
+  // live Binance tick, so the licensed chart shows OUR price with the full
+  // drawing/indicator toolset instead of TradingView's own liquidity. Metals
+  // and energy stay on the free widget below until they have a live feed.
+  if (ex === "CRYPTO" || seg.includes("CRYPTO") || seg.includes("FOREX")) return null;
+
   // ── Crypto → Binance pair ──────────────────────────────────────────
   if (s.endsWith("USDT") || s.endsWith("USDC")) return `BINANCE:${s}`;
   const base = s.endsWith("USD") ? s.slice(0, -3) : "";
