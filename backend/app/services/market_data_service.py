@@ -1131,6 +1131,20 @@ async def get_quote(token: str) -> dict[str, Any]:
             out["ts"] = now_ms
             _quote_cache[token] = (now_ms, out)
             return out
+        # Cold, and the leader has no snapshot either: nothing has ever asked
+        # the feed for this token. Ask now — subscribe() seeds `_state` and,
+        # on a non-leader, forwards to the leader over `feed:subscribe` — so
+        # the next poll has a real price. Without this a symbol-keyed
+        # instrument (crypto / forex / metals) read 0.00 from REST forever
+        # unless a WebSocket happened to subscribe it first, which is why
+        # opening the crypto list showed no price until a tick arrived.
+        # Numeric (Zerodha) tokens are left alone: they have a REST snapshot
+        # fallback below and their own on-demand subscribe path.
+        if not str(token).lstrip("-").isdigit():
+            try:
+                subscribe([token])
+            except Exception:  # pragma: no cover - never break a quote
+                logger.debug("quote_cold_subscribe_failed", exc_info=True)
     q = await _ensure_quote(token)
     out = await _overlay_all(token, q)
     await _persist_last_quote(token, out)
