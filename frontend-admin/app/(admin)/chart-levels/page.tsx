@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Download, Trash2, Upload } from "lucide-react";
@@ -19,7 +19,9 @@ import { DataTable, type Column } from "@/components/common/DataTable";
  */
 export default function ChartLevelsPage() {
   const qc = useQueryClient();
-  const [segment, setSegment] = useState<string>("CRYPTO_SPOT");
+  // Empty until the segment list lands — hardcoding a default would show a
+  // segment this deployment may not even have instruments in.
+  const [segment, setSegment] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -28,9 +30,15 @@ export default function ChartLevelsPage() {
     queryFn: () => ChartLevelsAPI.segments(),
   });
 
+  // Default to the biggest segment once the list arrives.
+  useEffect(() => {
+    if (!segment && segments?.length) setSegment(segments[0].value);
+  }, [segments, segment]);
+
   const { data: rows, isFetching } = useQuery({
     queryKey: ["admin", "chart-levels", segment],
     queryFn: () => ChartLevelsAPI.list(segment),
+    enabled: !!segment,
   });
 
   const configured = useMemo(() => (rows ?? []).length, [rows]);
@@ -139,15 +147,15 @@ export default function ChartLevelsPage() {
             onChange={(e) => setSegment(e.target.value)}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm"
           >
-            {(segments ?? [segment]).map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {(segments ?? []).map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label} ({s.count})
               </option>
             ))}
           </select>
         </div>
 
-        <Button onClick={download} disabled={busy} className="gap-2">
+        <Button onClick={download} disabled={busy || !segment} className="gap-2">
           <Download className="size-4" /> Download sheet
         </Button>
 

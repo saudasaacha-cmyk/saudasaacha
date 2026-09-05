@@ -612,8 +612,12 @@ export type ChartLevelRow = {
   levels: { price: number; color: string; label: string | null }[];
 };
 
+export type ChartSegmentOption = { value: string; label: string; count: number };
+
 export const ChartLevelsAPI = {
-  segments: () => unwrap<string[]>(api.get("/admin/chart-levels/segments")),
+  /** Only segments that hold instruments, labelled like Segment Settings. */
+  segments: () =>
+    unwrap<ChartSegmentOption[]>(api.get("/admin/chart-levels/segments")),
   list: (segment?: string) =>
     unwrap<ChartLevelRow[]>(
       api.get("/admin/chart-levels", { params: segment ? { segment } : {} }),

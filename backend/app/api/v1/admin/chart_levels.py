@@ -17,7 +17,6 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 
 from app.core.dependencies import CurrentAdmin
-from app.models._base import ALL_SEGMENTS
 from app.schemas.common import APIResponse
 from app.services import chart_level_service
 
@@ -29,30 +28,32 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 # size is not one of our sheets and shouldn't reach the parser.
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
-_SEGMENTS = {str(s) for s in ALL_SEGMENTS}
 
-
-def _check_segment(segment: str) -> str:
-    if segment not in _SEGMENTS:
+async def _check_segment(segment: str) -> str:
+    """Validate against segments that actually have instruments, not the
+    SegmentType enum — instruments carry FOREX and COMMODITIES, which the
+    enum does not, and the enum lists many segments holding nothing."""
+    known = {s["value"] for s in await chart_level_service.available_segments()}
+    if segment not in known:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown segment '{segment}'.",
+            detail=f"No instruments in segment '{segment}'.",
         )
     return segment
 
 
 @router.get("/segments", response_model=APIResponse[list])
 async def segments(admin: CurrentAdmin):
-    """Segments the picker offers — the platform's own list, so it can never
-    drift from what the template builder accepts."""
-    return APIResponse(data=sorted(_SEGMENTS))
+    """Segments the picker offers: only those holding instruments, labelled
+    the way the Segment Settings page labels them, biggest first."""
+    return APIResponse(data=await chart_level_service.available_segments())
 
 
 @router.get("/template")
 async def download_template(admin: CurrentAdmin, segment: str = Query(...)):
     """XLSX of every instrument in `segment`, pre-filled with what is already
     saved so an edit is a round-trip rather than a retype."""
-    _check_segment(segment)
+    await _check_segment(segment)
     data = await chart_level_service.build_template(admin, segment)
     filename = f"chart-levels-{segment}.xlsx"
     return Response(
@@ -95,7 +96,7 @@ async def import_levels(admin: CurrentAdmin, file: UploadFile = File(...)):
 @router.get("", response_model=APIResponse[list])
 async def list_levels(admin: CurrentAdmin, segment: str | None = Query(default=None)):
     if segment:
-        _check_segment(segment)
+        await _check_segment(segment)
     return APIResponse(data=await chart_level_service.list_for_admin(admin, segment))
 
 

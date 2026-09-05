@@ -49,6 +49,77 @@ for _i in range(1, MAX_LEVELS + 1):
     HEADERS += [f"Price {_i}", f"Color {_i}", f"Label {_i}"]
 
 
+# ── segment labels ───────────────────────────────────────────────────
+# Two segment taxonomies exist in this codebase: the netting one the Segment
+# Settings page shows (NSE_STK_FUT, FOREX, CRYPTO …) and the one instruments
+# actually carry (NSE_FUTURE, CRYPTO_SPOT, FOREX …). They overlap but are not
+# the same, so the picker is labelled from BOTH — netting display names are
+# reused rather than retyped, and the instrument-only names get their own
+# entries. Anything unmapped falls back to a title-cased form instead of the
+# raw enum, so a new segment can never show up as SCREAMING_SNAKE_CASE.
+_INSTRUMENT_SEGMENT_LABELS: dict[str, str] = {
+    "NSE_EQUITY": "NSE Equity",
+    "NSE_FUTURE": "Stock Future",
+    "NSE_INDEX_FUTURE": "Index Future",
+    "NSE_STOCK_OPTION_BUY": "Stock Option — Buy",
+    "NSE_STOCK_OPTION_SELL": "Stock Option — Sell",
+    "NSE_INDEX_OPTION_BUY": "Index Option — Buy",
+    "NSE_INDEX_OPTION_SELL": "Index Option — Sell",
+    "BSE_EQUITY": "BSE Equity",
+    "BSE_FUTURE": "BSE Future",
+    "BSE_INDEX_FUTURE": "BSE Index Future",
+    "BSE_OPTION_BUY": "BSE Option — Buy",
+    "BSE_OPTION_SELL": "BSE Option — Sell",
+    "MCX_FUTURE": "MCX Future",
+    "MCX_OPTION_BUY": "MCX Option — Buy",
+    "MCX_OPTION_SELL": "MCX Option — Sell",
+    "CDS_FUTURE": "Currency Future",
+    "CDS_OPTION_BUY": "Currency Option — Buy",
+    "CDS_OPTION_SELL": "Currency Option — Sell",
+    "CRYPTO_SPOT": "Crypto Spot",
+    "CRYPTO_FUTURE": "Crypto Future",
+}
+
+
+def segment_label(name: str) -> str:
+    from app.services.netting_service import SEGMENT_DEFAULTS
+
+    raw = str(name or "").strip()
+    if not raw:
+        return ""
+    for d in SEGMENT_DEFAULTS:
+        if d.get("name") == raw:
+            return str(d.get("displayName") or raw)
+    if raw in _INSTRUMENT_SEGMENT_LABELS:
+        return _INSTRUMENT_SEGMENT_LABELS[raw]
+    return raw.replace("_", " ").title()
+
+
+async def available_segments() -> list[dict[str, Any]]:
+    """Segments that actually HAVE instruments, with counts.
+
+    Deliberately not the SegmentType enum: instruments carry values the enum
+    doesn't contain (FOREX, COMMODITIES), so an enum-driven picker silently
+    made those two impossible to configure — and offered thirteen segments
+    that would download an empty sheet.
+    """
+    rows = await Instrument.get_motor_collection().aggregate(
+        [
+            {"$group": {"_id": "$segment", "count": {"$sum": 1}}},
+            {"$sort": {"count": -1, "_id": 1}},
+        ]
+    ).to_list(length=None)
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        name = r.get("_id")
+        if not name:
+            continue
+        out.append(
+            {"value": str(name), "label": segment_label(str(name)), "count": r.get("count", 0)}
+        )
+    return out
+
+
 # ── ownership ────────────────────────────────────────────────────────
 def owner_filter_for_admin(admin: User) -> dict[str, PydanticObjectId | None]:
     """The (owner_admin_id, owner_broker_id) pair identifying THIS actor's
@@ -96,7 +167,10 @@ async def build_template(admin: User, segment: str) -> bytes:
 
     wb = Workbook()
     ws = wb.active
-    ws.title = (segment or "Levels")[:31]
+    # Sheet tab and the Segment column both show the friendly label, matching
+    # the Segment Settings page. The parser keys off Token, never these.
+    label = segment_label(segment)
+    ws.title = (label or "Levels")[:31]
 
     head_fill = PatternFill("solid", fgColor="0B1220")
     head_font = Font(bold=True, color="FFFFFF")
@@ -108,7 +182,7 @@ async def build_template(admin: User, segment: str) -> bytes:
     for r, inst in enumerate(instruments, start=2):
         ws.cell(row=r, column=1, value=inst.token)
         ws.cell(row=r, column=2, value=inst.symbol)
-        ws.cell(row=r, column=3, value=str(inst.segment))
+        ws.cell(row=r, column=3, value=segment_label(str(inst.segment)))
         saved = existing.get(inst.token)
         for i in range(MAX_LEVELS):
             base = 4 + i * 3
