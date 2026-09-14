@@ -738,10 +738,24 @@ class ZerodhaService:
         if shared:
             return self._apply_instruments_cache(cache_key, shared)
 
+        # Cluster-wide "Kite can't serve this right now" marker. The local
+        # cooldown below only protects the worker that failed: every OTHER
+        # worker still lost the Redis lock and polled for 5 s per exchange.
+        # User search walks NSE, NFO and MCX in turn, so on those workers each
+        # search took 15 s — on every call, for as long as Zerodha had no token,
+        # which on a deployment that never connected it meant forever. Checked
+        # before the lock so every worker stands down together.
+        unavailable_key = f"zerodha:instruments:unavailable:{cache_key}"
+
         # Cooldown after a recent LOCAL failure — serve last-known (maybe empty).
         _now = _time.time()
         if _now - self._instruments_fail_at.get(cache_key, 0.0) < self._INSTRUMENTS_FAIL_COOLDOWN_SEC:
             return self._instruments_cache.get(cache_key, [])
+        try:
+            if await cache_get(unavailable_key):
+                return self._instruments_cache.get(cache_key, [])
+        except Exception:
+            pass
 
         # ── Elect a single fetcher: per-process lock, then cross-worker ──
         async with self._instr_lock(cache_key):
@@ -776,21 +790,35 @@ class ZerodhaService:
                     await asyncio.sleep(0.5)
                     try:
                         shared = await cache_get(redis_key)
+                        down = await cache_get(unavailable_key)
                     except Exception:
-                        shared = None
+                        shared, down = None, None
                     if shared:
                         return self._apply_instruments_cache(cache_key, shared)
+                    if down:
+                        # The lock holder just found Kite unreachable — no
+                        # catalog is coming, so stop waiting for one.
+                        return self._instruments_cache.get(cache_key, [])
                 # Still nothing — serve stale/empty. The option chain has a DB
                 # fallback and the next poll reads Redis once it's populated.
                 return self._instruments_cache.get(cache_key, [])
 
             # We hold the cluster-wide lock — do the real Kite fetch.
-            kc, s = await self._kite_with_token()
             try:
+                # Inside the try on purpose: with no token (never connected, or
+                # expired) this raises, and outside the try that skipped the
+                # cooldown entirely, so the very next caller went round again.
+                kc, s = await self._kite_with_token()
                 data = await asyncio.to_thread(kc.instruments, exchange) if exchange else await asyncio.to_thread(kc.instruments)
             except Exception as e:
                 # Start the cooldown so we don't hammer Kite through the 429 window.
                 self._instruments_fail_at[cache_key] = _now
+                try:
+                    await cache_set(
+                        unavailable_key, 1, ttl_sec=int(self._INSTRUMENTS_FAIL_COOLDOWN_SEC)
+                    )
+                except Exception:
+                    pass
                 raise RuntimeError(f"Kite instruments fetch failed: {e}") from e
 
             # SDK already returns parsed dicts. Normalise field names so the rest
