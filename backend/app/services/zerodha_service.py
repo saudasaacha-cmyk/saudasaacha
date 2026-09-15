@@ -258,6 +258,20 @@ class ZerodhaService:
         if s is None:
             s = ZerodhaSettings(account_index=account_index)
             await s.insert()
+        # The model's redirectUrl default is a hardcoded localhost URL, so every
+        # settings document created on a real deployment stored it — the admin
+        # page then told the operator to paste localhost into their Kite app,
+        # and Kite would send the browser there after login. Repair that exact
+        # legacy value to the canonical callback derived from BACKEND_PUBLIC_URL.
+        # A URL an admin deliberately set to something else is left alone, and
+        # local dev (where the two are identical) is unaffected.
+        from app.core.config import settings as _cfg
+
+        legacy = "http://localhost:8000/api/v1/admin/zerodha/callback"
+        canonical = _cfg.zerodha_redirect_url
+        if s.redirectUrl == legacy and canonical != legacy:
+            s.redirectUrl = canonical
+            await s.save()
         return s
 
     async def _pool_info_xproc(self) -> dict[str, Any]:

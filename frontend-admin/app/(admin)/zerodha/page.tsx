@@ -545,12 +545,23 @@ export default function ZerodhaConnectPage() {
           <CardContent className="space-y-3">
             <div className="space-y-1.5">
               <Label>API key</Label>
-              <Input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Kite API key" />
+              {/* A text field followed by a password field reads to Chrome as a
+                  login form, so it autofilled the saved admin email into
+                  "API key". These are Kite credentials, not a sign-in. */}
+              <Input
+                name="kite-api-key"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Kite API key"
+              />
             </div>
             <div className="space-y-1.5">
               <Label>API secret</Label>
               <Input
                 type="password"
+                name="kite-api-secret"
+                autoComplete="new-password"
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder={settings.apiSecretConfigured ? "•••••• (saved — leave blank to keep)" : "Kite API secret"}

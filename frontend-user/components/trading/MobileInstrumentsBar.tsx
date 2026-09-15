@@ -8,6 +8,7 @@ import { InstrumentAPI, MarketwatchAPI, SegmentSettingsAPI } from "@/lib/api";
 import { useMarketStream } from "@/lib/useMarketStream";
 import { cn, formatPrice, pnlColor } from "@/lib/utils";
 import { MobileOptionChain } from "@/components/trading/MobileOptionChain";
+import { TickFlash } from "@/components/trading/TickFlash";
 
 interface Props {
   activeToken: string | null;
@@ -842,12 +843,18 @@ function InstrumentRow({
       {/* Bid (sell, red) on top + Ask (buy, green) below — both prices
           shown so the trader reads the full spread at a glance. */}
       <div className="flex flex-col items-end leading-tight">
-        <span className="whitespace-nowrap font-tabular tabular-nums text-sm font-bold text-red-500">
+        <TickFlash
+          value={stickyBid}
+          className="whitespace-nowrap px-0.5 font-tabular tabular-nums text-sm font-bold text-red-500"
+        >
           {stickyBid != null ? formatPrice(stickyBid, segment, exchange) : "—"}
-        </span>
-        <span className="mt-0.5 whitespace-nowrap font-tabular tabular-nums text-sm font-bold text-emerald-500">
+        </TickFlash>
+        <TickFlash
+          value={stickyAsk}
+          className="mt-0.5 whitespace-nowrap px-0.5 font-tabular tabular-nums text-sm font-bold text-emerald-500"
+        >
           {stickyAsk != null ? formatPrice(stickyAsk, segment, exchange) : "—"}
-        </span>
+        </TickFlash>
       </div>
 
       {rightAction}

@@ -790,8 +790,13 @@ function FlashPrice({
   return (
     <span
       className={cn(
-        "whitespace-nowrap font-tabular tabular-nums text-[11px] font-medium transition-colors",
+        "whitespace-nowrap rounded-[3px] font-tabular tabular-nums text-[11px] font-medium transition-colors",
         flashColor,
+        // Tint the background too: a bid's base colour is already red, so its
+        // down-tick flashed red-on-red and never showed (same for an ask's
+        // up-tick). The tint reads in both directions.
+        dir === "up" && "bg-buy/25",
+        dir === "down" && "bg-sell/25",
       )}
     >
       {value != null ? formatPrice(value, segment, exchange) : "—"}
