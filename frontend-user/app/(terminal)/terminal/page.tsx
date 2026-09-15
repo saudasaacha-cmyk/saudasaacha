@@ -71,46 +71,6 @@ export default function TradingTerminalPage() {
     }
   }, [urlToken]);
 
-  // Pick something to show when nothing is selected. Order of preference:
-  //   1. the chart tab restored from localStorage — the strip already SHOWS
-  //      it, so leaving it unselected rendered a BTCUSD tab over an empty
-  //      "Select an instrument" chart and an order panel with no price;
-  //   2. the first favourite (no network call);
-  //   3. a BTCUSD search as the last resort.
-  //
-  // Deliberately NOT keyed on `wlQuotes`: that query refetches every 2 s and
-  // hands back a new array whenever a price moves, so the cleanup cancelled
-  // the in-flight search every two seconds. Any search slower than that never
-  // landed and nothing was ever selected. The dependencies below only change
-  // when the answer could actually change.
-  const firstTabToken = openTabs[0]?.token ?? null;
-  const firstFavToken = wlQuotes?.[0]?.instrument_token ?? null;
-  useEffect(() => {
-    if (selectedToken) return;
-    if (firstTabToken) {
-      setSelectedToken(firstTabToken);
-      return;
-    }
-    if (firstFavToken) {
-      setSelectedToken(firstFavToken);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const found = await InstrumentAPI.search("BTCUSD", undefined, undefined, 1);
-        if (!cancelled && found && found[0]?.token) {
-          setSelectedToken(found[0].token);
-        }
-      } catch {
-        // ignore — the user can still pick from the panel
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedToken, firstTabToken, firstFavToken]);
-
   const { data: instrument } = useQuery({
     queryKey: ["instrument", selectedToken],
     queryFn: () => InstrumentAPI.detail(selectedToken!),
@@ -201,6 +161,49 @@ export default function TradingTerminalPage() {
       // localStorage full / disabled — just skip
     }
   }, [openTabs]);
+
+  // Pick something to show when nothing is selected. Order of preference:
+  //   1. the chart tab restored from localStorage — the strip already SHOWS
+  //      it, so leaving it unselected rendered a BTCUSD tab over an empty
+  //      "Select an instrument" chart and an order panel with no price;
+  //   2. the first favourite (no network call);
+  //   3. a BTCUSD search as the last resort.
+  //
+  // Deliberately NOT keyed on `wlQuotes`: that query refetches every 2 s and
+  // hands back a new array whenever a price moves, so the cleanup cancelled
+  // the in-flight search every two seconds. Any search slower than that never
+  // landed and nothing was ever selected. The dependencies below only change
+  // when the answer could actually change.
+  //
+  // Must stay BELOW the `openTabs` useState: reading it earlier is a TDZ
+  // ReferenceError at render and fails `next build` type-checking.
+  const firstTabToken = openTabs[0]?.token ?? null;
+  const firstFavToken = wlQuotes?.[0]?.instrument_token ?? null;
+  useEffect(() => {
+    if (selectedToken) return;
+    if (firstTabToken) {
+      setSelectedToken(firstTabToken);
+      return;
+    }
+    if (firstFavToken) {
+      setSelectedToken(firstFavToken);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const found = await InstrumentAPI.search("BTCUSD", undefined, undefined, 1);
+        if (!cancelled && found && found[0]?.token) {
+          setSelectedToken(found[0].token);
+        }
+      } catch {
+        // ignore — the user can still pick from the panel
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedToken, firstTabToken, firstFavToken]);
 
   // Whenever the user opens an instrument (either via URL ?token=, watchlist
   // click, option-chain pick, or in-tab swap) ensure it's represented in
