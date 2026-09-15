@@ -47,6 +47,7 @@ export function AutoLoginPanel({ account = 0 }: { account?: number }) {
   const qc = useQueryClient();
   const [credsOpen, setCredsOpen] = useState(false);
   const [scheduleInput, setScheduleInput] = useState<string>("");
+  const [fastPollUntil, setFastPollUntil] = useState(0);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -57,7 +58,11 @@ export function AutoLoginPanel({ account = 0 }: { account?: number }) {
   const statusQuery = useQuery<ZerodhaAutoLoginStatus>({
     queryKey: STATUS_QUERY_KEY,
     queryFn: () => ZerodhaAutoLoginAPI.status(account),
-    refetchInterval: 15_000,
+    // A queued test runs on the feed server within ~30 s — poll fast until it lands.
+    refetchInterval: (q) =>
+      q.state.data?.last_stage === "in_progress" || Date.now() < fastPollUntil
+        ? 3_000
+        : 15_000,
     enabled: isSuperAdmin(admin),
   });
 
@@ -101,16 +106,10 @@ export function AutoLoginPanel({ account = 0 }: { account?: number }) {
 
   const testMut = useMutation({
     mutationFn: () => ZerodhaAutoLoginAPI.testNow(account),
-    onSuccess: (resp) => {
-      applyStatusToCache(resp.status);
-      if (resp.result.success) {
-        const ms = resp.result.duration_ms ?? 0;
-        toast.success(`Login successful in ${(ms / 1000).toFixed(1)} s`);
-      } else {
-        toast.error(
-          `Login failed at "${resp.result.stage ?? "unknown"}": ${resp.result.error ?? "unknown error"}`,
-        );
-      }
+    onSuccess: (next) => {
+      applyStatusToCache(next);
+      setFastPollUntil(Date.now() + 120_000);
+      toast.success("Test login queued — it runs on the feed server within ~30 s. Watch Last attempt below.");
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Test login failed"),

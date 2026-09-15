@@ -1,5 +1,8 @@
 """Daily background loop that fires the Zerodha auto-login.
 
+Also runs queued "Test login now" requests (`take_queued_test`), so every
+login executes on this feed-leader process — never in an API worker.
+
 Runs every 30 seconds. Fires the login when ALL of these are true:
 
   • Auto-login feature is enabled (admin toggle on)
@@ -163,7 +166,7 @@ async def _verify_ws_connected(timeout_sec: int = _VERIFY_TIMEOUT_SEC) -> bool:
 
     Returns
     -------
-    True if any pool entry has `connected=True` before the timeout.
+    True if Account A's socket reaches `connected=True` before the timeout.
     False if the entire window elapses with the pool stuck in
     CONNECTING / DISCONNECTED / ERROR.
     """
@@ -174,10 +177,15 @@ async def _verify_ws_connected(timeout_sec: int = _VERIFY_TIMEOUT_SEC) -> bool:
     while loop.time() < deadline:
         await asyncio.sleep(_VERIFY_POLL_INTERVAL_SEC)
         try:
-            info = zerodha.get_ws_pool_info()
-            connections = info.get("connections", []) or []
-            if any(c.get("connected") for c in connections):
-                return True
+            # Account A's OWN socket — a healthy Account B must not mask a
+            # dead A now that logging in no longer tears the whole pool down.
+            api_key = (await zerodha._get_settings(0)).apiKey
+            with zerodha._ticker_lock:
+                if any(
+                    e.get("api_key") == api_key and e.get("connected")
+                    for e in zerodha._tickers
+                ):
+                    return True
         except Exception:
             logger.warning(
                 "zerodha_scheduler_verify_pool_info_failed",
@@ -401,6 +409,26 @@ async def zerodha_auto_login_loop() -> None:
             any_enabled = False
             # Check both accounts independently
             for account_index in [0, 1]:
+                # "Test login now" from the admin API — runs here, on the
+                # process that owns the WS pool, even if the daily schedule
+                # is disabled (so the setup can be tested before enabling).
+                actor = await zerodha_auto_login.take_queued_test(account_index)
+                if actor is not None:
+                    result = await zerodha_auto_login.refresh_now(
+                        account_index=account_index,
+                        actor_id=actor or None,
+                        triggered_by="manual_test",
+                    )
+                    logger.info(
+                        "zerodha_scheduler_test_login_result",
+                        extra={
+                            "account": account_index,
+                            "success": result.get("success"),
+                            "stage": result.get("stage"),
+                            "error": (result.get("error") or "")[:200],
+                        },
+                    )
+
                 if not await zerodha_auto_login.is_enabled(account_index):
                     continue
                 any_enabled = True

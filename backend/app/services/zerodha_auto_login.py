@@ -1,84 +1,81 @@
 """Automated daily Kite Connect access-token refresh.
 
 Drives the Kite OAuth + TOTP login screen with a headless Playwright
-browser, captures the `request_token` from the redirect, and exchanges
-it for a fresh access token via the existing `zerodha_service`. The
-existing manual login flow is untouched — auto-login just calls the
-same `generate_session()` method the manual callback uses, so if the
-auto-login fails for any reason, manual fallback still works.
+browser and lets Kite redirect it to our own
+`/api/v1/admin/zerodha/callback`. That endpoint does the ONLY exchange of
+the single-use `request_token` (`zerodha_service.generate_session`), exactly
+like a manual login — so auto-login and manual login share one code path.
 
-WebSocket safety
-----------------
-Kite allows only ONE WebSocket per access token. When we issue a new
-token, every old `KiteTicker` instance gets a 403 close. To prevent
-the existing self-heal loop from racing with our login and producing
-duplicate WS attempts on the OLD token, we:
+Ported from the design Stock4X runs in production. The earlier version here
+aborted the redirect with `page.route()` and exchanged the token itself, but
+Playwright never routes redirect hops, so the browser still reached /callback
+and the two exchanges raced: one side failed with "Token is invalid or has
+expired".
 
-  1. Pause `zerodha._self_heal_paused = True` BEFORE generating the
-     new session.
-  2. Call `zerodha.disconnect_ws()` to cleanly close every existing
-     ticker entry (and clear `_token_to_ws` mappings).
-  3. Then run `generate_session()`, which kicks off a fresh WS pool
-     on the new token via the existing `_post_login_ws_kickoff` path.
-  4. Always re-arm `_self_heal_paused = False` in a finally block so
-     even on a partial failure the heal loop can recover.
+Where it runs
+-------------
+Only on the feed-leader process (the one owning the Kite WS pool): the daily
+scheduler lives there, and the admin "Test login now" button just queues a
+Redis flag that the scheduler claims (`queue_test` / `take_queued_test`).
+/callback may land on any HTTP worker; `generate_session` hands the WS
+reconnect to the leader, scoped to the account that logged in (A or B).
 
-Request-token race
-------------------
-Kite's request_token is one-shot. If our Playwright browser navigates
-all the way to `/admin/zerodha/callback?request_token=...`, the server-
-side endpoint consumes it before our own code can. We defend against
-this with THREE layers in `_run_login_flow`:
-
-  1. `page.on("request")` — passive observer, snaps every URL the
-     browser tries to fetch including redirects.
-  2. `page.route()` with a callable predicate — aborts the navigation
-     to `/callback` BEFORE the browser hits our own server.
-  3. Post-failure DB freshness check — if `generate_session` raises
-     "Invalid request_token", check whether `ZerodhaSettings.accessToken`
-     was just refreshed (lastConnected within 60s). If so, the server
-     callback handled the token successfully and we accept that.
+Success is confirmed by THIS account's `lastConnected` being stamped after
+the run started — not by the token value, which Kite repeats on a same-day
+re-login.
 
 Cross-worker safety
 -------------------
-A Redis SETNX lock guards `refresh_now()` so even if the scheduler
-fires in multiple uvicorn workers simultaneously, only one drives the
-browser. See `_REFRESH_LOCK_KEY`.
+A Redis SETNX lock per account guards `refresh_now()`. See `_REFRESH_LOCK_KEY`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import unquote
 
 from beanie import PydanticObjectId
 
 from app.models.audit_log import AuditAction
 from app.models.zerodha_auto_login import ZerodhaAutoLogin
-from app.models.zerodha_settings import ZerodhaSettings
 from app.services import audit_service
 from app.utils.crypto import CryptoError, decrypt, encrypt, mask_secret
 from app.utils.time_utils import now_utc
 
 logger = logging.getLogger(__name__)
 
-# Stage timeouts (milliseconds). Generous for slow EC2 networks but
-# short enough that 3 retries with 5-min gaps still complete inside the
-# 07:00 → 09:15 IST window before the market opens.
-_NAV_TIMEOUT_MS = 20_000
-_SELECTOR_TIMEOUT_MS = 12_000
-_REDIRECT_TIMEOUT_MS = 20_000
+# Generous for slow EC2 networks, short enough that the scheduler's 3
+# retries with 5-min gaps still finish well before the 09:15 IST open.
+_NAV_TIMEOUT_MS = 25_000
 
-# Cross-worker single-flight guard for refresh_now(). Held for the full
-# Playwright run + the few seconds it takes generate_session() to come
-# back. 5 minutes is the operator-recovery upper bound — long enough to
-# survive a slow Kite login, short enough that a crashed worker doesn't
-# block the next attempt forever.
+# The browser requesting this path is how we know Kite issued a
+# request_token. Substring match on the request event — `page.route` never
+# sees redirect hops, and a `**…/callback*` glob doesn't match `https://`.
+_CALLBACK_PATH = "/api/v1/admin/zerodha/callback"
+
+# Kite's 2FA step reuses input#userid (type=number); the rest cover UI drift.
+_TOTP_SELECTORS = (
+    "input#userid",
+    "input[type='number']",
+    "input#totp",
+    "input#pin",
+    "input[maxlength='6']",
+)
+
+# Cross-worker single-flight guard for refresh_now(). 5 minutes is the
+# operator-recovery upper bound — long enough to survive a slow Kite login,
+# short enough that a crashed worker doesn't block the next attempt forever.
 _REFRESH_LOCK_KEY = "zerodha_auto_login:refresh_lock"
 _REFRESH_LOCK_TTL_SEC = 300
+
+# "Test login now" queue: the API sets it, the feed leader's scheduler claims
+# it. The TTL drops a request that no live leader picks up.
+_RUN_NOW_KEY = "zerodha_auto_login:run_now"
+_RUN_NOW_TTL_SEC = 180
 
 
 class AutoLoginError(RuntimeError):
@@ -109,21 +106,6 @@ class ZerodhaAutoLoginService:
         doc = ZerodhaAutoLogin(account_index=account_index)
         await doc.insert()
         return doc
-
-    async def _get_zerodha_api_key(self, account_index: int = 0) -> str:
-        zs = await ZerodhaSettings.find_one(
-            ZerodhaSettings.account_index == account_index
-        )
-        if zs is None and account_index == 0:
-            zs = await ZerodhaSettings.find_one()
-        if not zs or not zs.apiKey:
-            label = "Account B" if account_index == 1 else "primary account"
-            raise AutoLoginError(
-                f"Kite API key not configured for {label} — set it in the "
-                "Zerodha settings page first.",
-                stage="precheck",
-            )
-        return zs.apiKey
 
     # ── Credentials management ─────────────────────────────────────
     async def save_credentials(
@@ -185,8 +167,9 @@ class ZerodhaAutoLoginService:
         """Clear a stuck Redis lock + reset in_progress DB state to failed.
         Called by the admin reset-lock endpoint when a Playwright run crashed
         mid-execution and left the lock held."""
-        redis = get_redis()
-        await redis.delete(f"{_REFRESH_LOCK_KEY}:{account_index}")
+        from app.core.redis_client import get_redis
+
+        await get_redis().delete(f"{_REFRESH_LOCK_KEY}:{account_index}")
         doc = await ZerodhaAutoLogin.find_one(
             ZerodhaAutoLogin.account_index == account_index
         )
@@ -195,6 +178,39 @@ class ZerodhaAutoLoginService:
             doc.last_status = "failed"
             doc.last_error_detail = "Manually reset by admin (lock was stuck)"
             await doc.save()
+
+    # ── "Test login now" hand-off to the feed leader ───────────────
+    async def queue_test(
+        self, account_index: int = 0, *, actor_id: PydanticObjectId | str | None
+    ) -> None:
+        """Ask the feed leader to run one login for this account. Playwright
+        must not run in an API worker: the WS pool isn't there."""
+        from app.core.redis_client import get_redis
+
+        await get_redis().set(
+            f"{_RUN_NOW_KEY}:{account_index}",
+            str(actor_id or ""),
+            ex=_RUN_NOW_TTL_SEC,
+        )
+
+    async def take_queued_test(self, account_index: int = 0) -> str | None:
+        """Claim a queued test run. Returns the requesting admin id ("" if
+        unknown), or None when nothing is queued. DEL is the claim, so only
+        one process wins even if several poll the same flag."""
+        from app.core.redis_client import get_redis
+
+        key = f"{_RUN_NOW_KEY}:{account_index}"
+        try:
+            redis = get_redis()
+            actor = await redis.get(key)
+            if actor is None or not await redis.delete(key):
+                return None
+        except Exception:
+            # Polled every scheduler tick — a Redis blip must not stop the
+            # daily schedule from being evaluated.
+            logger.warning("zerodha_auto_login_run_now_poll_failed", exc_info=True)
+            return None
+        return actor.decode() if isinstance(actor, bytes) else str(actor)
 
     async def get_status(self, account_index: int = 0) -> dict[str, Any]:
         """Masked snapshot for the admin UI. Never returns raw creds."""
@@ -395,27 +411,16 @@ class ZerodhaAutoLoginService:
             await self._release_lock(lock_acquired, account_index)
             return {"success": False, "error": str(exc), "stage": "decrypt"}
 
-        # ── WebSocket safe handoff ────────────────────────────────
-        # Pause self-heal + tear down old WS pool BEFORE we drive the
-        # browser. New token will trigger a fresh pool via the existing
-        # post-login kickoff in zerodha_service.generate_session().
+        # Keep self-heal quiet for the run: its token probe could read the
+        # expired token mid-login and clear the fresh one /callback just saved.
+        # The sockets are left alone — tearing the pool down here used to kill
+        # the OTHER account's feed too.
         from app.services.zerodha_service import zerodha
 
         prior_heal_state = getattr(zerodha, "_self_heal_paused", False)
         zerodha._self_heal_paused = True
         try:
-            try:
-                await zerodha.disconnect_ws()
-            except Exception:
-                logger.warning(
-                    "zerodha_auto_login_predisconnect_failed_continuing",
-                    exc_info=True,
-                )
-
             start = time.monotonic()
-            doc.last_attempt_at = now_utc()
-            doc.last_stage = "in_progress"
-            await doc.save()
 
             try:
                 access_token = await self._run_login_flow(
@@ -466,6 +471,10 @@ class ZerodhaAutoLoginService:
             doc.consecutive_failures = 0
             doc.last_duration_ms = duration_ms
             await doc.save()
+            logger.info(
+                "zerodha_auto_login_success",
+                extra={"account": account_index, "triggered_by": triggered_by},
+            )
 
             await audit_service.log_event(
                 action=AuditAction.SETTING_CHANGE,
@@ -551,7 +560,7 @@ class ZerodhaAutoLoginService:
             },
         )
 
-    # ── The Playwright flow — the trickiest part ────────────────────
+    # ── The Playwright flow ────────────────────────────────────────
     async def _run_login_flow(
         self,
         *,
@@ -560,29 +569,34 @@ class ZerodhaAutoLoginService:
         totp_secret: str,
         account_index: int = 0,
     ) -> str:
-        """Headless Playwright drive of the Kite OAuth screen.
+        """Headless drive of the Kite OAuth screen; returns the access token
+        /callback saved for this account.
 
-        Stages (matches `.stage` on AutoLoginError so the admin UI can
-        show "where it broke"):
-            precheck     — API key missing
-            import       — playwright/chromium not installed
-            navigate     — Kite login URL timed out
-            userid       — username+password page not interactive
-            password     — wrong password banner detected
-            totp_page    — 2FA page didn't appear
-            totp_submit  — TOTP code rejected / no redirect
-            redirect     — never landed on /callback
-            token_parse  — callback URL had no request_token
-            session      — Kite REST exchange failed
+        Stages (``AutoLoginError.stage``, shown in the admin UI):
+            precheck  — Kite API key missing for this account
+            import    — playwright/pyotp/chromium not installed
+            navigate  — Kite login URL did not load
+            userid    — username/password form not interactive
+            totp_page — no 2FA input found
+            redirect  — Kite never sent the browser to /callback (wrong
+                        password/TOTP, or the Kite app's redirect URL isn't
+                        this backend's /callback)
+            session   — /callback rejected the token, or saved no fresh
+                        session for this account
         """
-        api_key = await self._get_zerodha_api_key(account_index)
-        login_url = (
-            f"https://kite.zerodha.com/connect/login?v=3&api_key={api_key}"
-        )
+        from app.services.zerodha_service import _ensure_aware_utc, zerodha
 
         try:
-            from playwright.async_api import async_playwright
+            login_url = await zerodha.get_login_url(account_index)
+        except RuntimeError as exc:
+            raise AutoLoginError(
+                f"{exc} — set it in the Zerodha settings page first.",
+                stage="precheck",
+            ) from exc
+
+        try:
             import pyotp
+            from playwright.async_api import async_playwright
         except ImportError as exc:
             raise AutoLoginError(
                 "playwright or pyotp not installed — run "
@@ -591,24 +605,44 @@ class ZerodhaAutoLoginService:
                 stage="import",
             ) from exc
 
-        async with async_playwright() as p:
+        totp = pyotp.TOTP(totp_secret)
+
+        # Stealth is best-effort (playwright-stealth 2.x API). Kite's OAuth
+        # screen works with plain headless Chromium, so a version mismatch
+        # must never abort the login.
+        try:
+            from playwright_stealth import Stealth
+
+            pw_ctx = Stealth().use_async(async_playwright())
+        except Exception:
+            pw_ctx = async_playwright()
+
+        run_start = now_utc()
+        seen: dict[str, str] = {}
+
+        def _on_request(request: Any) -> None:
+            # Fires for redirect hops too, unlike page.route. After the
+            # exchange /callback bounces the browser to
+            # <admin>/zerodha?success=true or ?error=<why>.
+            url = request.url
+            if _CALLBACK_PATH in url:
+                seen["callback"] = "1"
+            elif "callback" in seen and "/zerodha?" in url:
+                m = re.search(r"[?&]error=([^&]+)", url)
+                if m:
+                    seen["error"] = unquote(m.group(1))[:200]
+                elif "success=true" in url:
+                    seen["done"] = "1"
+
+        kite_text = ""
+        async with pw_ctx as p:
             try:
                 browser = await p.chromium.launch(
                     headless=True,
                     args=[
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
-                        # Hide automation markers that Kite's anti-bot
-                        # fingerprinting looks for. Without these flags a
-                        # headless Chrome sets navigator.webdriver=true and
-                        # exposes several chrome.* APIs that betray automation,
-                        # triggering Kite's CAPTCHA challenge.
                         "--disable-blink-features=AutomationControlled",
-                        "--disable-infobars",
-                        "--disable-extensions",
-                        "--disable-plugins-discovery",
-                        "--no-first-run",
-                        "--no-default-browser-check",
                     ],
                 )
             except Exception as exc:
@@ -622,119 +656,14 @@ class ZerodhaAutoLoginService:
             try:
                 context = await browser.new_context(
                     user_agent=(
-                        "Mozilla/5.0 (X11; Linux x86_64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
                     ),
-                    viewport={"width": 1366, "height": 768},
-                    locale="en-IN",
-                    timezone_id="Asia/Kolkata",
-                    extra_http_headers={
-                        "Accept-Language": "en-IN,en;q=0.9",
-                    },
+                    viewport={"width": 1280, "height": 900},
                 )
                 page = await context.new_page()
-
-                # playwright-stealth patches ~30 JS properties that headless
-                # Chrome exposes (navigator.webdriver, chrome.runtime, plugins
-                # length, etc.) to match a real browser fingerprint. Kite uses
-                # these checks to decide whether to show a CAPTCHA.
-                #
-                # API COMPAT: playwright-stealth 1.x exposed a `stealth_async`
-                # FUNCTION; 2.x (installed on prod = 2.0.3) replaced it with a
-                # `Stealth` CLASS and removed `stealth_async`. The old
-                # `from playwright_stealth import stealth_async` therefore raised
-                # ImportError on 2.x, the except-branch logged "not installed",
-                # and stealth was SILENTLY SKIPPED — so Kite CAPTCHA'd the
-                # headless login and every auto-login died at `totp_submit`
-                # (the 13-Jul self-heal failures). Try the 2.x class API first,
-                # then fall back to the 1.x function API, so BOTH versions work.
-                _stealth_ok = False
-                try:
-                    from playwright_stealth import Stealth  # 2.x class API
-
-                    _stealth = Stealth()
-                    for _meth in ("apply_stealth_async", "apply_async"):
-                        _fn = getattr(_stealth, _meth, None)
-                        if _fn is not None:
-                            await _fn(page)
-                            _stealth_ok = True
-                            break
-                except ImportError:
-                    pass
-                except Exception as _exc:  # noqa: BLE001
-                    logger.warning("playwright_stealth_2x_apply_failed: %s", _exc)
-                if not _stealth_ok:
-                    try:
-                        from playwright_stealth import stealth_async  # 1.x func API
-
-                        await stealth_async(page)
-                        _stealth_ok = True
-                    except ImportError:
-                        logger.warning(
-                            "playwright_stealth unavailable (neither 2.x Stealth "
-                            "nor 1.x stealth_async) — Kite may CAPTCHA the "
-                            "headless login; run `pip install playwright-stealth`"
-                        )
-                    except Exception as _exc:  # noqa: BLE001
-                        logger.warning("playwright_stealth_1x_apply_failed: %s", _exc)
-
-                # 3-layer request_token capture — see module docstring
-                # "Request-token race" for the full reasoning.
-                captured_request_token: list[str | None] = [None]
-
-                def _on_request(request) -> None:
-                    """Layer 1 — observe every URL the browser requests."""
-                    try:
-                        url = request.url
-                        if (
-                            "request_token=" in url
-                            and captured_request_token[0] is None
-                        ):
-                            captured_request_token[0] = (
-                                self._extract_request_token(url)
-                            )
-                            logger.info(
-                                "zerodha_auto_login_callback_seen",
-                                extra={"url_tail": url[-180:]},
-                            )
-                    except Exception:
-                        pass
-
                 page.on("request", _on_request)
 
-                async def _intercept_callback(route) -> None:
-                    """Layer 2 — abort the /callback navigation so the
-                    server-side endpoint doesn't race-consume our token."""
-                    try:
-                        url = route.request.url
-                        if "request_token=" in url:
-                            if captured_request_token[0] is None:
-                                captured_request_token[0] = (
-                                    self._extract_request_token(url)
-                                )
-                            logger.info(
-                                "zerodha_auto_login_callback_aborted",
-                                extra={"url_tail": url[-180:]},
-                            )
-                            try:
-                                await route.abort()
-                            except Exception:
-                                pass
-                            return
-                    except Exception:
-                        pass
-                    try:
-                        await route.continue_()
-                    except Exception:
-                        pass
-
-                def _match_callback(url: str) -> bool:
-                    return "request_token=" in url
-
-                await page.route(_match_callback, _intercept_callback)
-
-                # ── Stage: navigate ──────────────────────────────
                 try:
                     await page.goto(
                         login_url,
@@ -743,227 +672,93 @@ class ZerodhaAutoLoginService:
                     )
                 except Exception as exc:
                     raise AutoLoginError(
-                        f"Kite login URL did not load: {exc}",
-                        stage="navigate",
+                        f"Kite login URL did not load: {exc}", stage="navigate"
                     ) from exc
 
-                # ── Stage: userid + password ─────────────────────
                 try:
-                    await page.wait_for_selector(
-                        'input[type="text"], input#userid',
-                        timeout=_SELECTOR_TIMEOUT_MS,
-                    )
-                    await self._fill_first(
-                        page, ['input#userid', 'input[type="text"]'], username
-                    )
-                    await self._fill_first(
-                        page,
-                        ['input#password', 'input[type="password"]'],
-                        password,
-                    )
-                    await page.click('button[type="submit"]')
+                    await page.fill("input#userid", username, timeout=_NAV_TIMEOUT_MS)
+                    await page.fill("input#password", password, timeout=_NAV_TIMEOUT_MS)
+                    await page.click("button[type='submit']", timeout=_NAV_TIMEOUT_MS)
                 except Exception as exc:
                     raise AutoLoginError(
                         f"username/password page not interactive: {exc}",
                         stage="userid",
                     ) from exc
 
-                # ── Stage: detect wrong-password banner ──────────
+                # Let the 2FA form swap in, then compute the code at the last
+                # moment so it can't roll over mid-login.
+                await page.wait_for_timeout(1800)
+                code = totp.now()
+                for sel in _TOTP_SELECTORS:
+                    try:
+                        el = page.locator(sel).first
+                        await el.wait_for(state="visible", timeout=4000)
+                        await el.fill(code, timeout=3000)
+                        break
+                    except Exception:
+                        continue
+                else:
+                    raise AutoLoginError(
+                        "TOTP input not found on the 2FA page (Kite UI changed?)",
+                        stage="totp_page",
+                    )
                 try:
-                    err_locator = page.locator(
-                        '.error, .alert, [class*="invalid"], [class*="error"]'
-                    ).first
-                    if await err_locator.is_visible(timeout=1500):
-                        err_text = (await err_locator.text_content()) or "login rejected"
-                        raise AutoLoginError(
-                            f"Kite rejected the login: {err_text.strip()[:200]}",
-                            stage="password",
-                        )
-                except AutoLoginError:
-                    raise
+                    # Some Kite variants auto-submit on the 6th digit.
+                    await page.click("button[type='submit']", timeout=3000)
                 except Exception:
-                    # is_visible() throws if selector doesn't exist — that's
-                    # the happy path; the page moved on to the TOTP screen.
                     pass
 
-                # ── Stage: TOTP page ─────────────────────────────
-                # Kite reuses input#userid on the TOTP screen on some
-                # builds, hence the long selector union.
-                totp_selector = (
-                    'input.totp, input#totp, input#userid, '
-                    'input[type="number"], input[autocomplete="one-time-code"], '
-                    'input[label="External TOTP"], input[maxlength="6"]'
-                )
-                try:
-                    await page.wait_for_timeout(700)  # SPA form-swap settle
-                    await page.wait_for_selector(
-                        totp_selector, timeout=_SELECTOR_TIMEOUT_MS
-                    )
-                except Exception as exc:
-                    raise AutoLoginError(
-                        f"TOTP page did not appear: {exc}", stage="totp_page"
-                    ) from exc
-
-                totp_code = pyotp.TOTP(totp_secret).now()
-                try:
-                    el = await page.query_selector(totp_selector)
-                    if el is None:
-                        raise RuntimeError(
-                            f"no element matched {totp_selector!r}"
-                        )
-                    await el.click()
-                    await el.fill("")
-                    # Type per-char so React onChange fires for every digit.
-                    await el.type(totp_code, delay=50)
-                    # Press Enter — modern Kite auto-submits on the
-                    # 6th digit but Enter is a safe belt-and-braces.
-                    try:
-                        await page.keyboard.press("Enter")
-                    except Exception:
-                        pass
-                    # Button click as backup — ignored if form already gone.
-                    try:
-                        await page.click(
-                            'button[type="submit"], button:has-text("Continue"), '
-                            'button:has-text("Login")',
-                            timeout=1000,
-                        )
-                    except Exception:
-                        pass
-                except Exception as exc:
-                    raise AutoLoginError(
-                        f"could not submit TOTP code: {exc}",
-                        stage="totp_submit",
-                    ) from exc
-
-                # ── Stage: wait for the intercepted request_token ──
-                deadline = (
-                    asyncio.get_event_loop().time()
-                    + (_REDIRECT_TIMEOUT_MS / 1000.0)
-                )
-                while asyncio.get_event_loop().time() < deadline:
-                    if captured_request_token[0]:
+                # Wait for the browser to request /callback, then for its
+                # success/error bounce. Closing mid-redirect would stop the
+                # exchange from ever running.
+                for _ in range(40):  # ~20 s
+                    if "callback" in seen:
                         break
-                    await asyncio.sleep(0.1)
-
-                request_token = captured_request_token[0]
-                if not request_token:
-                    err_text = await self._read_visible_error(page)
-                    final_url_snip = (page.url or "")[:200]
-                    shot_path: str | None = None
+                    await page.wait_for_timeout(500)
+                if "callback" in seen:
+                    for _ in range(20):  # ~10 s
+                        if "done" in seen or "error" in seen:
+                            break
+                        await page.wait_for_timeout(500)
+                else:
+                    # Still on Kite — a wrong password / TOTP shows its text here.
                     try:
-                        ts = int(time.time())
-                        shot_path = f"/tmp/zerodha_totp_fail_{ts}.png"
-                        await page.screenshot(path=shot_path, full_page=True)
-                        logger.warning(
-                            "zerodha_auto_login_totp_fail_screenshot",
-                            extra={"path": shot_path, "url": final_url_snip},
-                        )
+                        kite_text = " ".join((await page.inner_text("body")).split())[:200]
                     except Exception:
-                        shot_path = None
-                    msg = (
-                        f"Kite never issued a request_token. "
-                        f"Page URL: {final_url_snip}"
-                    )
-                    if err_text:
-                        msg += f" | Kite said: {err_text}"
-                    if shot_path:
-                        msg += f" | screenshot: {shot_path}"
-                    raise AutoLoginError(msg, stage="totp_submit")
-
-                # ── Stage: exchange via the existing service ────
-                from app.services.zerodha_service import zerodha as _zerodha
-
-                try:
-                    result = await _zerodha.generate_session(
-                        request_token, account_index=account_index
-                    )
-                    access = (
-                        result.get("accessToken") if isinstance(result, dict)
-                        else None
-                    )
-                except Exception as exc:
-                    # Layer 3 — race fallback. If our generate_session lost
-                    # to the server-side /callback (which consumed the
-                    # request_token first), accept the freshly-saved
-                    # ZerodhaSettings.accessToken as success.
-                    msg_lower = str(exc).lower()
-                    looks_token_used = (
-                        ("invalid" in msg_lower and ("token" in msg_lower or "request" in msg_lower))
-                        or "checksum" in msg_lower
-                    )
-                    if looks_token_used:
-                        zs = await ZerodhaSettings.find_one(
-                            ZerodhaSettings.account_index == account_index
-                        )
-                        if zs and zs.accessToken and zs.lastConnected:
-                            try:
-                                last = zs.lastConnected
-                                if last.tzinfo is None:
-                                    from datetime import timezone as _tz
-
-                                    last = last.replace(tzinfo=_tz.utc)
-                                fresh_sec = (now_utc() - last).total_seconds()
-                            except Exception:
-                                fresh_sec = 999_999
-                            if fresh_sec < 60:
-                                logger.info(
-                                    "zerodha_auto_login_token_refreshed_by_server_callback",
-                                    extra={"fresh_sec": fresh_sec},
-                                )
-                                return str(zs.accessToken)
-                    raise AutoLoginError(
-                        f"Kite generate_session failed: {exc}",
-                        stage="session",
-                    ) from exc
-
-                if not access:
-                    raise AutoLoginError(
-                        "Kite did not return an access_token",
-                        stage="session",
-                    )
-                return str(access)
+                        pass
             finally:
                 try:
                     await browser.close()
                 except Exception:
                     pass
 
-    # ── Small Playwright helpers ───────────────────────────────────
-    async def _fill_first(self, page, selectors: list[str], value: str) -> None:
-        last_exc: Exception | None = None
-        for sel in selectors:
-            try:
-                el = await page.query_selector(sel)
-                if el is not None:
-                    await el.fill(value)
-                    return
-            except Exception as exc:
-                last_exc = exc
-        raise RuntimeError(
-            f"no selector matched: {selectors!r} ({last_exc})"
+        if "callback" not in seen:
+            raise AutoLoginError(
+                f"Kite never redirected to /callback. Kite page: "
+                f"{kite_text or '(empty)'} — check the password / TOTP secret, "
+                "and that the Kite app's redirect URL is this backend's "
+                f"{_CALLBACK_PATH}.",
+                stage="redirect",
+            )
+        if "error" in seen:
+            raise AutoLoginError(
+                f"/callback rejected the login: {seen['error']}", stage="session"
+            )
+
+        # /callback stamps lastConnected right after the exchange, then warms
+        # the instrument cache before redirecting — so the DB is the source of
+        # truth, scoped to THIS account.
+        for _ in range(20):  # ~20 s
+            s = await zerodha._get_settings(account_index)
+            last = _ensure_aware_utc(s.lastConnected)
+            if s.accessToken and last is not None and last >= run_start:
+                return s.accessToken
+            await asyncio.sleep(1)
+        raise AutoLoginError(
+            "Kite redirected to /callback but no fresh session was saved for "
+            "this account — check the backend logs for zerodha_callback_failed.",
+            stage="session",
         )
-
-    async def _read_visible_error(self, page) -> str | None:
-        try:
-            loc = page.locator(
-                '.error, .alert, [class*="invalid"], [class*="error"]'
-            ).first
-            if await loc.is_visible(timeout=500):
-                txt = (await loc.text_content()) or ""
-                return txt.strip()[:200] or None
-        except Exception:
-            return None
-        return None
-
-    @staticmethod
-    def _extract_request_token(url: str) -> str | None:
-        try:
-            qs = parse_qs(urlparse(url).query)
-            tok = qs.get("request_token") or []
-            return tok[0] if tok else None
-        except Exception:
-            return None
 
     # ── Scheduler helpers ──────────────────────────────────────────
     async def is_enabled(self, account_index: int = 0) -> bool:

@@ -497,7 +497,13 @@ class ZerodhaService:
         if not s.apiKey:
             label = "Account B" if account_index == 1 else "primary account"
             raise RuntimeError(f"Zerodha API key not configured for {label}")
-        return f"https://kite.zerodha.com/connect/login?v=3&api_key={s.apiKey}"
+        # Both accounts share one redirect URL, so Kite must echo the account
+        # back — otherwise /callback defaults to account 0 and exchanges
+        # Account B's request_token with Account A's secret.
+        return (
+            f"https://kite.zerodha.com/connect/login?v=3&api_key={s.apiKey}"
+            f"&redirect_params=account%3D{account_index}"
+        )
 
     async def generate_session(self, request_token: str, account_index: int = 0) -> dict[str, Any]:
         """Exchange request_token for access_token (called by /callback)."""
@@ -544,21 +550,37 @@ class ZerodhaService:
         # callback returns instantly even when the WS connect needs the
         # full ~3 minute back-off (it converges in the background, and
         # the self-heal loop below keeps trying after that).
-        if account_index == 0:
-            try:
-                asyncio.create_task(self._login_auto_connect())
-            except Exception:
-                logger.exception("zerodha_post_login_ws_kickoff_failed")
+        #
+        # The WS pool lives only on the feed leader. /callback lands on
+        # whichever HTTP worker nginx picked, and a socket opened there has no
+        # self-heal and double-publishes ticks — so a non-leader hands the
+        # reconnect to the leader's failover command listener instead.
+        from app.services import market_data_service as _mds
+
+        if _mds.is_feed_leader():
+            self._kick_ws_after_login(account_index, s.apiKey, access)
         else:
-            # Account B: spawn a dedicated WS slot with Account B's own credentials.
-            # _login_auto_connect() only reconnects Account A's pool, so we bypass
-            # it here and directly add Account B as a new connection in the pool.
             try:
-                asyncio.create_task(self._account_b_ws_connect(s.apiKey, access))
+                await publish(
+                    FAILOVER_CMD_CHANNEL,
+                    {"action": "reconnect", "account": account_index},
+                )
             except Exception:
-                logger.exception("zerodha_account_b_ws_kickoff_failed")
+                logger.exception("zerodha_post_login_reconnect_publish_failed")
 
         return {"accessToken": access, "tokenExpiry": s.tokenExpiry}
+
+    def _kick_ws_after_login(self, account_index: int, api_key: str, access_token: str) -> None:
+        """Fire-and-forget WS (re)connect for the account that just logged in."""
+        try:
+            if account_index == 0:
+                asyncio.create_task(self._login_auto_connect())
+            else:
+                # Account B gets its own slot — _login_auto_connect() only
+                # rebuilds Account A's pool.
+                asyncio.create_task(self._account_b_ws_connect(api_key, access_token))
+        except Exception:
+            logger.exception("zerodha_post_login_ws_kickoff_failed")
 
     async def _login_auto_connect(self) -> None:
         """Kicks off the retry-aware WS connect after a fresh login. Runs
@@ -3006,6 +3028,22 @@ class ZerodhaService:
                             except Exception:
                                 logger.warning(
                                     "zerodha_failover_cmd_disconnect_failed",
+                                    exc_info=True,
+                                )
+                        elif data.get("action") == "reconnect":
+                            # A login finished on another worker (/callback):
+                            # bring THAT account's socket up on the fresh token.
+                            try:
+                                acct = int(data.get("account"))
+                                if acct in (0, 1):
+                                    s = await self._get_settings(acct)
+                                    if s.apiKey and s.accessToken:
+                                        self._kick_ws_after_login(
+                                            acct, s.apiKey, s.accessToken
+                                        )
+                            except Exception:
+                                logger.warning(
+                                    "zerodha_failover_cmd_reconnect_failed",
                                     exc_info=True,
                                 )
                     backoff = 1.0

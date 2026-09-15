@@ -156,12 +156,19 @@ screenshot it, don't email it, don't paste it into general notes apps.
 
 ### 3.3 Test the login
 
+First, in the Kite developer console, set each account's app **Redirect URL**
+to exactly the URL the Zerodha page shows, e.g.
+`https://api.<domain>/api/v1/admin/zerodha/callback`. Account A and B use the
+same URL: the login URL sends `redirect_params=account=N`, so `/callback`
+exchanges the token with the right account's API secret.
+
 Before enabling the daily scheduler, do a manual test:
 
-1. Click **Test login now**
-2. Watch the status card. After 10–25 seconds you'll see one of:
-   - ✅ `Login successful in XX.X s` → all good, proceed
-   - ❌ `Login failed at "stage_name": …` → check the troubleshooting section below
+1. Click **Test login now**. It is queued and runs on the feed-leader
+   process (the one that owns the Kite WS pool) within ~30 s.
+2. Watch the status card, which polls every 3 s for 2 minutes. After ~30–60 s you'll see one of:
+   - ✅ **Last attempt: Success** → all good, proceed
+   - ❌ **Last run failed at "stage_name": …** → check the troubleshooting section below
 
 ### 3.4 Set the schedule + enable
 
@@ -175,58 +182,31 @@ Status pill turns green: "Enabled". Done.
 
 ---
 
-## 4. WebSocket safety guarantees
+## 4. How a login runs (safe for both accounts)
 
-Auto-login is wired so the existing KiteTicker pool stays healthy across
-the daily token refresh. The flow is:
-
-1. `refresh_now()` acquires a Redis SETNX lock (`zerodha_auto_login:refresh_lock`, 5 min TTL) — prevents two workers from running the browser simultaneously
-2. Sets `zerodha._self_heal_paused = True` — pauses the 30-s self-heal loop so it doesn't race the new login
-3. Calls `await zerodha.disconnect_ws()` — explicitly tears down every existing `KiteTicker` connection on the OLD token (clean `Connection.close()` + 403-resilient ticker map cleanup)
-4. Runs the Playwright login → gets the new `request_token` via 3-layer capture (`page.on("request")` observer + `page.route()` abort + DB freshness fallback)
-5. Calls the existing `zerodha.generate_session(request_token)` — saves the new access_token to `ZerodhaSettings` AND triggers `_post_login_ws_kickoff` which spawns a fresh ticker pool on the new token
-6. Always (`finally:`) re-arms `zerodha._self_heal_paused = False` — even on partial failure, the 30-s self-heal loop can recover from there
-7. Releases the Redis lock
-
-This means even if step 5 raises an exception, the next 30-s self-heal
-tick will see no live ticker and call `connect_ws(force=True)` to bring
-it back. The token refresh is idempotent — Kite tolerates multiple
-`generate_session` calls fine.
-
-### What protects against the KiteTicker 403 storm
-
-Kite allows ONLY ONE WebSocket per access token. When we issue a new
-token, every old WS instance gets a 403 close. The existing
-`on_close` handler in `zerodha_service.py:1326-1360` already prunes
-zombie entries on 403/1006, so the old tickers vanish cleanly without
-leaving stale entries in `_token_to_ws`.
-
-Our `disconnect_ws()` call in step 3 short-circuits that — old connections
-close BEFORE the new token exists, so the prune path is never even hit.
-
-### What protects against Twisted/asyncio bridging
-
-The `KiteTicker.on_ticks` callback runs in Twisted's reactor thread.
-The existing `zerodha_service.py:1401-1407` already handles this with
-`asyncio.run_coroutine_threadsafe(publish(...), self._main_loop)`. We
-don't touch this path. Auto-login only adds REST-side calls; the WS
-tick stream is unaffected.
+1. Only the feed-leader process runs logins. The daily scheduler lives there, and **Test login now** just queues a Redis flag (`zerodha_auto_login:run_now:<account>`) that the scheduler claims.
+2. `refresh_now()` takes a per-account Redis SETNX lock (`zerodha_auto_login:refresh_lock:<account>`, 5 min TTL). It pauses self-heal for the run so the token probe can't clear the token being refreshed. It does **not** tear the WS pool down, so the other account's feed keeps streaming.
+3. Headless Chromium logs in to Kite (user id → password → TOTP) and follows Kite's redirect to `/api/v1/admin/zerodha/callback?request_token=…&account=N`.
+4. `/callback` does the **only** exchange of the single-use `request_token` (`generate_session`, with that account's API secret) and saves the token. The old design also exchanged it inside the login flow, so one of the two always failed with "Token is invalid or has expired".
+5. The login counts as successful when that account's `lastConnected` is stamped after the run started. The token value can't be used for this, because Kite repeats it on a same-day re-login.
+6. The WS reconnect happens on the feed leader, for the logged-in account only: Account A → `connect_ws(force=True)`, Account B → its own slot. If `/callback` landed on another worker, it publishes `{"action": "reconnect"}` on `zerodha:failover:cmd` instead of opening a socket there.
+7. `finally:` re-arms self-heal and releases the lock.
 
 ---
 
 ## 5. Daily scheduler behavior
 
-- Wakes every 60 s (cheap — just one Mongo find_one for `is_enabled`)
-- Fires the login only when:
+- Runs on the feed-leader process, wakes every 30 s, and checks Account A and B independently
+- First claims any queued **Test login now** for the account (runs even when the schedule is disabled)
+- Fires the daily login only when:
   - `is_enabled == True` (admin toggled on)
-  - Current IST time within 60 s of `schedule_time_ist`
-  - Not a weekend (Sat=5, Sun=6)
-  - Not an Indian trading holiday (`TradingHoliday` collection)
-  - This worker won the `zerodha_auto_login:scheduler_leader` lock (10 min TTL)
+  - Current IST time is from 2 min before to 50 min after `schedule_time_ist` (all 7 days)
+  - The scheduler hasn't already fired for this account today (DB `last_attempt_at` with `last_attempt_source == "scheduler"`, so restarts don't double-fire)
+  - This worker won the `zerodha_auto_login:scheduler_leader` lock (30 min TTL)
 - Retries up to 3× with 5 min gap between attempts on failure
+- For Account A it then verifies A's own socket connected (→ WS reconnect → one more full login)
 - After all retries exhausted: dispatches a `NotificationLevel.DANGER`
   Notification to every super-admin so they get the bell-icon alert
-- Records `last_fired_iso_date` in-memory to prevent double-fire on the same day
 
 ---
 
@@ -242,16 +222,10 @@ to root causes:
 | `import` | `playwright` package not installed OR `playwright install chromium` not run on this host | Re-run section 2.3 + 2.4 with the correct backend user |
 | `navigate` | Kite login URL did not load in 20s | Server's outbound HTTP to `kite.zerodha.com` is broken — check firewall / DNS |
 | `userid` | Username/password form not interactive | Kite changed their login page; selectors need updating in `zerodha_auto_login.py:_run_login_flow` |
-| `password` | Kite showed a wrong-password error banner | The saved password is incorrect or your Kite account is locked |
-| `totp_page` | TOTP screen didn't appear after username/password | Likely wrong password (Kite shows error before TOTP) — overlaps with `password` stage |
-| `totp_submit` | TOTP code rejected OR no redirect | Most common cause: **server clock drift > 30s**. Check `timedatectl status` — `System clock synchronized: yes` must show. Less common: TOTP secret in DB differs from Authy (re-save them together) |
-| `redirect` | Never landed on /callback | Kite OAuth callback URL in your Kite app settings doesn't match your `ZerodhaSettings.redirectUrl` |
-| `session` | `generate_session()` REST call to Kite failed | Token race — usually self-recovers via the layer-3 fallback. If consistent, check Kite API secret |
+| `totp_page` | No 2FA input found | Kite UI changed — update `_TOTP_SELECTORS` in `zerodha_auto_login.py` |
+| `redirect` | Kite never sent the browser to /callback (Kite's page text is in the error) | Wrong password or TOTP secret; **server clock drift > 30 s** (`timedatectl status` must show `System clock synchronized: yes`); or the Kite app's redirect URL ≠ this backend's `/api/v1/admin/zerodha/callback` |
+| `session` | /callback rejected the token (reason in the error) or saved no fresh session | Wrong API secret for that account; otherwise look for `zerodha_callback_failed` in the logs |
 | `lock` | Another auto-login is already in progress | Wait 5 min; lock auto-expires |
-
-Screenshots on TOTP failure are saved to `/tmp/zerodha_totp_fail_*.png`
-on Linux (configurable in `_run_login_flow`). SSH in and download to
-diagnose UI changes.
 
 ### Clock sync check
 
@@ -274,13 +248,12 @@ sudo systemctl restart systemd-timesyncd
 sudo journalctl -u saudasaacha-backend -f | grep -E 'zerodha_auto_login|zerodha_scheduler|callback'
 ```
 
-You should see, in order:
+You should see, in order (on the feed-leader worker):
 ```
-zerodha_auto_login_callback_seen
-zerodha_auto_login_callback_aborted
-... access_token saved ...
-zerodha_post_login_ws_kickoff_failed   # only if WS already alive — ignore
-zerodha_WS-1_connected                  # fresh ticker on new token
+zerodha_auto_login_success
+zerodha_scheduler_test_login_result   # manual test only
+zerodha_ws_pool_started               # fresh socket on the new token (Account A)
+zerodha_account_b_ws_spawned          # Account B
 ```
 
 ---

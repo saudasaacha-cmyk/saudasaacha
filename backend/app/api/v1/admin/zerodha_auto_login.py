@@ -166,17 +166,21 @@ async def test_now(
     admin: SuperAdmin,
     account: int = Query(default=0, ge=0, le=1),
 ) -> dict:
+    """Queue a one-off login. The feed leader's scheduler runs it within
+    ~30 s, so the fresh token and the ticker reconnect happen on the process
+    that owns the WS pool — not in this API worker. Poll GET for the outcome."""
     await _enforce_rate_limit(
         request=request, bucket="test", max_count=10, window_sec=3600
     )
-    result = await zerodha_auto_login.refresh_now(
-        account_index=account,
-        actor_id=admin.id,
-        ip_address=request.client.host if request.client else None,
-        triggered_by="manual",
-    )
+    try:
+        await zerodha_auto_login.queue_test(account, actor_id=admin.id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not queue the test login (Redis unavailable?): {exc}",
+        ) from exc
     return {
         "success": True,
-        "result": result,
+        "queued": True,
         "status": await zerodha_auto_login.get_status(account),
     }
