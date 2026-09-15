@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { cn, formatINR } from "@/lib/utils";
 import { playBuyTone, playSellTone } from "@/lib/trade-audio";
 import { isInstrumentMarketOpen, marketLabel } from "@/lib/marketHours";
-import { TickFlash } from "@/components/trading/TickFlash";
 
 interface Props {
   instrument: any;
@@ -1117,9 +1116,7 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
             )}
           >
             <span className="text-[10px] font-semibold uppercase tracking-wider text-sell">SELL</span>
-            <TickFlash value={sellPrice} className="px-1 font-tabular text-sm font-semibold">
-              {fmtPrice(sellPrice)}
-            </TickFlash>
+            <span className="px-1 font-tabular text-sm font-semibold">{fmtPrice(sellPrice)}</span>
           </button>
           <button
             type="button"
@@ -1132,9 +1129,7 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
             )}
           >
             <span className="text-[10px] font-semibold uppercase tracking-wider text-buy">BUY</span>
-            <TickFlash value={buyPrice} className="px-1 font-tabular text-sm font-semibold">
-              {fmtPrice(buyPrice)}
-            </TickFlash>
+            <span className="px-1 font-tabular text-sm font-semibold">{fmtPrice(buyPrice)}</span>
           </button>
         </div>
 
