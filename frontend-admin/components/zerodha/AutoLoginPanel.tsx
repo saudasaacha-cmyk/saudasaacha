@@ -338,8 +338,9 @@ export function AutoLoginPanel({ account = 0 }: { account?: number }) {
           </Button>
         </div>
         <p className="text-[10px] text-muted-foreground">
-          Kite tokens expire at 08:00 IST. Default 07:00 gives a 1-hour
-          buffer + retries before the 09:15 market open.
+          The token is treated as expired at 07:00 IST (Kite flushes it around
+          06:00) and self-heal logs in again then. A schedule like 07:15 is the
+          backup run, with retries before the 09:15 market open.
         </p>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-3">

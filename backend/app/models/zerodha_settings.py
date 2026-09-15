@@ -1,7 +1,7 @@
 """Zerodha Kite Connect integration settings — single-row collection.
 
-Stores admin-supplied API credentials, the day's access token (Kite tokens
-expire at 08:00 IST every day), enabled segments, and the list of subscribed
+Stores admin-supplied API credentials, the day's access token (Kite flushes
+it ~06:00 IST; the app treats it as expired at 07:00 IST), enabled segments, and the list of subscribed
 instruments that the WebSocket ticker is following.
 """
 

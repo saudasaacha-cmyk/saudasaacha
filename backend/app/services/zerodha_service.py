@@ -40,15 +40,17 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 def _next_kite_expiry_utc() -> datetime:
-    """Kite access tokens expire at 08:00 IST every day.
+    """When the app treats a fresh Kite token as expired: TOMORROW 07:00 IST.
 
-    A fresh token is valid until TOMORROW 08:00 IST regardless of when
-    generated. Old logic returned TODAY 08:00 for pre-8AM logins (e.g.
-    07:02 → expiry in 58 min), causing immediate "token expired" status.
+    Kite itself flushes access tokens at ~06:00 IST (regulatory). At 07:00
+    self-heal clears the token and triggers auto-login, so a scheduled
+    auto-login (e.g. 07:15) is the backup before the 09:15 open. Always
+    tomorrow regardless of when generated — returning TODAY for pre-07:00
+    logins caused an immediate "token expired" status.
     """
     now_ist = datetime.now(IST)
     tomorrow = now_ist + timedelta(days=1)
-    target = tomorrow.replace(hour=8, minute=0, second=0, microsecond=0)
+    target = tomorrow.replace(hour=7, minute=0, second=0, microsecond=0)
     return target.astimezone(timezone.utc)
 
 
@@ -419,7 +421,7 @@ class ZerodhaService:
             s.isConnected = False
             s.wsStatus = WsStatus.DISCONNECTED
             await s.save()
-            raise RuntimeError("Zerodha token has expired (08:00 IST daily). Re-authenticate.")
+            raise RuntimeError("Zerodha token has expired (07:00 IST daily). Re-authenticate.")
         return self._kite(s.apiKey, s.accessToken), s
 
     async def probe_and_clear_invalid_token(self) -> bool:

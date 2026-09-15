@@ -519,7 +519,7 @@ export default function ZerodhaConnectPage() {
           <div>
             <div className="font-semibold text-destructive">{accountLabel} token expired</div>
             <div className="text-xs text-muted-foreground">
-              Kite access tokens roll over at 08:00 IST every day. Click <strong>Login {accountLabel}</strong> above to refresh.
+              Kite access tokens are treated as expired at 07:00 IST every day. Click <strong>Login {accountLabel}</strong> above to refresh.
             </div>
           </div>
         </div>
@@ -671,7 +671,7 @@ export default function ZerodhaConnectPage() {
         <Card>
           <CardHeader>
             <CardTitle>Status</CardTitle>
-            <CardDescription>Token rotates daily at 08:00 IST.</CardDescription>
+            <CardDescription>Token rotates daily at 07:00 IST.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <Row
