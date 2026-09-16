@@ -44,6 +44,12 @@ _CONNECT_TIMEOUT_SEC = 90
 # Heartbeat so the panel can tell "connecting" from "feed process is down".
 _STATUS_HEARTBEAT_SEC = 10
 
+# MetaApi rate-limits subscribe/synchronize per account. A failed sync gets a
+# much slower ladder than an ordinary connection error, because hammering it
+# every minute is what keeps the account throttled.
+_SYNC_BACKOFF_BASE_SEC = 60
+_SYNC_BACKOFF_MAX_SEC = 900
+
 # The broker's full symbol universe, published by the feed process so the API
 # workers can search it without opening their own MetaAPI connection.
 METAAPI_BROKER_SYMBOLS_KEY = "metaapi:broker_symbols"
@@ -668,15 +674,30 @@ class MetaApiFeed:
 
     async def _run_loop(self) -> None:
         backoff = 2
+        sync_failures = 0
         while not self._stop:
             try:
                 await self._connect_once()
                 backoff = 2
+                sync_failures = 0
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001
                 self._last_error = str(e)[:300]
                 logger.warning("metaapi_error: %s", e)
+                # A sync that times out is usually MetaApi throttling us:
+                # their docs rate-limit subscribe/synchronize per account, and
+                # retrying every minute for an hour keeps the account pinned
+                # in that state. Ordinary connection errors keep the quick
+                # ladder; sync timeouts back off to a quarter of an hour.
+                if "synchroniz" in str(e).lower() or "timed out" in str(e).lower():
+                    sync_failures += 1
+                    backoff = min(_SYNC_BACKOFF_BASE_SEC * (2 ** (sync_failures - 1)), _SYNC_BACKOFF_MAX_SEC)
+                    logger.warning(
+                        "metaapi_sync_backoff next_try_in_sec=%d consecutive=%d",
+                        backoff,
+                        sync_failures,
+                    )
             finally:
                 self._connected = False
                 await self._publish_status()
