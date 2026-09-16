@@ -627,17 +627,36 @@ class MetaApiFeed:
         except Exception:
             logger.debug("metaapi_status_loop_failed", exc_info=True)
 
+    async def _teardown_client(self) -> None:
+        """Close the streaming connection AND the MetaApi client.
+
+        Closing only the connection leaves the client's websocket and its
+        subscription jobs running. Each reconnect then built another one, and
+        after an hour of retries the account had dozens of clients all trying
+        to subscribe — MetaApi answered every sync with a timeout even though
+        the terminal itself was CONNECTED.
+        """
+        try:
+            if self._conn is not None:
+                await self._conn.close()
+        except Exception:
+            logger.debug("metaapi_conn_close_failed", exc_info=True)
+        self._conn = None
+        try:
+            if self._api is not None:
+                # Sync method: schedules the socket close and stops the jobs.
+                self._api.close()
+        except Exception:
+            logger.debug("metaapi_client_close_failed", exc_info=True)
+        self._api = None
+
     async def stop(self) -> None:
         self._stop = True
         self._connected = False
         if self._status_task is not None:
             self._status_task.cancel()
             self._status_task = None
-        try:
-            if self._conn is not None:
-                await self._conn.close()
-        except Exception:
-            pass
+        await self._teardown_client()
         if self._task:
             self._task.cancel()
             try:
@@ -661,12 +680,7 @@ class MetaApiFeed:
             finally:
                 self._connected = False
                 await self._publish_status()
-                try:
-                    if self._conn is not None:
-                        await self._conn.close()
-                except Exception:
-                    pass
-                self._conn = None
+                await self._teardown_client()
             if self._stop:
                 break
             await asyncio.sleep(min(backoff, 60))
