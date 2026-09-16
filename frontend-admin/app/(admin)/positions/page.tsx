@@ -175,6 +175,17 @@ export default function AdminPositionsPage() {
   );
 }
 
+const FAST_CLOSE_SEC = 120;
+
+/** Seconds a closed position was held, or null when either end is missing. */
+function holdSeconds(row: any): number | null {
+  const a = parseDate(row?.opened_at);
+  const b = parseDate(row?.closed_at);
+  if (!a || !b) return null;
+  const sec = Math.floor((b.getTime() - a.getTime()) / 1000);
+  return sec >= 0 ? sec : null;
+}
+
 function AdminPositionsInner() {
   const qc = useQueryClient();
   const me = useAdminAuthStore((s) => s.admin);
@@ -207,6 +218,10 @@ function AdminPositionsInner() {
   // Type filter — one dropdown that narrows by PRODUCT (NRML/MIS/CNC) or by
   // ORDER TYPE (MARKET/LIMIT/SL_M). "ALL" = no filter.
   const [typeFilter, setTypeFilter] = useState("ALL");
+  // Fast-close filter (CLOSED tab) — seconds, or "ALL". Trades closed inside
+  // FAST_CLOSE_SEC are highlighted even when the filter is off, so a scalping
+  // pattern is visible while scrolling the normal book.
+  const [holdFilter, setHoldFilter] = useState("ALL");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   // Closed-tab date filter (IST YYYY-MM-DD). Empty → backend default window
@@ -252,7 +267,7 @@ function AdminPositionsInner() {
     queryKey: [
       "admin", "positions", "CLOSED", queryUserId,
       page, pageSize, debouncedSearch, serverProduct ?? "",
-      fromDate, toDate,
+      fromDate, toDate, holdFilter,
       closedFifoMode ? "fifo" : "agg",
     ],
     queryFn: () =>
@@ -271,6 +286,7 @@ function AdminPositionsInner() {
             product: serverProduct,
             from_date: fromDate || undefined,
             to_date: toDate || undefined,
+            max_hold_sec: holdFilter === "ALL" ? undefined : Number(holdFilter),
             own_scope: ownScope,
           }),
     refetchInterval: tab === "closed" ? 30000 : false,
@@ -1023,14 +1039,25 @@ function AdminPositionsInner() {
             key: "holding_time",
             header: "Holding Time",
             align: "right" as const,
-            render: (r: any) => (
-              <span
-                className="whitespace-nowrap font-tabular text-muted-foreground"
-                title={r.closed_at ?? undefined}
-              >
-                {fmtHoldingTime(r.opened_at, r.closed_at)}
-              </span>
-            ),
+            render: (r: any) => {
+              const sec = holdSeconds(r);
+              const fast = sec !== null && sec < FAST_CLOSE_SEC;
+              return (
+                <span
+                  className={cn(
+                    "whitespace-nowrap font-tabular",
+                    fast ? "font-semibold text-atm" : "text-muted-foreground",
+                  )}
+                  title={
+                    fast
+                      ? `Closed within ${FAST_CLOSE_SEC / 60} min of opening`
+                      : (r.closed_at ?? undefined)
+                  }
+                >
+                  {fmtHoldingTime(r.opened_at, r.closed_at)}
+                </span>
+              );
+            },
           },
         ]
       : []),
@@ -1406,6 +1433,23 @@ function AdminPositionsInner() {
             <option value="LIMIT">Limit orders</option>
             <option value="SL_M">SL-M orders</option>
           </select>
+          {/* Fast-close filter — server-side, because the closed book is paginated. */}
+          {tab === "closed" && (
+            <select
+              value={holdFilter}
+              onChange={(e) => {
+                setHoldFilter(e.target.value);
+                setPage(1);
+              }}
+              className="h-9 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+              aria-label="Filter by holding time"
+            >
+              <option value="ALL">Any holding time</option>
+              <option value="120">Closed under 2 min</option>
+              <option value="300">Closed under 5 min</option>
+              <option value="900">Closed under 15 min</option>
+            </select>
+          )}
         </div>
 
         <div className="relative w-full sm:w-72">
@@ -1448,13 +1492,15 @@ function AdminPositionsInner() {
           // across the full card width (operator: "bahut gap hai").
           tableClassName="w-max"
           onRowClick={(r: any) => setNettingId(String(r.id))}
-          rowClassName={(r) =>
-            tab === "open" && Number(r.unrealized_pnl) < -Number(r.margin_used) * 0.5
-              ? "bg-destructive/5"
-              : tab === "open" && Number(r.unrealized_pnl) < -Number(r.margin_used) * 0.25
-                ? "bg-atm/5"
-                : undefined
-          }
+          rowClassName={(r) => {
+            if (tab === "closed") {
+              const sec = holdSeconds(r);
+              return sec !== null && sec < FAST_CLOSE_SEC ? "bg-atm/10" : undefined;
+            }
+            if (Number(r.unrealized_pnl) < -Number(r.margin_used) * 0.5) return "bg-destructive/5";
+            if (Number(r.unrealized_pnl) < -Number(r.margin_used) * 0.25) return "bg-atm/5";
+            return undefined;
+          }}
         />
       </div>
 

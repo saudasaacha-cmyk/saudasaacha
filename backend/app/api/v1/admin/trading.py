@@ -644,6 +644,12 @@ async def list_positions(
     product: str | None = None,
     from_date: str | None = Query(default=None, description="IST YYYY-MM-DD; CLOSED tab lower bound (closed_at)"),
     to_date: str | None = Query(default=None, description="IST YYYY-MM-DD; CLOSED tab upper bound (closed_at)"),
+    max_hold_sec: int | None = Query(
+        default=None,
+        ge=1,
+        le=86400,
+        description="CLOSED tab: only positions held at most this long (fast-close / scalp view)",
+    ),
     own_scope: bool = Query(default=False, description="SUPER_ADMIN only: restrict to the super-admin's OWN direct users (no admin's clients)"),
     page: int | None = Query(default=None, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
@@ -750,6 +756,27 @@ async def list_positions(
                     {"user_id": {"$in": [m.id for m in matched]}},
                     {"instrument.symbol": regex},
                 ]
+            }
+        )
+
+    # Fast-close view — "trades closed within N minutes". Mongo subtracts the
+    # two timestamps server-side because the CLOSED tab is paginated: filtering
+    # in the page would only narrow the 25 rows already fetched, not the book.
+    if max_hold_sec is not None:
+        and_clauses.append(
+            {
+                "$expr": {
+                    "$and": [
+                        {"$gt": ["$closed_at", None]},
+                        {"$gt": ["$opened_at", None]},
+                        {
+                            "$lte": [
+                                {"$subtract": ["$closed_at", "$opened_at"]},
+                                max_hold_sec * 1000,
+                            ]
+                        },
+                    ]
+                }
             }
         )
 
