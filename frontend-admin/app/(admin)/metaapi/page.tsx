@@ -52,6 +52,7 @@ export default function MetaApiPage() {
   const [accountId, setAccountId] = useState("");
   const [region, setRegion] = useState("");
   const [maxSymbols, setMaxSymbols] = useState("");
+  const [aliases, setAliases] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [filter, setFilter] = useState("");
 
@@ -62,6 +63,11 @@ export default function MetaApiPage() {
     setRegion(settings.region ?? "");
     setMaxSymbols(String(settings.max_symbols ?? 24));
     setSelected(settings.symbols ?? []);
+    setAliases(
+      Object.entries(settings.symbol_map ?? {})
+        .map(([platform, broker]) => `${platform}:${broker}`)
+        .join(", "),
+    );
   }, [settings]);
 
   // Broker symbol list is fetched on demand — it opens a connection upstream.
@@ -78,6 +84,7 @@ export default function MetaApiPage() {
         account_id: accountId.trim(),
         region: region.trim(),
         max_symbols: Number(maxSymbols) || undefined,
+        symbol_map: parseAliases(aliases),
       }),
     onSuccess: (next) => {
       qc.setQueryData(SETTINGS_KEY, next);
@@ -264,6 +271,23 @@ export default function MetaApiPage() {
               onChange={(e) => setMaxSymbols(e.target.value)}
             />
           </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="mt-aliases">
+              Symbol names at your broker (optional)
+            </Label>
+            <Input
+              id="mt-aliases"
+              autoComplete="off"
+              placeholder="SPX500:US500, USOIL:SPOTCRUDE, AAPL:AAPL.US"
+              value={aliases}
+              onChange={(e) => setAliases(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Use this when your broker names a symbol differently: our name
+              first, the broker&apos;s name after the colon. Load the symbol
+              list below to see the exact names.
+            </p>
+          </div>
           <div>
             <Button
               disabled={saveSettingsMut.isPending}
@@ -365,6 +389,18 @@ export default function MetaApiPage() {
       </Card>
     </div>
   );
+}
+
+/** "SPX500:US500, AAPL:AAPL.US" → { SPX500: "US500", AAPL: "AAPL.US" } */
+function parseAliases(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of text.split(/[\n,]/)) {
+    const [platform, broker] = part.split(":");
+    if (platform?.trim() && broker?.trim()) {
+      out[platform.trim().toUpperCase()] = broker.trim();
+    }
+  }
+  return out;
 }
 
 function Field({ label, value }: { label: string; value: string }) {

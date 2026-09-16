@@ -753,6 +753,7 @@ export const MetaApiAPI = {
     account_id?: string;
     region?: string;
     max_symbols?: number;
+    symbol_map?: Record<string, string>;
   }) =>
     api.put("/admin/metaapi/settings", body).then((r) => r.data?.settings as MetaApiSettings),
   status: () => api.get("/admin/metaapi/status").then((r) => r.data?.status as MetaApiStatus),

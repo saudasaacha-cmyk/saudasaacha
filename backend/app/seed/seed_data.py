@@ -199,6 +199,16 @@ async def seed_holidays() -> None:
     logger.info("seeded_holidays")
 
 
+async def seed_global_instruments() -> None:
+    """Forex / metals / energy / stocks / indices catalogue rows. Without
+    these the terminal's Stocks and Indices tabs are empty on a deployment
+    that gets its prices from MetaAPI rather than Infoway."""
+    from app.services.infoway_service import seed_default_instruments
+
+    created = await seed_default_instruments()
+    logger.info("seeded_global_instruments", extra={"created": created})
+
+
 async def run_seed() -> None:
     """Top-level idempotent seeder."""
     await seed_netting_and_risk()
@@ -208,4 +218,5 @@ async def run_seed() -> None:
     await seed_wd_rules()
     await seed_platform_settings()
     await seed_holidays()
+    await seed_global_instruments()
     logger.info("seed_complete")

@@ -818,81 +818,121 @@ def _classify_infoway_code(code: str) -> dict[str, Any]:
     }
 
 
-async def mirror_subscribed_to_instruments() -> int:
-    """Idempotent: insert/update an `Instrument` row for every Infoway code
-    we have subscribed to. User-side `/instruments/search` then finds
-    forex/crypto/metals/energy symbols just like Indian instruments."""
+async def upsert_instrument_for_code(code: str) -> bool:
+    """Insert or heal the catalogue row for one global symbol. Returns True
+    when a row was created. Shared by the Infoway mirror (symbols we happen to
+    be subscribed to) and the boot seed (symbols we always want listed)."""
     from bson import Decimal128
 
     from app.models._base import Exchange, InstrumentType
     from app.models.instrument import Instrument
+    from app.services.infoway_lots import get_infoway_lot_size
 
+    # Never mirror internal seed tokens (NSE_EQ_*, NSE_IDX_*, BSE_IDX_*,
+    # MCX_FUT_*, CRYPTO_*, FX_*) or junk codes ("UNDEFINED"). Real Infoway
+    # symbols are clean tickers (EURUSD, BTCUSDT, XAUUSD, AAPL) with no
+    # underscores. If such an internal token ever sneaks into a channel's
+    # subscribe set, mirroring it here would overwrite the legit seed row's
+    # segment with the FOREX fallback — exactly the corruption that filled
+    # the Forex tab with crypto / Indian stocks / indices.
+    if "_" in code or code == "UNDEFINED" or not code.strip():
+        return False
+    meta = _classify_infoway_code(code)
+    try:
+        ex = Exchange(meta["exchange"])
+    except ValueError:
+        return False
+    try:
+        it = InstrumentType(meta["instrument_type"])
+    except ValueError:
+        it = InstrumentType.SPOT
+
+    # Retail-CFD contract size by symbol. Forex → 100,000 base units
+    # per lot, spot gold → 100 troy oz, USOIL → 1,000 barrels, etc.
+    # Falls back to a per-segment default for unlisted symbols.
+    lot = get_infoway_lot_size(code, meta.get("segment"))
+
+    existing = await Instrument.find_one(Instrument.token == code)
+    if existing is None:
+        await Instrument(
+            token=code,
+            symbol=code,
+            trading_symbol=code,
+            name=meta["name"],
+            exchange=ex,
+            segment=meta["segment"],
+            instrument_type=it,
+            lot_size=lot,
+            tick_size=Decimal128("0.0001"),
+            is_active=True,
+            is_tradable=True,
+        ).insert()
+        return True
+    else:
+        existing.exchange = ex
+        existing.segment = meta["segment"]
+        existing.instrument_type = it
+        # Heal the display name too so rows mirrored before the friendly
+        # commodity names existed (e.g. "XAU/USD" → "Gold (XAU/USD)")
+        # become searchable by "GOLD" on the next mirror pass.
+        existing.name = meta["name"]
+        # Heal stored lot_size when it disagrees with the canonical
+        # value — legacy rows seeded before this table existed had
+        # `lot_size = 1` which silently understated notional /
+        # margin by 100,000× for a 1-lot forex order.
+        if int(existing.lot_size or 0) != lot:
+            existing.lot_size = lot
+        existing.is_active = True
+        existing.is_tradable = True
+        await existing.save()
+    return False
+
+
+async def mirror_subscribed_to_instruments() -> int:
+    """Idempotent: insert/update an `Instrument` row for every Infoway code
+    we have subscribed to. User-side `/instruments/search` then finds
+    forex/crypto/metals/energy symbols just like Indian instruments."""
     subs: set[str] = set()
     for ch in infoway._channels.values():
         subs |= ch._subscribed
-    codes = sorted(subs)
-
-    from app.services.infoway_lots import get_infoway_lot_size
 
     mirrored = 0
-    for code in codes:
-        # Never mirror internal seed tokens (NSE_EQ_*, NSE_IDX_*, BSE_IDX_*,
-        # MCX_FUT_*, CRYPTO_*, FX_*) or junk codes ("UNDEFINED"). Real Infoway
-        # symbols are clean tickers (EURUSD, BTCUSDT, XAUUSD, AAPL) with no
-        # underscores. If such an internal token ever sneaks into a channel's
-        # subscribe set, mirroring it here would overwrite the legit seed row's
-        # segment with the FOREX fallback — exactly the corruption that filled
-        # the Forex tab with crypto / Indian stocks / indices.
-        if "_" in code or code == "UNDEFINED" or not code.strip():
-            continue
-        meta = _classify_infoway_code(code)
-        try:
-            ex = Exchange(meta["exchange"])
-        except ValueError:
-            continue
-        try:
-            it = InstrumentType(meta["instrument_type"])
-        except ValueError:
-            it = InstrumentType.SPOT
-
-        # Retail-CFD contract size by symbol. Forex → 100,000 base units
-        # per lot, spot gold → 100 troy oz, USOIL → 1,000 barrels, etc.
-        # Falls back to a per-segment default for unlisted symbols.
-        lot = get_infoway_lot_size(code, meta.get("segment"))
-
-        existing = await Instrument.find_one(Instrument.token == code)
-        if existing is None:
-            await Instrument(
-                token=code,
-                symbol=code,
-                trading_symbol=code,
-                name=meta["name"],
-                exchange=ex,
-                segment=meta["segment"],
-                instrument_type=it,
-                lot_size=lot,
-                tick_size=Decimal128("0.0001"),
-                is_active=True,
-                is_tradable=True,
-            ).insert()
+    for code in sorted(subs):
+        if await upsert_instrument_for_code(code):
             mirrored += 1
-        else:
-            existing.exchange = ex
-            existing.segment = meta["segment"]
-            existing.instrument_type = it
-            # Heal the display name too so rows mirrored before the friendly
-            # commodity names existed (e.g. "XAU/USD" → "Gold (XAU/USD)")
-            # become searchable by "GOLD" on the next mirror pass.
-            existing.name = meta["name"]
-            # Heal stored lot_size when it disagrees with the canonical
-            # value — legacy rows seeded before this table existed had
-            # `lot_size = 1` which silently understated notional /
-            # margin by 100,000× for a 1-lot forex order.
-            if int(existing.lot_size or 0) != lot:
-                existing.lot_size = lot
-            existing.is_active = True
-            existing.is_tradable = True
-            await existing.save()
     if mirrored:
         logger.info("infoway_mirror_done", extra={"count": mirrored})
     return mirrored
+
+
+async def seed_default_instruments() -> int:
+    """Catalogue rows for the configured default forex / metals / energy /
+    stocks / indices symbols, whether or not Infoway is connected.
+
+    The terminal's Stocks and Indices tabs read the catalogue, and on a
+    MetaAPI-fed deployment Infoway never subscribes (so never mirrors) those
+    symbols — which left both tabs empty. Crypto is deliberately excluded: the
+    Indian seed already ships CRYPTO_SPOT rows (BTCUSD…), and adding Infoway's
+    USDT pairs on top would show the same coin twice.
+    """
+    sources = [
+        settings.INFOWAY_DEFAULT_FOREX or "",
+        getattr(settings, "INFOWAY_DEFAULT_METALS", "") or "",
+        getattr(settings, "INFOWAY_DEFAULT_ENERGY", "") or "",
+        getattr(settings, "INFOWAY_DEFAULT_STOCKS", "") or "",
+        getattr(settings, "INFOWAY_DEFAULT_INDICES", "") or "",
+    ]
+    created = 0
+    seen: set[str] = set()
+    for src in sources:
+        for raw in src.split(","):
+            code = raw.strip().upper()
+            if not code or code in seen:
+                continue
+            seen.add(code)
+            if await upsert_instrument_for_code(code):
+                created += 1
+    logger.info(
+        "default_instruments_seeded", extra={"created": created, "total": len(seen)}
+    )
+    return created
