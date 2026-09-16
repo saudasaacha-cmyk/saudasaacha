@@ -493,8 +493,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             try:
                 from app.services.metaapi_service import metaapi as _metaapi
 
-                if _run_global and _metaapi.is_enabled():
+                if _run_global:
+                    # start() self-skips when the admin panel / .env has it off.
                     await _metaapi.start()
+                    # Connect + disconnect come from the admin API on another
+                    # worker; the pool lives here, so listen for those commands.
+                    subtasks.append(
+                        _asyncio.create_task(
+                            _supervise("metaapi_cmd_listener", _metaapi.cmd_listener),
+                            name="metaapi_cmd_listener",
+                        )
+                    )
                     logger.info("metaapi_feed_auto_started")
             except Exception:
                 logger.exception("metaapi_feed_auto_start_failed")

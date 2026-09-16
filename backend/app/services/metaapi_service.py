@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 # mirrors infoway_service / binance_service spike guards.
 _MAX_TICK_SPIKE_PCT = 0.5
 
+# Cross-process control. The admin API answers on any HTTP worker, but the
+# feed only exists in the feed process: commands travel one way on this
+# channel, the live status snapshot comes back through the Redis key.
+METAAPI_CMD_CHANNEL = "metaapi:cmd"
+METAAPI_STATUS_KEY = "metaapi:status"
+
 
 def _f(v: Any, default: float = 0.0) -> float:
     try:
@@ -90,9 +96,99 @@ class MetaApiFeed:
         self._task: asyncio.Task[Any] | None = None
         self._stop = False
         self._last_rx = 0.0
+        self._last_error = ""
+        # Resolved config — admin row over .env. See load_config().
+        self._cfg: dict[str, Any] | None = None
+
+    # ── config: admin panel first, .env fallback ──────────────────────
+    async def _fetch_doc(self) -> Any:
+        """The single MetaApiSettings row, or None when it (or Mongo) is absent."""
+        try:
+            from app.models.metaapi_settings import MetaApiSettings
+
+            return await MetaApiSettings.find_one()
+        except Exception:
+            logger.debug("metaapi_settings_fetch_failed", exc_info=True)
+            return None
+
+    async def load_config(self) -> dict[str, Any]:
+        """Resolve the live config and cache it on the instance.
+
+        The admin row wins field by field; every field it leaves empty falls
+        back to the matching METAAPI_* env var, so a deployment that hasn't
+        been switched over to the admin panel keeps running unchanged.
+        """
+        doc = await self._fetch_doc()
+
+        token = ""
+        if doc is not None and getattr(doc, "encrypted_token", ""):
+            try:
+                from app.utils.crypto import decrypt
+
+                token = decrypt(doc.encrypted_token, doc.encrypted_token_iv)
+            except Exception:
+                logger.warning(
+                    "metaapi_token_decrypt_failed — ZERODHA_CREDS_KEY rotated? "
+                    "Re-save the token in the admin panel."
+                )
+        if not token:
+            try:
+                token = settings.METAAPI_TOKEN.get_secret_value()
+            except Exception:
+                token = ""
+
+        account_id = (getattr(doc, "account_id", "") or "") or (
+            getattr(settings, "METAAPI_ACCOUNT_ID", "") or ""
+        )
+        region = (getattr(doc, "region", "") or "") or (
+            getattr(settings, "METAAPI_REGION", "") or ""
+        )
+        enabled = (
+            bool(doc.enabled) if doc is not None
+            else bool(getattr(settings, "METAAPI_FEED", False))
+        )
+        max_symbols = int(getattr(doc, "max_symbols", 0) or 0) or int(
+            getattr(settings, "METAAPI_MAX_SYMBOLS", 24) or 24
+        )
+        alias = dict(getattr(doc, "symbol_map", {}) or {}) or self._resolve_alias()
+
+        symbols: list[str] = []
+        seen: set[str] = set()
+        raw_symbols = [
+            str(s).strip().upper() for s in (getattr(doc, "symbols", []) or []) if str(s).strip()
+        ] or self._resolve_symbols_from_env()
+        for s in raw_symbols:
+            if s not in seen:
+                seen.add(s)
+                symbols.append(s)
+        # Past the account cap MetaAPI rejects subscriptions and the SDK retries
+        # them forever (429 flood); the extras use the Infoway fallback instead.
+        if len(symbols) > max_symbols:
+            logger.warning(
+                "metaapi_symbols_capped from=%d to=%d", len(symbols), max_symbols
+            )
+            symbols = symbols[:max_symbols]
+
+        configured = bool(token) and bool(account_id)
+        self._cfg = {
+            "enabled": enabled and configured,
+            "configured": configured,
+            "token": token,
+            "account_id": account_id,
+            "region": region,
+            "symbols": symbols,
+            "alias": alias,
+            "max_symbols": max_symbols,
+            "source": "admin" if doc is not None else "env",
+        }
+        self._max_symbols = max_symbols
+        return self._cfg
 
     # ── public accessors ──────────────────────────────────────────────
     def is_enabled(self) -> bool:
+        """Cached view for boot checks and status; load_config() is the source."""
+        if self._cfg is not None:
+            return bool(self._cfg.get("enabled"))
         try:
             has_token = bool(settings.METAAPI_TOKEN.get_secret_value())
         except Exception:
@@ -109,13 +205,30 @@ class MetaApiFeed:
 
     def status(self) -> dict[str, Any]:
         now = time.time()
+        cfg = self._cfg or {}
         return {
             "enabled": self.is_enabled(),
+            "configured": bool(cfg.get("configured")),
             "connected": self._connected,
+            "account_id": cfg.get("account_id", ""),
+            "region": cfg.get("region", ""),
+            "source": cfg.get("source", ""),
             "symbols": self._symbols,
+            "max_symbols": self._max_symbols,
             "tick_count": len(self._state),
+            "last_error": self._last_error,
             "last_rx_age_sec": round(now - self._last_rx, 1) if self._last_rx else None,
         }
+
+    async def _publish_status(self) -> None:
+        """Mirror the status into Redis so the admin API can read it from any
+        worker — the feed itself only exists in this process."""
+        try:
+            from app.core.redis_client import cache_set
+
+            await cache_set(METAAPI_STATUS_KEY, self.status(), ttl_sec=20)
+        except Exception:
+            logger.debug("metaapi_status_publish_failed", exc_info=True)
 
     def _mt_symbol(self, sym: str) -> str:
         """Map a platform symbol to the MT broker's symbol (they can differ:
@@ -203,7 +316,7 @@ class MetaApiFeed:
         }
 
     # ── config ────────────────────────────────────────────────────────
-    def _resolve_symbols(self) -> list[str]:
+    def _resolve_symbols_from_env(self) -> list[str]:
         raw = (getattr(settings, "METAAPI_SYMBOLS", "") or "").strip()
         if not raw:
             # Default: reuse the Infoway forex / metals / energy / indices lists
@@ -221,13 +334,6 @@ class MetaApiFeed:
             if s and s not in seen:
                 seen.add(s)
                 out.append(s)
-        # Never seed more than the account's subscription cap — the remainder
-        # would only trigger 429 retry floods (see `_max_symbols`).
-        if len(out) > self._max_symbols:
-            logger.warning(
-                "metaapi_startup_symbols_capped from=%d to=%d", len(out), self._max_symbols
-            )
-            out = out[: self._max_symbols]
         return out
 
     def _resolve_alias(self) -> dict[str, str]:
@@ -244,17 +350,35 @@ class MetaApiFeed:
 
     # ── lifecycle ─────────────────────────────────────────────────────
     async def start(self) -> None:
-        if not self.is_enabled():
-            logger.info("metaapi_feed_skipped: METAAPI_FEED off or token/account missing")
+        cfg = await self.load_config()
+        if not cfg["enabled"]:
+            logger.info(
+                "metaapi_feed_skipped: disabled or token/account missing (source=%s)",
+                cfg["source"],
+            )
+            await self._publish_status()
             return
         _silence_sdk_loggers()
-        self._symbols = self._resolve_symbols()
-        self._alias = self._resolve_alias()
+        self._symbols = list(cfg["symbols"])
+        self._alias = dict(cfg["alias"])
         self._stop = False
+        self._last_error = ""
+        if self._task is not None and not self._task.done():
+            logger.info("metaapi_feed_already_running")
+            return
         self._task = asyncio.create_task(self._run_loop(), name="metaapi_feed")
         logger.info(
-            "metaapi_feed_started symbols=%d aliases=%d", len(self._symbols), len(self._alias)
+            "metaapi_feed_started symbols=%d aliases=%d source=%s",
+            len(self._symbols),
+            len(self._alias),
+            cfg["source"],
         )
+
+    async def restart(self) -> None:
+        """Apply freshly saved settings: stop, forget the cached config, start."""
+        await self.stop()
+        self._cfg = None
+        await self.start()
 
     async def subscribe(self, symbols: list[str]) -> None:
         """On-demand: ensure `symbols` are streamed by the MT terminal.
@@ -301,6 +425,7 @@ class MetaApiFeed:
 
     async def stop(self) -> None:
         self._stop = True
+        self._connected = False
         try:
             if self._conn is not None:
                 await self._conn.close()
@@ -312,6 +437,8 @@ class MetaApiFeed:
                 await self._task
             except (asyncio.CancelledError, Exception):
                 pass
+            self._task = None
+        await self._publish_status()
 
     async def _run_loop(self) -> None:
         backoff = 2
@@ -322,9 +449,11 @@ class MetaApiFeed:
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001
+                self._last_error = str(e)[:300]
                 logger.warning("metaapi_error: %s", e)
             finally:
                 self._connected = False
+                await self._publish_status()
                 try:
                     if self._conn is not None:
                         await self._conn.close()
@@ -339,9 +468,10 @@ class MetaApiFeed:
     async def _connect_once(self) -> None:
         from metaapi_cloud_sdk import MetaApi  # imported lazily so the dep is optional
 
-        token = settings.METAAPI_TOKEN.get_secret_value()
-        acc_id = settings.METAAPI_ACCOUNT_ID
-        region = (getattr(settings, "METAAPI_REGION", "") or "").strip()
+        cfg = self._cfg or await self.load_config()
+        token = cfg["token"]
+        acc_id = cfg["account_id"]
+        region = (cfg["region"] or "").strip()
 
         self._api = MetaApi(token, {"region": region}) if region else MetaApi(token)
         self._account = await self._api.metatrader_account_api.get_account(acc_id)
@@ -361,8 +491,10 @@ class MetaApiFeed:
         await self._conn.connect()
         await self._conn.wait_synchronized({"timeoutInSeconds": 60})
         self._connected = True
+        self._last_error = ""
         self._last_rx = time.monotonic()
         logger.info("metaapi_connected account=%s", acc_id)
+        await self._publish_status()
 
         _sub_count = 0
         for s in self._symbols:
@@ -381,12 +513,68 @@ class MetaApiFeed:
         # background. Bail out (→ reconnect) if it desynchronises.
         while not self._stop:
             await asyncio.sleep(5)
+            await self._publish_status()
             try:
                 if not getattr(self._conn, "synchronized", True):
                     logger.warning("metaapi_desynchronised_forcing_reconnect")
                     return
             except Exception:
                 return
+
+
+    async def cmd_listener(self) -> None:
+        """Run admin commands (connect / disconnect / resubscribe) published by
+        the API workers on `metaapi:cmd`. Started in the feed process only."""
+        import json
+
+        from app.core.redis_client import pubsub
+
+        backoff = 1.0
+        ps: Any = None
+        try:
+            while True:
+                try:
+                    if ps is None:
+                        ps = pubsub()
+                        await ps.subscribe(METAAPI_CMD_CHANNEL)
+                        logger.info("metaapi_cmd_listener_started")
+                    async for msg in ps.listen():
+                        if msg.get("type") != "message":
+                            continue
+                        raw = msg.get("data")
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8", "ignore")
+                        try:
+                            action = (json.loads(raw) or {}).get("action")
+                        except Exception:
+                            continue
+                        logger.info("metaapi_cmd_received action=%s", action)
+                        try:
+                            if action == "disconnect":
+                                await self.stop()
+                            elif action in ("connect", "resubscribe"):
+                                await self.restart()
+                        except Exception:
+                            logger.exception("metaapi_cmd_failed action=%s", action)
+                    backoff = 1.0
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning("metaapi_cmd_listener_error", exc_info=True)
+                    if ps is not None:
+                        try:
+                            await ps.close()
+                        except Exception:
+                            pass
+                        ps = None
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 30.0)
+        finally:
+            if ps is not None:
+                try:
+                    await ps.unsubscribe(METAAPI_CMD_CHANNEL)
+                except Exception:
+                    pass
 
 
 metaapi = MetaApiFeed()

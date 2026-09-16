@@ -718,6 +718,58 @@ export const ReportsAdminAPI = {
   },
 };
 
+export type MetaApiSettings = {
+  enabled: boolean;
+  has_token: boolean;
+  account_id: string;
+  region: string;
+  symbols: string[];
+  symbol_map: Record<string, string>;
+  max_symbols: number;
+  source: "admin" | "env" | "";
+};
+
+export type MetaApiStatus = {
+  enabled: boolean;
+  configured: boolean;
+  connected: boolean;
+  account_id: string;
+  region: string;
+  source: string;
+  symbols: string[];
+  max_symbols: number;
+  tick_count: number;
+  last_error: string;
+  last_rx_age_sec: number | null;
+  // false = the feed process hasn't reported recently (feed down / never started)
+  live: boolean;
+};
+
+export const MetaApiAPI = {
+  settings: () =>
+    api.get("/admin/metaapi/settings").then((r) => r.data?.settings as MetaApiSettings),
+  saveSettings: (body: {
+    token?: string;
+    account_id?: string;
+    region?: string;
+    max_symbols?: number;
+  }) =>
+    api.put("/admin/metaapi/settings", body).then((r) => r.data?.settings as MetaApiSettings),
+  status: () => api.get("/admin/metaapi/status").then((r) => r.data?.status as MetaApiStatus),
+  connect: () => api.post("/admin/metaapi/connect").then((r) => r.data?.status as MetaApiStatus),
+  disconnect: () =>
+    api.post("/admin/metaapi/disconnect").then((r) => r.data?.status as MetaApiStatus),
+  // Broker symbol list straight from the MT account (server caches 10 min).
+  brokerSymbols: (refresh = false) =>
+    api
+      .get("/admin/metaapi/symbols", { params: { refresh } })
+      .then((r) => r.data as { symbols: string[]; cached: boolean }),
+  saveSymbols: (symbols: string[]) =>
+    api
+      .put("/admin/metaapi/symbols", { symbols })
+      .then((r) => r.data as { settings: MetaApiSettings; status: MetaApiStatus }),
+};
+
 export const ZerodhaAPI = {
   status: (account = 0) =>
     api.get("/admin/zerodha/status", { params: { account } }).then((r) => (r.data?.status ?? r.data)),

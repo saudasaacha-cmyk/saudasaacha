@@ -95,6 +95,7 @@ def _document_models() -> list[type["Document"]]:
     from app.models.wallet import Wallet
     from app.models.push_subscription import PushSubscription
     from app.models.watchlist import Watchlist, WatchlistItem
+    from app.models.metaapi_settings import MetaApiSettings
     from app.models.zerodha_auto_login import ZerodhaAutoLogin
     from app.models.zerodha_feed_routing import ZerodhaFeedRouting
     from app.models.zerodha_settings import ZerodhaSettings
@@ -164,6 +165,7 @@ def _document_models() -> list[type["Document"]]:
         # Integrations
         ZerodhaSettings,
         ZerodhaAutoLogin,
+        MetaApiSettings,
         ZerodhaFeedRouting,
     ]
 
