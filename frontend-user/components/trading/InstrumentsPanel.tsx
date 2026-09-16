@@ -51,7 +51,6 @@ type Bucket = {
 const BUCKETS: Bucket[] = [
   // Core
   { key: "favorites", label: "Favorites", group: "core", mode: "watchlist" },
-  { key: "all", label: "All", group: "core", mode: "query", query: "" },
 
   // Asset-class groups — strictly Infoway-fed segments. Indian-market
   // equivalents (NSE EQ, BSE EQ, MCX FUT, …) get their own dedicated
@@ -135,7 +134,7 @@ export function InstrumentsPanel({ onClose }: Props) {
     () =>
       BUCKETS.filter((b) => {
         const rows = b.adminRows ?? [];
-        // Core (Favorites / All) buckets have no `adminRows` — always visible.
+        // Core (Favorites) buckets have no `adminRows` — always visible.
         if (rows.length === 0) return true;
         // Hide only when EVERY admin row backing the bucket is inactive.
         // Future cross-segment chips (e.g. one chip backed by both NSE_FUT
@@ -290,7 +289,7 @@ export function InstrumentsPanel({ onClose }: Props) {
   // Free-text search — wins over the bucket when the box has any text.
   // Scoped to the current bucket's filters so typing "BANK" inside NSE OPT
   // returns only NSE option contracts, not MCX or crypto. When the bucket
-  // is Favorites / All / a free-text bucket we don't constrain — that's
+  // is Favorites or a free-text bucket we don't constrain — that's
   // the global search the user expects.
   const searchScopeSegments = bucket.mode === "filter" ? browseSegments : undefined;
   const searchScopeTypes = bucket.mode === "filter" ? browseTypes : undefined;
