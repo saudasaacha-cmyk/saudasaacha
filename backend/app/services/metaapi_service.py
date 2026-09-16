@@ -37,6 +37,13 @@ _MAX_TICK_SPIKE_PCT = 0.5
 METAAPI_CMD_CHANNEL = "metaapi:cmd"
 METAAPI_STATUS_KEY = "metaapi:status"
 
+# An MT account that is deployed but not logged in to the broker makes the SDK
+# wait forever, so every connect stage is bounded — a stuck account must show
+# up in the admin panel as an error, not as silence.
+_CONNECT_TIMEOUT_SEC = 90
+# Heartbeat so the panel can tell "connecting" from "feed process is down".
+_STATUS_HEARTBEAT_SEC = 10
+
 
 def _f(v: Any, default: float = 0.0) -> float:
     try:
@@ -94,6 +101,7 @@ class MetaApiFeed:
         self._max_symbols: int = int(getattr(settings, "METAAPI_MAX_SYMBOLS", 24) or 24)
         self._cap_log_ts = 0.0
         self._task: asyncio.Task[Any] | None = None
+        self._status_task: asyncio.Task[Any] | None = None
         self._stop = False
         self._last_rx = 0.0
         self._last_error = ""
@@ -367,6 +375,10 @@ class MetaApiFeed:
             logger.info("metaapi_feed_already_running")
             return
         self._task = asyncio.create_task(self._run_loop(), name="metaapi_feed")
+        if self._status_task is None or self._status_task.done():
+            self._status_task = asyncio.create_task(
+                self._status_loop(), name="metaapi_status"
+            )
         logger.info(
             "metaapi_feed_started symbols=%d aliases=%d source=%s",
             len(self._symbols),
@@ -423,9 +435,25 @@ class MetaApiFeed:
             except Exception as e:  # noqa: BLE001
                 self._note_sub_error(broker, e, "metaapi_on_demand_subscribe_failed")
 
+    async def _status_loop(self) -> None:
+        """Publish the status every few seconds while the feed is up. Without
+        it a connect that hangs upstream looks identical to a dead feed
+        process, because status is only written on connect / error / stop."""
+        try:
+            while not self._stop:
+                await self._publish_status()
+                await asyncio.sleep(_STATUS_HEARTBEAT_SEC)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("metaapi_status_loop_failed", exc_info=True)
+
     async def stop(self) -> None:
         self._stop = True
         self._connected = False
+        if self._status_task is not None:
+            self._status_task.cancel()
+            self._status_task = None
         try:
             if self._conn is not None:
                 await self._conn.close()
@@ -477,19 +505,34 @@ class MetaApiFeed:
         self._account = await self._api.metatrader_account_api.get_account(acc_id)
 
         # Ensure the account is deployed + connected to the broker before we
-        # open the market-data stream. Best-effort — a already-deployed account
-        # just no-ops.
+        # open the market-data stream. `wait_connected()` never returns while
+        # the broker login fails (wrong password, dead demo server), so bound
+        # it and report what MetaAPI says about the account.
+        state = getattr(self._account, "state", None)
+        conn_status = getattr(self._account, "connection_status", None)
+        logger.info(
+            "metaapi_account_state state=%s connection=%s", state, conn_status
+        )
         try:
-            state = getattr(self._account, "state", None)
             if state and state not in ("DEPLOYED",):
-                await self._account.deploy()
-            await self._account.wait_connected()
-        except Exception as e:
-            logger.warning("metaapi_deploy_wait_warning: %s", e)
+                await asyncio.wait_for(self._account.deploy(), _CONNECT_TIMEOUT_SEC)
+            await asyncio.wait_for(
+                self._account.wait_connected(), _CONNECT_TIMEOUT_SEC
+            )
+        except asyncio.TimeoutError as e:
+            raise RuntimeError(
+                f"MT account did not connect within {_CONNECT_TIMEOUT_SEC}s "
+                f"(MetaAPI reports state={state}, connection={conn_status}). "
+                "Check the account on metaapi.cloud — it must show Connected, "
+                "not just Deployed."
+            ) from e
 
         self._conn = self._account.get_streaming_connection()
-        await self._conn.connect()
-        await self._conn.wait_synchronized({"timeoutInSeconds": 60})
+        await asyncio.wait_for(self._conn.connect(), _CONNECT_TIMEOUT_SEC)
+        await asyncio.wait_for(
+            self._conn.wait_synchronized({"timeoutInSeconds": 60}),
+            _CONNECT_TIMEOUT_SEC,
+        )
         self._connected = True
         self._last_error = ""
         self._last_rx = time.monotonic()
