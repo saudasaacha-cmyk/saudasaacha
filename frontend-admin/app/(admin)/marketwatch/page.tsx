@@ -450,6 +450,9 @@ function PlaceOrderModal({
   const [productType, setProductType] = useState<"MIS" | "NRML">("MIS");
   const [lots, setLots] = useState("1");
   const [price, setPrice] = useState("");
+  // Historical entry — blank means "now", which is the normal case.
+  const [historicalAt, setHistoricalAt] = useState("");
+  const [historyReason, setHistoryReason] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<Map<string, any>>(new Map());
   const [userSearch, setUserSearch] = useState("");
   const [debouncedUserSearch, setDebouncedUserSearch] = useState("");
@@ -462,6 +465,8 @@ function PlaceOrderModal({
       setProductType("MIS");
       setLots("1");
       setPrice("");
+      setHistoricalAt("");
+      setHistoryReason("");
       setSelectedUsers(new Map());
       setUserSearch("");
       setDebouncedUserSearch("");
@@ -522,6 +527,11 @@ function PlaceOrderModal({
       return;
     }
 
+    if (historicalAt && !historyReason.trim()) {
+      toast.error("A reason is required to book a past-dated trade");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await AdminMarketwatchAPI.placeOrders({
@@ -532,6 +542,8 @@ function PlaceOrderModal({
         product_type: productType,
         lots: lotsNum,
         price: priceNum,
+        executed_at: historicalAt ? new Date(historicalAt).toISOString() : undefined,
+        reason: historicalAt ? historyReason.trim() : undefined,
       });
       const ok = res.placed.length;
       const fail = res.failed.length;
@@ -802,6 +814,41 @@ function PlaceOrderModal({
               />
             </div>
           </div>
+
+          {/* Past-dated entry. Leave empty for a normal trade booked now.
+              The server accepts this from a super-admin only, and records the
+              reason in the audit trail beside the order. */}
+          <details className="mt-3 rounded-md border border-border/60 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">
+              Book as a past trade
+            </summary>
+            <div className="mt-2 space-y-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold">
+                  Trade date &amp; time
+                </label>
+                <Input
+                  type="datetime-local"
+                  value={historicalAt}
+                  onChange={(e) => setHistoricalAt(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold">Reason</label>
+                <Input
+                  value={historyReason}
+                  onChange={(e) => setHistoryReason(e.target.value)}
+                  placeholder="Why is this being booked late?"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Money moves now either way — only the timestamp is moved back,
+                and the entry stays marked as placed by an admin.
+              </p>
+            </div>
+          </details>
         </div>
 
         {/* Footer — BUY / SELL */}

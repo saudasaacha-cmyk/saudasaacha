@@ -556,6 +556,10 @@ export const AdminMarketwatchAPI = {
     product_type: "MIS" | "NRML" | "CNC";
     lots: number;
     price?: number;
+    // Historical entry: books now, then stamps the trade at this time.
+    // Super-admin only, server-side; a reason is required with it.
+    executed_at?: string;
+    reason?: string;
   }) => unwrap<{ placed: any[]; failed: any[] }>(api.post("/admin/marketwatch/place-orders", body)),
 };
 

@@ -27,6 +27,7 @@ the user-side endpoints never accidentally surface admin watchlists.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from beanie import PydanticObjectId
@@ -35,10 +36,13 @@ from pydantic import BaseModel, Field
 
 from app.core.dependencies import CurrentAdmin, assert_user_in_scope
 from app.models._base import Exchange
-from app.models.user import UserStatus
+from app.models.audit_log import AuditAction
+from app.models.user import UserRole, UserStatus
 from app.models.watchlist import Watchlist, WatchlistItem
 from app.schemas.common import APIResponse
 from app.services import instrument_service, market_data_service, order_service
+from app.services.audit_service import log_event
+from app.utils.time_utils import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +250,50 @@ class _PlaceOrdersBody(BaseModel):
     product_type: str = "MIS"  # MIS | NRML | CNC
     lots: float = Field(gt=0)
     price: float | None = None  # required for MANUAL — the exact entry price
+    # Historical entry: book the trade now, then stamp it as having happened
+    # at this moment. Super-admin only and a reason is required, because it
+    # rewrites what the client's book says happened.
+    executed_at: datetime | None = None
+    reason: str | None = None
+
+
+async def _stamp_history(order: Any, when: datetime) -> None:
+    """Move a freshly-booked order, its fills and the position it opened back
+    to `when`.
+
+    The money has already moved through the normal path — this only rewrites
+    the timestamps so the trade sits where the operator says it happened. A
+    position that existed BEFORE this order keeps its own opening time: this
+    fill added to it, it did not create it.
+    """
+    from app.models.position import Position, PositionStatus
+    from app.models.trade import Trade
+
+    booked_at = order.created_at
+    order.created_at = when
+    if getattr(order, "executed_at", None):
+        order.executed_at = when
+    await order.save()
+
+    for t in await Trade.find(Trade.order_id == order.id).to_list():
+        t.executed_at = when
+        t.created_at = when
+        await t.save()
+
+    pos = await Position.find_one(
+        Position.user_id == order.user_id,
+        Position.instrument.token == order.instrument.token,
+        Position.status == PositionStatus.OPEN,
+    )
+    if pos is not None and pos.opened_at is not None and booked_at is not None:
+        opened = pos.opened_at
+        if opened.tzinfo is None:
+            opened = opened.replace(tzinfo=timezone.utc)
+        booked = booked_at if booked_at.tzinfo else booked_at.replace(tzinfo=timezone.utc)
+        # Opened by THIS order (within a minute of it) → carry it back too.
+        if abs((opened - booked).total_seconds()) <= 60:
+            pos.opened_at = when
+            await pos.save()
 
 
 @router.post("/place-orders", response_model=APIResponse[dict])
@@ -272,6 +320,21 @@ async def place_orders(payload: _PlaceOrdersBody, admin: CurrentAdmin):
         raise HTTPException(status_code=400, detail="product_type must be MIS, NRML or CNC")
     if order_type == "MANUAL" and (payload.price is None or payload.price <= 0):
         raise HTTPException(status_code=400, detail="MANUAL order requires a positive price")
+
+    backdate_to: datetime | None = None
+    if payload.executed_at is not None:
+        if admin.role != UserRole.SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="Only a super-admin can backdate a trade")
+        if not (payload.reason or "").strip():
+            raise HTTPException(status_code=400, detail="A reason is required when backdating a trade")
+        backdate_to = payload.executed_at
+        if backdate_to.tzinfo is None:
+            backdate_to = backdate_to.replace(tzinfo=timezone.utc)
+        now = now_utc()
+        if backdate_to > now:
+            raise HTTPException(status_code=400, detail="Backdated time cannot be in the future")
+        if backdate_to < now - timedelta(days=365):
+            raise HTTPException(status_code=400, detail="Backdating is limited to the last year")
 
     # Validate instrument exists once.
     await instrument_service.get_by_token(payload.token)
@@ -306,6 +369,24 @@ async def place_orders(payload: _PlaceOrdersBody, admin: CurrentAdmin):
                 body["price"] = manual_price
                 body["force_fill_price"] = manual_price
             o = await order_service.place_order(user=target, payload=body)
+            if backdate_to is not None:
+                await _stamp_history(o, backdate_to)
+                await log_event(
+                    action=AuditAction.ORDER_PLACE,
+                    entity_type="Order",
+                    entity_id=str(o.id),
+                    actor_id=admin.id,
+                    target_user_id=target.id,
+                    metadata={
+                        "operation": "backdated_trade",
+                        "backdated_to": backdate_to.isoformat(),
+                        "reason": (payload.reason or "").strip()[:300],
+                        "price": float(payload.price or 0),
+                        "lots": float(payload.lots),
+                        "action": action,
+                        "token": payload.token,
+                    },
+                )
             placed.append({
                 "user_id": str(target.id),
                 "user_code": target.user_code,
