@@ -534,3 +534,91 @@ async def top_movers(
             "days": days,
         }
     )
+
+
+@router.get("/similar-activity")
+async def similar_activity(
+    admin: CurrentAdmin,
+    days: int = Query(default=1, ge=1, le=90),
+    window_sec: int = Query(default=60, ge=5, le=3600, description="How close in time counts as together"),
+    min_users: int = Query(default=3, ge=2, le=50),
+    limit: int = Query(default=50, ge=1, le=200),
+    _: None = Depends(require_perm("reports", "read")),
+) -> APIResponse[Any]:
+    """Clients who traded the same symbol, the same way, at the same moment.
+
+    Buckets fills by (symbol, side, time window) and keeps the buckets several
+    distinct clients land in. That pattern is copy-trading, a shared signal
+    group, or one person behind several accounts — all things a dealer wants
+    to see before the exposure builds up.
+
+    Same-minute agreement is normal on a big move, so treat this as a lead to
+    check, not a verdict: raise `min_users` or shrink `window_sec` to tighten.
+    """
+    since = now_utc() - timedelta(days=days)
+    match: dict[str, Any] = {"executed_at": {"$gte": since}}
+    scope = await scoped_user_ids(admin)
+    if scope is not None:
+        if not scope:
+            return APIResponse(data={"clusters": [], "window_sec": window_sec, "days": days})
+        match["user_id"] = {"$in": scope}
+
+    window_ms = window_sec * 1000
+    clusters = await Trade.aggregate(
+        [
+            {"$match": match},
+            {
+                "$group": {
+                    "_id": {
+                        "symbol": "$instrument.symbol",
+                        "action": "$action",
+                        # Integer division of the epoch into fixed windows —
+                        # cheaper and more stable than a sliding window, at the
+                        # cost of splitting activity that straddles a boundary.
+                        "bucket": {
+                            "$floor": {"$divide": [{"$toLong": "$executed_at"}, window_ms]}
+                        },
+                    },
+                    "users": {"$addToSet": "$user_id"},
+                    "trades": {"$sum": 1},
+                    "quantity": {"$sum": "$quantity"},
+                    "first_at": {"$min": "$executed_at"},
+                    "last_at": {"$max": "$executed_at"},
+                }
+            },
+            {"$match": {"$expr": {"$gte": [{"$size": "$users"}, min_users]}}},
+            {"$sort": {"first_at": -1}},
+            {"$limit": limit},
+        ]
+    ).to_list()
+
+    # Name the clients in one query rather than per cluster.
+    user_ids = {uid for c in clusters for uid in c["users"]}
+    users = await User.find({"_id": {"$in": list(user_ids)}}).to_list() if user_ids else []
+    by_id = {u.id: u for u in users}
+
+    rows = [
+        {
+            "symbol": c["_id"]["symbol"],
+            "action": c["_id"]["action"],
+            "users": [
+                {
+                    "user_id": str(uid),
+                    "user_code": getattr(by_id.get(uid), "user_code", "") or "",
+                    "name": getattr(by_id.get(uid), "full_name", "") or "",
+                }
+                for uid in c["users"]
+            ],
+            "user_count": len(c["users"]),
+            "trades": c["trades"],
+            "quantity": c["quantity"],
+            "first_at": c["first_at"].isoformat() if c.get("first_at") else None,
+            "last_at": c["last_at"].isoformat() if c.get("last_at") else None,
+        }
+        for c in clusters
+    ]
+    rows.sort(key=lambda r: (r["user_count"], r["trades"]), reverse=True)
+
+    return APIResponse(
+        data={"clusters": rows, "window_sec": window_sec, "days": days, "min_users": min_users}
+    )
