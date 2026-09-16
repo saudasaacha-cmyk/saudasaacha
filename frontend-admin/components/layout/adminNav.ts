@@ -104,6 +104,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: "/orders", label: "Orders", icon: ListOrdered, perm: "trading_view", empPerm: "orders" },
       { href: "/positions", label: "Positions", icon: Activity, perm: "trading_view", empPerm: "positions" },
+      { href: "/exposure", label: "Exposure", icon: Layers, perm: "trading_view" },
       { href: "/marketwatch", label: "Market Watch", icon: LineChart, perm: "trading_view", empPerm: "marketwatch" },
       { href: "/chart-levels", label: "Chart Lines", icon: Ruler, perm: "trading_view", empPerm: "marketwatch" },
       { href: "/instruments", label: "Instruments", icon: ListChecks, superOnly: true },

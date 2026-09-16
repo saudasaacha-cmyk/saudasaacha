@@ -635,6 +635,110 @@ async def list_closed_positions_fifo(
     )
 
 
+@router.get("/exposure", response_model=APIResponse[Any])
+async def house_exposure(
+    admin: CurrentAdmin,
+    segment: str | None = Query(default=None, description="Filter to one segment_type"),
+    _: None = Depends(require_perm("trading_view", "read")),
+):
+    """The house book: every open position folded together per symbol.
+
+    This is the B-book's own risk position: clients net long 40 lots of GOLD
+    means the house is short 40, and `net_qty` is what the house would have to
+    hedge to be flat.
+
+    No P&L column: open P&L is only persisted when the risk loop marks a row,
+    and notional/P&L are in each instrument's own currency (USD for CFDs, INR
+    for MCX), so one summed figure across symbols would be a wrong number
+    rather than a useful one. `margin_used` is INR everywhere and is summed.
+
+    Aggregated in Mongo rather than in Python: the per-user Positions page
+    already pulls rows one user at a time, and folding thousands of rows in
+    the API worker just to sum them is the kind of thing that makes an admin
+    page time out once the book grows.
+    """
+    match: dict[str, Any] = {
+        "status": PositionStatus.OPEN.value,
+        "$or": [{"is_demo": {"$ne": True}}, {"is_demo": {"$exists": False}}],
+    }
+    scope = await scoped_user_ids(admin)
+    if scope is not None:
+        if not scope:
+            return APIResponse(data={"rows": [], "totals": {}})
+        match["user_id"] = {"$in": scope}
+    if segment:
+        match["segment_type"] = segment
+
+    pipeline: list[dict[str, Any]] = [
+        {"$match": match},
+        {
+            "$group": {
+                "_id": {
+                    "token": "$instrument.token",
+                    "symbol": "$instrument.symbol",
+                    "exchange": "$instrument.exchange",
+                    "segment": "$segment_type",
+                },
+                # `quantity` is signed: long positive, short negative.
+                "net_qty": {"$sum": "$quantity"},
+                "long_qty": {
+                    "$sum": {"$cond": [{"$gt": ["$quantity", 0]}, "$quantity", 0]}
+                },
+                "short_qty": {
+                    "$sum": {"$cond": [{"$lt": ["$quantity", 0]}, {"$abs": "$quantity"}, 0]}
+                },
+                "users": {"$addToSet": "$user_id"},
+                "positions": {"$sum": 1},
+                "margin_used": {"$sum": {"$toDouble": "$margin_used"}},
+                "notional": {
+                    "$sum": {
+                        "$multiply": [{"$abs": "$quantity"}, {"$toDouble": "$avg_price"}]
+                    }
+                },
+                # Every open row on a symbol carries the same ticker-updated
+                # price, so the max is simply the current one (0 when cold).
+                "ltp": {"$max": {"$toDouble": "$ltp"}},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "token": "$_id.token",
+                "symbol": "$_id.symbol",
+                "exchange": "$_id.exchange",
+                "segment": "$_id.segment",
+                "net_qty": 1,
+                "long_qty": 1,
+                "short_qty": 1,
+                "positions": 1,
+                "users": {"$size": "$users"},
+                "margin_used": {"$round": ["$margin_used", 2]},
+                "notional": {"$round": ["$notional", 2]},
+                "ltp": 1,
+            }
+        },
+        {"$sort": {"notional": -1}},
+    ]
+    rows = await Position.aggregate(pipeline).to_list()
+
+    totals = {
+        "symbols": len(rows),
+        "positions": sum(r["positions"] for r in rows),
+        # INR everywhere, so this one total is comparable across symbols.
+        "margin_used": round(sum(r["margin_used"] for r in rows), 2),
+        "users": 0,
+    }
+    if rows:
+        # Distinct users across the whole book, not the sum of per-symbol
+        # counts (one client holding three symbols is still one client).
+        distinct = await Position.aggregate(
+            [{"$match": match}, {"$group": {"_id": "$user_id"}}, {"$count": "n"}]
+        ).to_list()
+        totals["users"] = distinct[0]["n"] if distinct else 0
+
+    return APIResponse(data={"rows": rows, "totals": totals})
+
+
 @router.get("/positions", response_model=APIResponse[Any])
 async def list_positions(
     admin: CurrentAdmin,

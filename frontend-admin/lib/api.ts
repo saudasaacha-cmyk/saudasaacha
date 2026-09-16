@@ -368,6 +368,8 @@ export const TradingAPI = {
   // Server-side paginated variant — pass `page` to get { rows, total, … }
   // instead of a flat array. Used by the Closed Trades tab so only one
   // page (e.g. 25 rows) is fetched + enriched per request.
+  // House book: open positions folded per symbol (net / long / short, clients).
+  exposure: (params?: any) => unwrap<any>(api.get("/admin/exposure", { params })),
   positionsPaged: (params?: any) =>
     unwrap<{ rows: any[]; total: number; page: number; page_size: number; total_pages: number }>(
       api.get("/admin/positions", { params }),
