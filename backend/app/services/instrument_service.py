@@ -236,7 +236,32 @@ async def get_by_token(token: str) -> Instrument:
     if inst is not None:
         return inst
 
+    # Not Zerodha's — the user may have picked a CFD symbol straight out of
+    # the broker's universe in search, which has no row until now.
+    inst = await _mirror_from_metaapi(token)
+    if inst is not None:
+        return inst
+
     raise NotFoundError(f"Instrument {token} not found")
+
+
+async def _mirror_from_metaapi(token: str) -> "Instrument | None":
+    """Create the catalogue row for a symbol the MT broker offers but we have
+    never stored. Returns None when the broker doesn't carry it, so unknown
+    tokens still fail loudly."""
+    try:
+        from app.services.metaapi_service import clean_broker_symbol, metaapi
+
+        symbol = clean_broker_symbol(token)
+        if not symbol or not await metaapi.offers(symbol):
+            return None
+        from app.services.infoway_service import upsert_instrument_for_code
+
+        await upsert_instrument_for_code(symbol)
+        return await Instrument.find_one(Instrument.token == symbol)
+    except Exception:
+        logger.exception("metaapi_instrument_mirror_failed", extra={"token": token})
+        return None
 
 
 async def _mirror_from_zerodha(token: str, existing: "Instrument | None" = None) -> Instrument | None:

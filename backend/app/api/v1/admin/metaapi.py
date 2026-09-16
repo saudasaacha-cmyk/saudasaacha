@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.dependencies import SuperAdmin
-from app.core.redis_client import cache_get, cache_set, publish
+from app.core.redis_client import cache_get, publish
 from app.models.audit_log import AuditAction
 from app.models.metaapi_settings import MetaApiSettings
 from app.services import audit_service
@@ -29,12 +29,6 @@ from app.utils.crypto import CryptoError, encrypt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/metaapi", tags=["admin-metaapi"])
-
-# Broker symbol lists change rarely and the fetch opens an RPC connection, so
-# cache it; the panel's refresh button bypasses this.
-_SYMBOLS_CACHE_KEY = "metaapi:broker_symbols"
-_SYMBOLS_CACHE_TTL = 600
-
 
 class SettingsBody(BaseModel):
     token: str | None = None  # "" or "***" keeps the stored token
@@ -177,37 +171,19 @@ async def disconnect(admin: SuperAdmin) -> dict:
 async def broker_symbols(
     admin: SuperAdmin, refresh: bool = Query(default=False)
 ) -> dict:
-    """Every symbol this MT account offers, straight from MetaAPI."""
-    if not refresh:
-        cached = await cache_get(_SYMBOLS_CACHE_KEY)
-        if cached:
-            return {"success": True, "symbols": cached, "cached": True}
-
+    """Every symbol this MT account offers. Served from the feed process's
+    published snapshot; `refresh` forces a fresh read from MetaAPI."""
     cfg = await metaapi.load_config()
     if not cfg["configured"]:
         raise HTTPException(
             status_code=400, detail="Save the MetaAPI token and account id first."
         )
     try:
-        from metaapi_cloud_sdk import MetaApi
+        symbols = await metaapi.list_broker_symbols(refresh=refresh)
     except ImportError as exc:
         raise HTTPException(
-            status_code=503,
-            detail="metaapi-cloud-sdk is not installed on this host.",
+            status_code=503, detail="metaapi-cloud-sdk is not installed on this host."
         ) from exc
-
-    conn = None
-    try:
-        api = (
-            MetaApi(cfg["token"], {"region": cfg["region"]})
-            if cfg["region"]
-            else MetaApi(cfg["token"])
-        )
-        account = await api.metatrader_account_api.get_account(cfg["account_id"])
-        conn = account.get_rpc_connection()
-        await conn.connect()
-        await conn.wait_synchronized(60)
-        raw = await conn.get_symbols()
     except Exception as exc:
         raise HTTPException(
             status_code=502,
@@ -216,16 +192,7 @@ async def broker_symbols(
                 "and that the account is deployed on metaapi.cloud."
             ),
         ) from exc
-    finally:
-        if conn is not None:
-            try:
-                await conn.close()
-            except Exception:
-                pass
-
-    symbols = sorted({str(s).upper() for s in (raw or []) if str(s).strip()})
-    await cache_set(_SYMBOLS_CACHE_KEY, symbols, ttl_sec=_SYMBOLS_CACHE_TTL)
-    return {"success": True, "symbols": symbols, "cached": False}
+    return {"success": True, "symbols": symbols, "cached": not refresh}
 
 
 @router.put("/symbols")

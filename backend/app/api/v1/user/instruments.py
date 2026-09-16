@@ -471,7 +471,90 @@ async def search(
         get_ex=lambda i: (i.exchange.value if hasattr(i.exchange, "value") else str(i.exchange)),
         cap_for=_cap_for,
     )
-    return APIResponse(data=[_serialize(i) for i in results])
+    payload = [_serialize(i) for i in results]
+
+    # Nothing (or little) in the catalogue? Offer what the CFD broker carries.
+    external: list[dict] = []
+    if q and len(payload) < limit:
+        try:
+            external = await _metaapi_search_external(
+                q,
+                seg_list,
+                limit - len(payload),
+                have={(p.get("symbol") or "").upper() for p in payload},
+                blocked=blocked,
+                inactive_segs=inactive_segs,
+            )
+        except Exception:
+            logger.exception("metaapi_external_search_failed")
+    return APIResponse(data=payload + external)
+
+
+# Segments whose instruments come from the MT/CFD broker rather than Zerodha.
+_GLOBAL_SEGMENTS = {"FOREX", "STOCKS", "INDICES", "COMMODITIES"}
+
+
+async def _metaapi_search_external(
+    q: str,
+    seg_list: list[str],
+    limit: int,
+    *,
+    have: set[str],
+    blocked,
+    inactive_segs,
+) -> list[dict]:
+    """Search the broker's own symbol universe for symbols we have no row for.
+
+    The MT account offers thousands of CFD symbols and a row only exists once
+    someone has picked one, so searching "AAPL" or "GER40" used to come back
+    empty. These payloads are addable: picking one creates the catalogue row
+    (see `instrument_service.get_by_token`) and the feed subscribes it once it
+    lands in a watchlist.
+    """
+    if limit <= 0 or not q.strip():
+        return []
+    if seg_list and not (set(seg_list) & _GLOBAL_SEGMENTS):
+        return []
+
+    from app.services.infoway_lots import get_infoway_lot_size
+    from app.services.infoway_service import _classify_infoway_code
+    from app.services.metaapi_service import metaapi
+    from app.services.netting_service import is_symbol_blocked_for
+
+    names = await metaapi.search_symbols(q, limit=limit * 4)
+    out: list[dict] = []
+    for sym in names:
+        if sym in have:
+            continue
+        meta = _classify_infoway_code(sym)
+        seg = meta["segment"]
+        if seg not in _GLOBAL_SEGMENTS:
+            continue  # crypto keeps its own seeded rows
+        if seg_list and seg not in seg_list:
+            continue
+        if seg in inactive_segs or is_symbol_blocked_for(sym, blocked):
+            continue
+        out.append(
+            {
+                "token": sym,
+                "symbol": sym,
+                "trading_symbol": sym,
+                "name": meta["name"],
+                "exchange": meta["exchange"],
+                "segment": seg,
+                "instrument_type": meta["instrument_type"],
+                "lot_size": get_infoway_lot_size(sym, seg),
+                "tick_size": "0.0001",
+                "expiry": None,
+                "strike": None,
+                "option_type": None,
+                "is_active": True,
+                "is_tradable": True,
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
 
 
 async def _find_or_create_from_zerodha(token: str) -> Instrument | None:

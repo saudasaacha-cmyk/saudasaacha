@@ -44,6 +44,50 @@ _CONNECT_TIMEOUT_SEC = 90
 # Heartbeat so the panel can tell "connecting" from "feed process is down".
 _STATUS_HEARTBEAT_SEC = 10
 
+# The broker's full symbol universe, published by the feed process so the API
+# workers can search it without opening their own MetaAPI connection.
+METAAPI_BROKER_SYMBOLS_KEY = "metaapi:broker_symbols"
+_BROKER_SYMBOLS_TTL_SEC = 3600
+
+# Brokers decorate the same instrument in ways that are pure noise to us:
+# AAPL.US, EURUSD.r, US500-F, TSLA.US-PERP. Strip the venue/variant so one
+# catalogue row covers them, and remember the broker's exact spelling for the
+# subscribe call.
+_VARIANT_SUFFIXES = ("-PERP", "-24", "-F", "-CASH", "CASH", "PRO", "RAW", "ECN", "STP")
+
+# Genuine renames, tried only when the platform name isn't offered verbatim.
+_SYMBOL_ALIASES: dict[str, tuple[str, ...]] = {
+    "SPX500": ("US500", "SP500", "SPX"),
+    "DE40": ("GER40", "DAX40", "GER30"),
+    "UK100": ("FTSE100", "UK100"),
+    "NAS100": ("USTEC", "NDX100", "TECH100"),
+    "US30": ("DJ30", "WS30", "DOW30"),
+    "JPN225": ("JP225", "NIKKEI225"),
+    "HK50": ("HSI50", "HK50"),
+    "USOIL": ("SPOTCRUDE", "XTIUSD", "WTI", "CRUDEOIL", "USCRUDE"),
+    "UKOIL": ("SPOTBRENT", "XBRUSD", "BRENT", "BRENTOIL"),
+    "NATGAS": ("XNGUSD", "NGAS", "NATURALGAS"),
+    "XAUUSD": ("GOLD", "GOLDUSD"),
+    "XAGUSD": ("SILVER", "SILVERUSD"),
+}
+
+
+def clean_broker_symbol(raw: str) -> str:
+    """Broker spelling → our catalogue symbol: AAPL.US-24 → AAPL, US500-F →
+    US500, EURUSD.r → EURUSD."""
+    s = (raw or "").strip().upper()
+    if not s:
+        return ""
+    s = s.split(".", 1)[0]
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _VARIANT_SUFFIXES:
+            if s.endswith(suffix) and len(s) > len(suffix) + 2:
+                s = s[: -len(suffix)]
+                changed = True
+    return s.strip("-_")
+
 
 def _f(v: Any, default: float = 0.0) -> float:
     try:
@@ -107,6 +151,11 @@ class MetaApiFeed:
         self._last_error = ""
         # Resolved config — admin row over .env. See load_config().
         self._cfg: dict[str, Any] | None = None
+        # The broker's own symbol universe, kept in the broker's exact
+        # spelling (suffix case matters when subscribing: "EURUSD.r").
+        self._broker_symbols: set[str] = set()
+        self._broker_by_upper: dict[str, str] = {}   # EURUSD.R  -> EURUSD.r
+        self._broker_by_clean: dict[str, str] = {}   # EURUSD    -> EURUSD.r
 
     # ── config: admin panel first, .env fallback ──────────────────────
     async def _fetch_doc(self) -> Any:
@@ -239,10 +288,140 @@ class MetaApiFeed:
             logger.debug("metaapi_status_publish_failed", exc_info=True)
 
     def _mt_symbol(self, sym: str) -> str:
-        """Map a platform symbol to the MT broker's symbol (they can differ:
-        US30/DJ30, USOIL/WTI, EURUSD/EURUSD.raw). Alias map comes from
-        METAAPI_SYMBOL_MAP; default is identity."""
-        return self._alias.get(sym, sym)
+        """Map a platform symbol to this broker's spelling.
+
+        Order: the admin's explicit alias map (always wins), then the broker's
+        own symbol list — exact match, then the cleaned-name index (so AAPL
+        finds AAPL.US and US500 finds US500-F), then the rename table. Falls
+        back to the symbol itself when the broker list isn't loaded yet.
+        """
+        s = (sym or "").upper()
+        explicit = self._alias.get(s)
+        if explicit:
+            return explicit
+        if not self._broker_symbols:
+            return sym
+        hit = self._broker_by_upper.get(s) or self._broker_by_clean.get(s)
+        if hit:
+            return hit
+        for candidate in _SYMBOL_ALIASES.get(s, ()):  # genuine renames
+            hit = self._broker_by_upper.get(candidate) or self._broker_by_clean.get(candidate)
+            if hit:
+                return hit
+        return sym
+
+    # ── Broker symbol universe ────────────────────────────────────────
+    def _index_broker_symbols(self, symbols: list[str]) -> None:
+        """Index the universe for lookup while preserving the broker's exact
+        spelling — subscribing with "EURUSD.R" when the broker means
+        "EURUSD.r" gets the symbol rejected. When several variants clean to
+        the same name (AAPL.US, AAPL.US-24) the shortest wins: the plain spot
+        contract."""
+        self._broker_symbols = {s for s in symbols if s}
+        by_upper: dict[str, str] = {}
+        by_clean: dict[str, str] = {}
+        for exact in sorted(self._broker_symbols, key=len):
+            by_upper.setdefault(exact.upper(), exact)
+            clean = clean_broker_symbol(exact)
+            if clean:
+                by_clean.setdefault(clean, exact)
+        self._broker_by_upper = by_upper
+        self._broker_by_clean = by_clean
+
+    async def _refresh_broker_symbols(self) -> None:
+        """Read the universe off the synchronised terminal (free — no extra
+        connection) and publish it for the API workers' instrument search."""
+        symbols: list[str] = []
+        try:
+            specs = getattr(self._conn.terminal_state, "specifications", None) or []
+            for spec in specs:
+                name = spec.get("symbol") if isinstance(spec, dict) else getattr(spec, "symbol", None)
+                if name:
+                    symbols.append(str(name).strip())
+        except Exception:
+            logger.debug("metaapi_specifications_read_failed", exc_info=True)
+        if not symbols:
+            return
+        self._index_broker_symbols(symbols)
+        try:
+            from app.core.redis_client import cache_set
+
+            await cache_set(
+                METAAPI_BROKER_SYMBOLS_KEY, sorted(self._broker_symbols), ttl_sec=_BROKER_SYMBOLS_TTL_SEC
+            )
+        except Exception:
+            logger.debug("metaapi_broker_symbols_publish_failed", exc_info=True)
+        logger.info("metaapi_broker_symbols_indexed count=%d", len(self._broker_symbols))
+
+    async def list_broker_symbols(self, refresh: bool = False) -> list[str]:
+        """Every symbol this MT account offers. Served from the feed process's
+        published snapshot; an API worker only opens its own RPC connection
+        when that snapshot is missing (or the caller forces a refresh)."""
+        from app.core.redis_client import cache_get, cache_set
+
+        if not refresh:
+            if self._broker_symbols:
+                return sorted(self._broker_symbols)
+            cached = await cache_get(METAAPI_BROKER_SYMBOLS_KEY)
+            if cached:
+                self._index_broker_symbols(list(cached))
+                return sorted(self._broker_symbols)
+
+        cfg = self._cfg or await self.load_config()
+        if not cfg["configured"]:
+            return []
+        from metaapi_cloud_sdk import MetaApi
+
+        api = (
+            MetaApi(cfg["token"], {"region": cfg["region"]})
+            if cfg["region"]
+            else MetaApi(cfg["token"])
+        )
+        account = await api.metatrader_account_api.get_account(cfg["account_id"])
+        conn = account.get_rpc_connection()
+        try:
+            await conn.connect()
+            await conn.wait_synchronized(60)
+            raw = await conn.get_symbols()
+        finally:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+        symbols = [str(s).strip() for s in (raw or []) if str(s).strip()]
+        self._index_broker_symbols(symbols)
+        await cache_set(
+            METAAPI_BROKER_SYMBOLS_KEY, sorted(self._broker_symbols), ttl_sec=_BROKER_SYMBOLS_TTL_SEC
+        )
+        return sorted(self._broker_symbols)
+
+    async def offers(self, platform_symbol: str) -> bool:
+        """True when the broker carries this symbol under any spelling."""
+        s = (platform_symbol or "").strip().upper()
+        if not s:
+            return False
+        if not self._broker_by_clean:
+            await self.list_broker_symbols()
+        if s in self._broker_by_upper or s in self._broker_by_clean:
+            return True
+        return any(
+            c in self._broker_by_upper or c in self._broker_by_clean
+            for c in _SYMBOL_ALIASES.get(s, ())
+        )
+
+    async def search_symbols(self, q: str, limit: int = 30) -> list[str]:
+        """Catalogue-shaped names matching `q`, de-duplicated across broker
+        variants (AAPL.US and AAPL.US-24 both surface once, as AAPL).
+        Prefix matches rank above substring matches."""
+        needle = (q or "").strip().upper()
+        if not needle:
+            return []
+        if not self._broker_by_clean:
+            await self.list_broker_symbols()
+        names = sorted(self._broker_by_clean.keys())
+        starts = [n for n in names if n.startswith(needle)]
+        contains = [n for n in names if needle in n and not n.startswith(needle)]
+        return (starts + contains)[:limit]
 
     def _looks_non_metaapi(self, sym: str) -> bool:
         """Cheap pre-filter for PLATFORM tokens that clearly aren't MT symbols,
@@ -519,7 +698,7 @@ class MetaApiFeed:
             await asyncio.wait_for(
                 self._account.wait_connected(), _CONNECT_TIMEOUT_SEC
             )
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise RuntimeError(
                 f"MT account did not connect within {_CONNECT_TIMEOUT_SEC}s "
                 f"(MetaAPI reports state={state}, connection={conn_status}). "
@@ -533,6 +712,7 @@ class MetaApiFeed:
             self._conn.wait_synchronized({"timeoutInSeconds": 60}),
             _CONNECT_TIMEOUT_SEC,
         )
+        await self._refresh_broker_symbols()
         self._connected = True
         self._last_error = ""
         self._last_rx = time.monotonic()
