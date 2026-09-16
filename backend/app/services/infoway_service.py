@@ -932,7 +932,10 @@ async def seed_default_instruments() -> int:
             seen.add(code)
             if await upsert_instrument_for_code(code):
                 created += 1
+    # NB: not `extra={"created": ...}` — `created` is a reserved LogRecord
+    # attribute and logging raises KeyError on the overwrite, which aborted
+    # the whole boot seed in production.
     logger.info(
-        "default_instruments_seeded", extra={"created": created, "total": len(seen)}
+        "default_instruments_seeded", extra={"inserted": created, "symbols": len(seen)}
     )
     return created

@@ -272,7 +272,7 @@ async def heal_legacy_percent_seeds() -> int:
                 await seg.save()
                 healed += 1
             except Exception:
-                logger.exception("heal_seed_save_failed", extra={"name": seg.name})
+                logger.exception("heal_seed_save_failed", extra={"segment_name": seg.name})
     if healed:
         logger.info("healed_legacy_seed_rows", extra={"count": healed})
         try:

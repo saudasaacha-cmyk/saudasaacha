@@ -206,7 +206,7 @@ async def seed_global_instruments() -> None:
     from app.services.infoway_service import seed_default_instruments
 
     created = await seed_default_instruments()
-    logger.info("seeded_global_instruments", extra={"created": created})
+    logger.info("seeded_global_instruments", extra={"inserted": created})
 
 
 async def run_seed() -> None:
