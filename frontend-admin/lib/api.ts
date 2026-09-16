@@ -700,6 +700,9 @@ export const MoneyAPI = {
 };
 
 export const ReportsAdminAPI = {
+  // Instruments by live % move + clients by realised P&L.
+  topMovers: (params: { days?: number; include_options?: boolean; limit?: number }) =>
+    unwrap<any>(api.get("/admin/reports/top-movers", { params })),
   users: () => unwrap<any>(api.get("/admin/reports/users")),
   financial: () => unwrap<any>(api.get("/admin/reports/financial")),
   trades: () => unwrap<any>(api.get("/admin/reports/trades")),

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -27,6 +29,7 @@ from app.schemas.common import APIResponse
 from app.services import report_pdf_service
 from app.utils.time_utils import now_utc
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/reports", tags=["admin-reports"])
 
 
@@ -383,4 +386,151 @@ async def tradebook_pdf(
             "Content-Length": str(len(pdf_bytes)),
             "Access-Control-Expose-Headers": "Content-Disposition",
         },
+    )
+
+
+@router.get("/top-movers")
+async def top_movers(
+    admin: CurrentAdmin,
+    days: int = Query(default=1, ge=1, le=365, description="Window for the client ranking"),
+    limit: int = Query(default=10, ge=1, le=50),
+    include_options: bool = Query(
+        default=False,
+        description="Options swing tens of percent daily and swamp the ranking; off by default",
+    ),
+    _: None = Depends(require_perm("reports", "read")),
+) -> APIResponse[Any]:
+    """Two rankings: instruments by live % change, and clients by realised P&L.
+
+    Symbols come from the feed leader's `mdlive` snapshots — that is exactly
+    the set of instruments actually streaming, so nothing here invents a price
+    for a symbol nobody is watching. Clients are ranked on realised P&L only
+    (open trades are not marked here), which keeps one comparable rupee figure.
+    """
+    from app.core.redis_client import get_redis
+    from app.models.instrument import Instrument
+
+    # ── Symbols: scan the live snapshots the feed leader publishes ──────
+    gainers: list[dict[str, Any]] = []
+    losers: list[dict[str, Any]] = []
+    try:
+        redis = get_redis()
+        keys: list[str] = []
+        cursor = 0
+        # Bounded scan: the live universe is watchlist-sized, and an admin
+        # page must never hold Redis for an unbounded sweep.
+        while len(keys) < 5000:
+            cursor, batch = await redis.scan(cursor, match="mdlive:*", count=500)
+            keys.extend(k.decode() if isinstance(k, bytes) else k for k in batch)
+            if cursor == 0:
+                break
+        quotes: list[dict[str, Any]] = []
+        if keys:
+            raw_values = await redis.mget(keys)
+            for key, raw in zip(keys, raw_values, strict=False):
+                if not raw:
+                    continue
+                try:
+                    q = json.loads(raw)
+                except Exception:
+                    continue
+                try:
+                    ltp = float(q.get("ltp") or 0)
+                    change_pct = float(q.get("change_pct") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if ltp <= 0 or change_pct == 0:
+                    continue  # cold or never-moved token: not a mover
+                quotes.append(
+                    {
+                        "token": key.split(":", 1)[1],
+                        "ltp": round(ltp, 4),
+                        "change_pct": round(change_pct, 2),
+                        "change": round(float(q.get("change") or 0), 4),
+                    }
+                )
+        # Name every live token in one query, then rank. Done before the
+        # sort because the segment decides whether a row belongs here at all:
+        # a far-OTM option moving 60% in a day would otherwise fill the whole
+        # board and bury the underlyings an admin actually watches.
+        if quotes:
+            docs = await Instrument.find(
+                {"token": {"$in": [q["token"] for q in quotes]}}
+            ).to_list()
+            by_token = {d.token: d for d in docs}
+            named: list[dict[str, Any]] = []
+            for row in quotes:
+                inst = by_token.get(row["token"])
+                segment = str(getattr(inst, "segment", "") or "")
+                if not include_options and "OPTION" in segment.upper():
+                    continue
+                row["symbol"] = inst.symbol if inst else row["token"]
+                row["segment"] = segment
+                row["exchange"] = (
+                    (inst.exchange.value if hasattr(inst.exchange, "value") else str(inst.exchange))
+                    if inst
+                    else ""
+                )
+                named.append(row)
+            quotes = named
+
+        quotes.sort(key=lambda r: r["change_pct"], reverse=True)
+        gainers = [q for q in quotes if q["change_pct"] > 0][:limit]
+        losers = [q for q in quotes if q["change_pct"] < 0][-limit:][::-1]
+    except Exception:
+        logger.exception("top_movers_symbols_failed")
+
+    # ── Clients: realised P&L over the window ───────────────────────────
+    since = now_utc() - timedelta(days=days)
+    match: dict[str, Any] = {"executed_at": {"$gte": since}, "pnl_inr": {"$ne": None}}
+    scope = await scoped_user_ids(admin)
+    if scope is not None:
+        if not scope:
+            return APIResponse(
+                data={
+                    "symbols": {"gainers": gainers, "losers": losers},
+                    "clients": {"gainers": [], "losers": []},
+                    "days": days,
+                }
+            )
+        match["user_id"] = {"$in": scope}
+
+    ranked = await Trade.aggregate(
+        [
+            {"$match": match},
+            {
+                "$group": {
+                    "_id": "$user_id",
+                    "pnl": {"$sum": {"$toDouble": "$pnl_inr"}},
+                    "trades": {"$sum": 1},
+                }
+            },
+            {"$sort": {"pnl": -1}},
+        ]
+    ).to_list()
+
+    user_docs = await User.find(
+        {"_id": {"$in": [r["_id"] for r in ranked[:limit] + ranked[-limit:]]}}
+    ).to_list()
+    names = {u.id: u for u in user_docs}
+
+    def _client_row(r: dict[str, Any]) -> dict[str, Any]:
+        u = names.get(r["_id"])
+        return {
+            "user_id": str(r["_id"]),
+            "user_code": getattr(u, "user_code", "") or "",
+            "name": getattr(u, "full_name", "") or "",
+            "pnl": round(r["pnl"], 2),
+            "trades": r["trades"],
+        }
+
+    client_gainers = [_client_row(r) for r in ranked[:limit] if r["pnl"] > 0]
+    client_losers = [_client_row(r) for r in ranked[::-1][:limit] if r["pnl"] < 0]
+
+    return APIResponse(
+        data={
+            "symbols": {"gainers": gainers, "losers": losers},
+            "clients": {"gainers": client_gainers, "losers": client_losers},
+            "days": days,
+        }
     )
