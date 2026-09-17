@@ -735,6 +735,28 @@ class ZerodhaService:
             self._instr_fetch_locks[cache_key] = lk
         return lk
 
+    def _kite_meta_for(self, token: int) -> dict[str, Any] | None:
+        """Catalog row (symbol / exchange / lot / tick) for a Kite token.
+
+        Indexed lazily off `_instruments_cache` and rebuilt whenever that cache
+        is replaced, so an 80k-row scan happens once per catalog refresh rather
+        than per subscribe.
+        """
+        try:
+            idx = getattr(self, "_kite_token_idx", None)
+            if idx is None or getattr(self, "_kite_token_idx_at", None) != self._instruments_cache_at:
+                idx = {}
+                for rows in self._instruments_cache.values():
+                    for r in rows:
+                        tok = r.get("token")
+                        if tok:
+                            idx[int(tok)] = r
+                self._kite_token_idx = idx
+                self._kite_token_idx_at = self._instruments_cache_at
+            return idx.get(int(token))
+        except Exception:  # pragma: no cover - lookup must never block a subscribe
+            return None
+
     def _apply_instruments_cache(self, cache_key: str, catalog: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Populate the in-process L1 cache and return the catalog."""
         import time as _time
@@ -2503,11 +2525,22 @@ class ZerodhaService:
             for t in tokens:
                 if t in existing_tokens:
                     continue
-                meta = (symbols or {}).get(t) or self._symbol_by_token.get(t) or {}
+                meta = (
+                    (symbols or {}).get(t)
+                    or self._symbol_by_token.get(t)
+                    or self._kite_meta_for(t)
+                    or {}
+                )
+                # Never fall back to the token number as the symbol when the
+                # catalog can name it. FULL mode is re-asserted BY SYMBOL, so a
+                # symbol-less row silently receives no OHLC — day high/low stay
+                # 0, the day-range order gate can't apply, and the admin panel
+                # shows a wall of bare numbers. 435 of 576 stored rows were in
+                # that state before the catalog lookup above was added.
                 sub = SubscribedInstrument(
                     token=t,
-                    symbol=meta.get("symbol") or str(t),
-                    exchange=meta.get("exchange") or "NSE",
+                    symbol=str(meta.get("symbol") or "").strip() or str(t),
+                    exchange=str(meta.get("exchange") or "").strip() or "NSE",
                 )
                 s.subscribedInstruments.append(sub)
                 added.append(sub)
