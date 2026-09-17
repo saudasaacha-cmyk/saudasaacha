@@ -126,6 +126,38 @@ def bracket_direction_error(
     return None
 
 
+# Grace after the tick feed (re)connects. A deploy or a brief WS drop makes
+# every instrument look quiet for a moment, and blocking trading for everyone
+# at once is what got the earlier 60-second version removed in July 2026.
+_FEED_WARM_GRACE_SEC = 60
+
+
+def stale_feed_block_reason(
+    *,
+    symbol: str,
+    price_age_sec: float | None,
+    threshold_sec: int,
+    feed_warm_age_sec: float | None,
+    grace_sec: int = _FEED_WARM_GRACE_SEC,
+) -> str | None:
+    """Why this instrument can't be traded right now, or None to allow it.
+
+    Allows the order when the feature is off (threshold 0), when there is no
+    price age to judge by, and while the feed is still warming up after a
+    reconnect.
+    """
+    if threshold_sec <= 0 or price_age_sec is None:
+        return None
+    if feed_warm_age_sec is not None and feed_warm_age_sec < grace_sec:
+        return None
+    if price_age_sec <= threshold_sec:
+        return None
+    return (
+        f"{symbol}: price has not moved for {int(price_age_sec)}s "
+        f"(limit {threshold_sec}s). Trading resumes on the next price update."
+    )
+
+
 async def validate(
     *,
     user: User,
@@ -1326,6 +1358,33 @@ async def validate(
             # and the phantom-P&L class of bug). A briefly-quiet-but-live feed
             # no longer blocks; when no exchange timestamp exists at all the
             # order simply proceeds.
+            # ── Stale-price block (admin setting, default 30 s) ─────────
+            # Operator request: if an instrument's price has not moved for
+            # N seconds, nobody may open a trade on it until a new price
+            # arrives. Uses the exchange's own packet time — the same signal
+            # as the session guard below, with a tighter threshold — so a
+            # frozen feed and a genuinely untraded contract both count.
+            _stale_block_sec = int(risk.get("staleFeedBlockSec") or 0)
+            if _stale_block_sec > 0:
+                _warm_age: float | None = None
+                try:
+                    from app.core.redis_client import cache_get as _cache_get
+                    from app.services.zerodha_service import FEED_WARM_KEY
+
+                    _warm_at = await _cache_get(FEED_WARM_KEY)
+                    if _warm_at:
+                        _warm_age = _vt.time() - float(_warm_at)
+                except Exception:
+                    _warm_age = None
+                _stale_msg = stale_feed_block_reason(
+                    symbol=instrument.symbol,
+                    price_age_sec=_ex_age,
+                    threshold_sec=_stale_block_sec,
+                    feed_warm_age_sec=_warm_age,
+                )
+                if _stale_msg:
+                    raise OrderRejectedError(_stale_msg, code="STALE_FEED")
+
             if _ex_age is not None and _ex_age > _SESSION_STALE_SEC:
                 raise MarketClosedError(
                     f"{instrument.symbol}: no live session — the exchange feed "

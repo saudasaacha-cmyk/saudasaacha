@@ -30,6 +30,7 @@ const FIELDS: Field[] = [
   { key: "exitOnlyMode", label: "Exit-only mode (no new entries)", type: "boolean", help: "When ON, validator rejects every new-entry order. Existing positions can still be closed" },
   { key: "profitTradeHoldMinSeconds", label: "Profit trade hold minimum", type: "int", suffix: "sec", help: "Minimum seconds a profitable trade must be held before user-initiated close is allowed. 0 = no hold" },
   { key: "lossTradeHoldMinSeconds", label: "Loss trade hold minimum", type: "int", suffix: "sec", help: "Minimum seconds a losing trade must be held before user-initiated close is allowed. 0 = no hold" },
+  { key: "staleFeedBlockSec", label: "Block trading on a stale price", type: "int", suffix: "sec", help: "Reject new orders when an instrument's exchange price has not moved for this long; trading resumes on the next price update. Skipped for 60s after the feed reconnects. 0 = off" },
 ];
 
 /** Coerce a draft value to the right type before POST so we never send the

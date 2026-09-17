@@ -73,6 +73,8 @@ def _ensure_aware_utc(dt: datetime | None) -> datetime | None:
 # key and listens for admin commands on this channel, so the admin panel can
 # view live health + trigger off-market tests across processes.
 FAILOVER_STATUS_KEY = "zerodha:failover:status"
+# When the tick feed last (re)connected — read by the stale-feed order block.
+FEED_WARM_KEY = "zerodha:feed_warm_at"
 FAILOVER_CMD_CHANNEL = "zerodha:failover:cmd"
 # WS pool snapshot the feed publishes so the admin Status panel (backend
 # workers) shows the real per-account ticker state + subscribed count.
@@ -2126,6 +2128,15 @@ class ZerodhaService:
                 entry["connecting"] = False
                 entry["last_close_reason"] = ""
                 logger.info(f"zerodha_{label}_connected")
+                # Publish the warm-up moment: the stale-feed order block gives
+                # a grace period after a (re)connect, and the validator runs on
+                # workers that have no socket of their own.
+                try:
+                    from app.core.redis_client import cache_set as _cache_set
+
+                    await _cache_set(FEED_WARM_KEY, int(time.time()), ttl_sec=3600)
+                except Exception:
+                    logger.debug("zerodha_feed_warm_publish_failed", exc_info=True)
                 # Subscribe any tokens queued before the socket opened.
                 queued = list(entry["tokens"])
                 if queued:

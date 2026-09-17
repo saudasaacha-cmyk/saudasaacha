@@ -52,6 +52,7 @@ class RiskSettingsBase(BaseModel):
     exitOnlyMode: bool | None = None
     profitTradeHoldMinSeconds: int | None = None
     lossTradeHoldMinSeconds: int | None = None
+    staleFeedBlockSec: int | None = None
 
 
 class RiskSettingsRequired(BaseModel):
@@ -65,6 +66,11 @@ class RiskSettingsRequired(BaseModel):
     exitOnlyMode: bool = False
     profitTradeHoldMinSeconds: int = 0
     lossTradeHoldMinSeconds: int = 0
+    # Block new orders on an instrument whose exchange price has not moved
+    # for this long. 0 = off. A 60-second version of this was removed in
+    # July 2026 for false-blocking during feed hiccups, so it is a setting
+    # now: loosen or disable it without a deploy.
+    staleFeedBlockSec: int = 30
 
 
 class RiskSettings(TimestampMixin, RiskSettingsRequired):
