@@ -39,14 +39,16 @@ def test_markup_is_negative_when_the_fill_is_below_reference():
     assert snap["markup"] == Decimal("-0.20")
 
 
-def test_tick_age_measures_how_stale_the_feed_was():
+def test_our_own_write_stamp_is_not_treated_as_tick_age():
+    # `ts` is set when the snapshot is written, so it is always ~0 ms old.
+    # Trusting it would report every fill as landing on a fresh price.
     snap = execution_snapshot(
         quote={"ts": _now_ms() - 2500},
         order_created_at=None,
         reference_ltp=None,
         fill_price=None,
     )
-    assert 2000 <= snap["tick_age_ms"] <= 4000
+    assert snap["tick_age_ms"] is None
 
 
 def test_fill_latency_counts_from_when_the_order_was_accepted():
@@ -84,3 +86,39 @@ def test_missing_quote_is_tolerated():
     )
     assert snap["tick_age_ms"] is None
     assert snap["markup"] is None
+
+
+def test_tick_age_uses_the_exchange_packet_time_not_our_write_time():
+    # `ts` is stamped when we write the snapshot, so it always looks fresh;
+    # only the exchange's own timestamp says how old the price really was.
+    snap = execution_snapshot(
+        quote={"ts": _now_ms(), "exchange_timestamp": (time.time() - 4)},
+        order_created_at=None,
+        reference_ltp=None,
+        fill_price=None,
+    )
+    assert 3500 <= snap["tick_age_ms"] <= 5000
+
+
+def test_exchange_timestamp_in_milliseconds_is_understood_too():
+    snap = execution_snapshot(
+        quote={"exchange_timestamp": _now_ms() - 2000},
+        order_created_at=None,
+        reference_ltp=None,
+        fill_price=None,
+    )
+    assert 1500 <= snap["tick_age_ms"] <= 3000
+
+
+def test_parked_orders_report_no_fill_latency():
+    # A LIMIT order placed ten minutes ago and triggered now waited; it was
+    # not slow to execute.
+    created = datetime.now(timezone.utc) - timedelta(minutes=10)
+    snap = execution_snapshot(
+        quote={},
+        order_created_at=created,
+        reference_ltp=None,
+        fill_price=None,
+        immediate=False,
+    )
+    assert snap["fill_latency_ms"] is None

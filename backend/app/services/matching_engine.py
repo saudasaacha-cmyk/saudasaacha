@@ -54,24 +54,38 @@ def execution_snapshot(
     order_created_at: Any,
     reference_ltp: Decimal | None,
     fill_price: Decimal | None,
+    immediate: bool = True,
 ) -> dict[str, Any]:
     """What the market looked like at a fill, for the slippage / latency reports.
 
     Pure and defensive on purpose: this runs inside the fill path, so a missing
-    or malformed quote must yield None rather than raise. Returns
-    ``tick_age_ms`` (how stale the feed tick was), ``fill_latency_ms`` (order
-    accepted → filled) and ``markup`` (fill minus the pre-markup reference).
+    or malformed quote must yield None rather than raise.
+
+    ``tick_age_ms`` measures the EXCHANGE's own packet time, not our own: the
+    quote's `ts` is stamped when we write the snapshot, so it always reads
+    ~0 ms old and would claim every fill was on a fresh price.
+
+    ``fill_latency_ms`` is only meaningful for an immediate fill. A parked
+    LIMIT / SL-M sits until its trigger hits, so the gap since it was placed
+    is waiting time, not execution speed — those get None instead of a
+    ten-minute "latency".
     """
     tick_age_ms: int | None = None
     try:
-        quote_ts = float((quote or {}).get("ts") or 0)
-        if quote_ts > 0:
-            tick_age_ms = max(0, int(time.time() * 1000 - quote_ts))
+        raw_ts = (quote or {}).get("exchange_timestamp")
+        feed_ms: float | None = None
+        if raw_ts:
+            feed_ms = float(raw_ts)
+            # The exchange packet time arrives in seconds; our own stamps are ms.
+            if feed_ms < 1e11:
+                feed_ms *= 1000
+        if feed_ms and feed_ms > 0:
+            tick_age_ms = max(0, int(time.time() * 1000 - feed_ms))
     except (TypeError, ValueError):
         tick_age_ms = None
 
     fill_latency_ms: int | None = None
-    if order_created_at is not None:
+    if order_created_at is not None and immediate:
         try:
             created = order_created_at
             if created.tzinfo is None:
@@ -454,6 +468,9 @@ async def execute_market_order(
         order_created_at=getattr(order, "created_at", None),
         reference_ltp=raw_ltp,
         fill_price=to_decimal(ltp),
+        # A parked LIMIT / SL-M reaches this function when its trigger fires;
+        # the wait since it was placed is not our execution speed.
+        immediate=order.order_type == OrderType.MARKET,
     )
 
     def _money(v: Decimal | None) -> Decimal128 | None:
