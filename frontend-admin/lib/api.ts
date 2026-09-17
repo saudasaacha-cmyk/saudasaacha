@@ -714,6 +714,12 @@ export const ReportsAdminAPI = {
     min_users?: number;
     limit?: number;
   }) => unwrap<any>(api.get("/admin/reports/similar-activity", { params })),
+  // Fills vs the price the client was shown.
+  slippage: (params: { days?: number; group_by?: "user" | "symbol"; limit?: number }) =>
+    unwrap<any>(api.get("/admin/reports/slippage", { params })),
+  // Fill timing + how stale the price was at each fill.
+  latency: (params: { days?: number; stale_ms?: number; limit?: number }) =>
+    unwrap<any>(api.get("/admin/reports/latency", { params })),
   users: () => unwrap<any>(api.get("/admin/reports/users")),
   financial: () => unwrap<any>(api.get("/admin/reports/financial")),
   trades: () => unwrap<any>(api.get("/admin/reports/trades")),

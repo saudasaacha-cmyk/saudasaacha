@@ -54,6 +54,19 @@ class Trade(TimestampMixin):
     # the close), so the displayed P&L matches the user's true cost.
     pnl_inr: Money | None = None
 
+    # ── Execution snapshot: what the market looked like at this fill ───
+    # Slippage and latency cannot be reconstructed after the fact — for a
+    # MARKET order `price` is the fill and nothing recorded what it was
+    # measured against, or how fresh the feed was. All optional: trades
+    # booked before this existed carry None and are skipped by the reports.
+    expected_price: Money | None = None  # the price the client's screen asked for
+    reference_ltp: Money | None = None  # LTP before our markup
+    bid_at_fill: Money | None = None
+    ask_at_fill: Money | None = None
+    markup: Money | None = None  # fill − reference: the spread we took
+    tick_age_ms: int | None = None  # how old the feed tick was when we filled
+    fill_latency_ms: int | None = None  # order accepted → filled
+
     # Specific-lot close: the tapped fill's entry price this closing trade was
     # booked against (Active-tab Exit). Mirrors the originating Order field so
     # the FIFO closed-blotter (list_closed_trade_events_fifo) can pair this

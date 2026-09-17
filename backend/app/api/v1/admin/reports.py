@@ -622,3 +622,197 @@ async def similar_activity(
     return APIResponse(
         data={"clusters": rows, "window_sec": window_sec, "days": days, "min_users": min_users}
     )
+
+
+def _execution_scope_match(since: datetime, scope: list[Any] | None) -> dict[str, Any] | None:
+    """Shared filter for the execution reports. None ⇒ caller owns no users."""
+    match: dict[str, Any] = {"executed_at": {"$gte": since}}
+    if scope is not None:
+        if not scope:
+            return None
+        match["user_id"] = {"$in": scope}
+    return match
+
+
+@router.get("/slippage")
+async def slippage_report(
+    admin: CurrentAdmin,
+    days: int = Query(default=7, ge=1, le=90),
+    group_by: str = Query(default="user", pattern="^(user|symbol)$"),
+    limit: int = Query(default=50, ge=1, le=200),
+    _: None = Depends(require_perm("reports", "read")),
+) -> APIResponse[Any]:
+    """Where fills landed against the price the client was shown.
+
+    Slippage is signed from the CLIENT's side: positive means they got a worse
+    price than their screen quoted (paid more buying, received less selling).
+    `markup` is the spread this platform added, so it is the revenue side of
+    the same fill.
+
+    Only fills recorded after execution capture went live carry these numbers;
+    older trades have nothing to compare and are left out rather than counted
+    as zero.
+    """
+    since = now_utc() - timedelta(days=days)
+    match = _execution_scope_match(since, await scoped_user_ids(admin))
+    if match is None:
+        return APIResponse(data={"rows": [], "totals": {}, "days": days, "group_by": group_by})
+    match["expected_price"] = {"$ne": None}
+
+    key = "$user_id" if group_by == "user" else "$instrument.symbol"
+    rows = await Trade.aggregate(
+        [
+            {"$match": match},
+            {
+                "$project": {
+                    "key": key,
+                    "quantity": 1,
+                    # Client-side sign: buying above / selling below the quoted
+                    # price both count as slippage against the client.
+                    "slip": {
+                        "$multiply": [
+                            {
+                                "$subtract": [
+                                    {"$toDouble": "$price"},
+                                    {"$toDouble": "$expected_price"},
+                                ]
+                            },
+                            {"$cond": [{"$eq": ["$action", "BUY"]}, 1, -1]},
+                        ]
+                    },
+                    "markup": {
+                        "$cond": [
+                            {"$eq": [{"$ifNull": ["$markup", None]}, None]},
+                            0,
+                            {"$toDouble": "$markup"},
+                        ]
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$key",
+                    "fills": {"$sum": 1},
+                    "avg_slip": {"$avg": "$slip"},
+                    "worst_slip": {"$max": "$slip"},
+                    "best_slip": {"$min": "$slip"},
+                    "markup_value": {"$sum": {"$multiply": ["$markup", "$quantity"]}},
+                }
+            },
+            {"$sort": {"fills": -1}},
+            {"$limit": limit},
+        ]
+    ).to_list()
+
+    if group_by == "user":
+        users = await User.find({"_id": {"$in": [r["_id"] for r in rows]}}).to_list()
+        names = {u.id: u for u in users}
+        for r in rows:
+            u = names.get(r["_id"])
+            r["label"] = getattr(u, "full_name", "") or getattr(u, "user_code", "") or str(r["_id"])
+            r["user_id"] = str(r["_id"])
+    else:
+        for r in rows:
+            r["label"] = r["_id"]
+
+    for r in rows:
+        r.pop("_id", None)
+        r["avg_slip"] = round(r["avg_slip"], 4)
+        r["worst_slip"] = round(r["worst_slip"], 4)
+        r["best_slip"] = round(r["best_slip"], 4)
+        r["markup_value"] = round(r["markup_value"], 2)
+
+    totals = {
+        "fills": sum(r["fills"] for r in rows),
+        "markup_value": round(sum(r["markup_value"] for r in rows), 2),
+    }
+    return APIResponse(data={"rows": rows, "totals": totals, "days": days, "group_by": group_by})
+
+
+@router.get("/latency")
+async def latency_report(
+    admin: CurrentAdmin,
+    days: int = Query(default=7, ge=1, le=90),
+    stale_ms: int = Query(default=1000, ge=100, le=60000, description="A tick older than this counts as stale"),
+    limit: int = Query(default=50, ge=1, le=200),
+    _: None = Depends(require_perm("reports", "read")),
+) -> APIResponse[Any]:
+    """How fresh the price was when each client's orders filled.
+
+    Latency arbitrage looks like this: a client repeatedly fills against ticks
+    that were already stale, and makes money doing it. `stale_fills` counts
+    fills on a tick older than `stale_ms`, and `stale_pnl` is what those fills
+    booked — a client with many stale fills AND positive stale P&L is the one
+    worth investigating.
+
+    `fill_latency_ms` is our own side: how long we took between accepting the
+    order and filling it.
+    """
+    since = now_utc() - timedelta(days=days)
+    match = _execution_scope_match(since, await scoped_user_ids(admin))
+    if match is None:
+        return APIResponse(data={"rows": [], "totals": {}, "days": days, "stale_ms": stale_ms})
+    match["fill_latency_ms"] = {"$ne": None}
+
+    rows = await Trade.aggregate(
+        [
+            {"$match": match},
+            {
+                "$project": {
+                    "user_id": 1,
+                    "fill_latency_ms": 1,
+                    "tick_age_ms": {"$ifNull": ["$tick_age_ms", None]},
+                    "pnl": {
+                        "$cond": [
+                            {"$eq": [{"$ifNull": ["$pnl_inr", None]}, None]},
+                            0,
+                            {"$toDouble": "$pnl_inr"},
+                        ]
+                    },
+                    "is_stale": {
+                        "$cond": [
+                            {"$gt": [{"$ifNull": ["$tick_age_ms", 0]}, stale_ms]},
+                            1,
+                            0,
+                        ]
+                    },
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$user_id",
+                    "fills": {"$sum": 1},
+                    "avg_fill_ms": {"$avg": "$fill_latency_ms"},
+                    "max_fill_ms": {"$max": "$fill_latency_ms"},
+                    "avg_tick_age_ms": {"$avg": "$tick_age_ms"},
+                    "max_tick_age_ms": {"$max": "$tick_age_ms"},
+                    "stale_fills": {"$sum": "$is_stale"},
+                    "stale_pnl": {"$sum": {"$multiply": ["$pnl", "$is_stale"]}},
+                    "pnl": {"$sum": "$pnl"},
+                }
+            },
+            {"$sort": {"stale_fills": -1, "fills": -1}},
+            {"$limit": limit},
+        ]
+    ).to_list()
+
+    users = await User.find({"_id": {"$in": [r["_id"] for r in rows]}}).to_list()
+    names = {u.id: u for u in users}
+    for r in rows:
+        u = names.get(r["_id"])
+        r["user_id"] = str(r["_id"])
+        r.pop("_id", None)
+        r["label"] = getattr(u, "full_name", "") or getattr(u, "user_code", "") or r["user_id"]
+        r["user_code"] = getattr(u, "user_code", "") or ""
+        r["avg_fill_ms"] = round(r["avg_fill_ms"] or 0)
+        r["max_fill_ms"] = round(r["max_fill_ms"] or 0)
+        r["avg_tick_age_ms"] = round(r["avg_tick_age_ms"] or 0) if r["avg_tick_age_ms"] is not None else None
+        r["stale_pnl"] = round(r["stale_pnl"], 2)
+        r["pnl"] = round(r["pnl"], 2)
+
+    totals = {
+        "fills": sum(r["fills"] for r in rows),
+        "stale_fills": sum(r["stale_fills"] for r in rows),
+        "stale_pnl": round(sum(r["stale_pnl"] for r in rows), 2),
+    }
+    return APIResponse(data={"rows": rows, "totals": totals, "days": days, "stale_ms": stale_ms})

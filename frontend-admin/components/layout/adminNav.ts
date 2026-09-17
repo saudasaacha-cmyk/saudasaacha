@@ -117,6 +117,8 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: "/reports/top-movers", label: "Top Gainers/Losers", icon: BarChart3, perm: "reports" },
       { href: "/reports/similar-activity", label: "Similar Activity", icon: Users, perm: "reports" },
+      { href: "/reports/slippage", label: "Slippage", icon: Activity, perm: "reports" },
+      { href: "/reports/latency", label: "Latency", icon: History, perm: "reports" },
       { href: "/reports/admin", label: "Admin Reports", icon: BarChart3, superOnly: true },
       { href: "/reports/users", label: "User reports", icon: Users, perm: "reports" },
       { href: "/reports/financial", label: "Financial", icon: Banknote, perm: "reports" },

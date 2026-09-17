@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import time
+from datetime import timezone
 from decimal import Decimal
 from typing import Any
 
@@ -44,6 +46,52 @@ logger = logging.getLogger(__name__)
 # risk_enforcer._OPEN_GRACE_SEC (suppresses stop-out/SL/TP) so ALL three sides
 # wait the same window for opening prices to settle — symmetric, no exploit.
 _OPEN_SETTLE_BUFFER_SEC = 60
+
+
+def execution_snapshot(
+    *,
+    quote: dict[str, Any],
+    order_created_at: Any,
+    reference_ltp: Decimal | None,
+    fill_price: Decimal | None,
+) -> dict[str, Any]:
+    """What the market looked like at a fill, for the slippage / latency reports.
+
+    Pure and defensive on purpose: this runs inside the fill path, so a missing
+    or malformed quote must yield None rather than raise. Returns
+    ``tick_age_ms`` (how stale the feed tick was), ``fill_latency_ms`` (order
+    accepted → filled) and ``markup`` (fill minus the pre-markup reference).
+    """
+    tick_age_ms: int | None = None
+    try:
+        quote_ts = float((quote or {}).get("ts") or 0)
+        if quote_ts > 0:
+            tick_age_ms = max(0, int(time.time() * 1000 - quote_ts))
+    except (TypeError, ValueError):
+        tick_age_ms = None
+
+    fill_latency_ms: int | None = None
+    if order_created_at is not None:
+        try:
+            created = order_created_at
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            fill_latency_ms = max(0, int((now_utc() - created).total_seconds() * 1000))
+        except Exception:  # noqa: BLE001 — telemetry must never break a fill
+            fill_latency_ms = None
+
+    markup: Decimal | None = None
+    try:
+        if reference_ltp is not None and reference_ltp > 0 and fill_price is not None:
+            markup = quantize_money(to_decimal(fill_price) - to_decimal(reference_ltp))
+    except Exception:  # noqa: BLE001
+        markup = None
+
+    return {
+        "tick_age_ms": tick_age_ms,
+        "fill_latency_ms": fill_latency_ms,
+        "markup": markup,
+    }
 
 
 def _trade_number() -> str:
@@ -88,6 +136,7 @@ async def execute_market_order(
     fill_price = ltp
     bid: Decimal | None = None
     ask: Decimal | None = None
+    quote: dict[str, Any] = {}
     try:
         quote = await market_data_service.get_quote(order.instrument.token)
         bid_raw = quote.get("bid")
@@ -400,6 +449,16 @@ async def execute_market_order(
         raw_pnl_inr_dec = quantize_money(raw_realized)
         pnl_inr_dec = quantize_money(raw_realized - to_decimal(charges.brokerage))
 
+    snapshot = execution_snapshot(
+        quote=quote,
+        order_created_at=getattr(order, "created_at", None),
+        reference_ltp=raw_ltp,
+        fill_price=to_decimal(ltp),
+    )
+
+    def _money(v: Decimal | None) -> Decimal128 | None:
+        return Decimal128(str(v)) if v is not None else None
+
     trade = Trade(
         trade_number=_trade_number(),
         order_id=order.id,  # type: ignore[arg-type]
@@ -420,6 +479,13 @@ async def execute_market_order(
         # pairs this close with the SAME lot the P&L booked against. None for
         # every non-Active-tab-Exit close → unchanged FIFO display.
         cost_basis_override=getattr(order, "cost_basis_override", None) if is_closing else None,
+        expected_price=_money(to_decimal(expected_price) if expected_price else None),
+        reference_ltp=_money(raw_ltp),
+        bid_at_fill=_money(bid),
+        ask_at_fill=_money(ask),
+        markup=_money(snapshot["markup"]),
+        tick_age_ms=snapshot["tick_age_ms"],
+        fill_latency_ms=snapshot["fill_latency_ms"],
     )
     order.filled_quantity += order.quantity
     order.pending_quantity = max(0, order.quantity - order.filled_quantity)
