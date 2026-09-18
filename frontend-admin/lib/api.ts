@@ -258,6 +258,10 @@ export const UsersAPI = {
   // admin approval (Payments → Settlement Requests).
   setAutoSettlement: (id: string, enabled: boolean) =>
     unwrap<any>(api.post(`/admin/users/${id}/auto-settlement`, { enabled })),
+  // Per-user trade alert — pops a toast + plays `sound` in this admin's
+  // panel whenever the user opens / closes a trade.
+  setTradeAlert: (id: string, body: { enabled?: boolean; sound?: string }) =>
+    unwrap<any>(api.post(`/admin/users/${id}/trade-alert`, body)),
   resetPassword: (id: string, new_password: string) =>
     unwrap<any>(api.post(`/admin/users/${id}/reset-password`, { new_password })),
   walletAdjust: (id: string, body: { amount: number; narration: string; transaction_type?: string }) =>

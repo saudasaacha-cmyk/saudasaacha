@@ -20,8 +20,10 @@ import {
   ShieldOff,
   TrendingUp,
   UserCog,
+  Volume2,
 } from "lucide-react";
 import { UsersAPI } from "@/lib/api";
+import { NOTIFY_SOUNDS, playSound } from "@/lib/notify-sound";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +91,20 @@ export default function UserDetailPage() {
     }
     autoSettlementMut.mutate(!current);
   }
+
+  // Trade alerts — watch this user's fills from the admin panel. The
+  // sound is stored per user so two watched users can be told apart
+  // without looking at the screen.
+  const tradeAlertMut = useMutation({
+    mutationFn: (body: { enabled?: boolean; sound?: string }) =>
+      UsersAPI.setTradeAlert(id, body),
+    onSuccess: (_d, body) => {
+      qc.invalidateQueries({ queryKey: ["admin", "user", id] });
+      if (body.sound) toast.success("Alert sound saved");
+      else toast.success(body.enabled ? "Trade alerts ON" : "Trade alerts OFF");
+    },
+    onError: (e: any) => toast.error(e.message || "Failed"),
+  });
 
   const [adjAmount, setAdjAmount] = useState("");
   const [adjNote, setAdjNote] = useState("");
@@ -300,6 +316,66 @@ export default function UserDetailPage() {
               <Button onClick={adjustWallet} className="w-full">
                 Apply
               </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card id="trade-alerts">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Volume2 className="size-4" /> Trade alerts
+            </CardTitle>
+            <CardDescription>
+              Pop a notification with sound in YOUR admin panel whenever this
+              user opens or closes a trade.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Button
+              variant="outline"
+              className={cn(
+                "w-full",
+                u.trade_alert && "border-emerald-500/50 text-emerald-700 dark:text-emerald-300"
+              )}
+              loading={tradeAlertMut.isPending}
+              onClick={() => tradeAlertMut.mutate({ enabled: !u.trade_alert })}
+            >
+              <Volume2 className="size-4" />
+              Alerts: {u.trade_alert ? "ON" : "OFF"}
+            </Button>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Sound
+              </Label>
+              <div className="flex gap-2">
+                <select
+                  value={u.trade_alert_sound || "chime"}
+                  onChange={(e) => {
+                    // Preview as you pick — picking a sound you can't hear
+                    // first is how you end up with fifteen identical bells.
+                    playSound(e.target.value);
+                    tradeAlertMut.mutate({ sound: e.target.value });
+                  }}
+                  className="h-9 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  {NOTIFY_SOUNDS.map((snd) => (
+                    <option key={snd.id} value={snd.id}>
+                      {snd.label}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  variant="outline"
+                  onClick={() => playSound(u.trade_alert_sound || "chime")}
+                  title="Play this sound"
+                >
+                  Test
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Only admins who own this user hear it. Silenced entirely when
+                Platform settings → Notifications is off.
+              </p>
             </div>
           </CardContent>
         </Card>

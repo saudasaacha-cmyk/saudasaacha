@@ -67,6 +67,10 @@ def _ser(u: User) -> dict:
         # for admin approval. Drives the user-detail toggle button +
         # the Payments → Settlement Requests tab.
         "auto_settlement": bool(getattr(u, "auto_settlement", True)),
+        # Per-user admin trade alert — drives the side toast + sound in
+        # the admin panel when this user opens / closes a trade.
+        "trade_alert": bool(getattr(u, "trade_alert", False)),
+        "trade_alert_sound": getattr(u, "trade_alert_sound", "chime") or "chime",
     }
 
 
@@ -769,6 +773,48 @@ async def set_auto_settlement(
         old_values={"auto_settlement": old_value},
         new_values={"auto_settlement": enabled},
         metadata={"action": "AUTO_SETTLEMENT_TOGGLE"},
+    )
+    return APIResponse(data=_ser(u))
+
+
+@router.post("/{user_id}/trade-alert", response_model=APIResponse[dict])
+async def set_trade_alert(
+    user_id: str,
+    payload: dict,
+    admin: CurrentAdmin,
+    _: None = Depends(require_perm("users", "write")),
+):
+    """Watch (or stop watching) this user's trades.
+
+    With it on, every fill on the user's positions pops a toast in the
+    admin panel — scoped to the admins who own the user — and plays the
+    chosen sound. Payload: `{"enabled": bool, "sound": str}`; `sound` is
+    optional and keeps the stored one when omitted. Audit-logged, because
+    "why didn't I get alerted" is a question that gets asked later.
+    """
+    u = await assert_user_in_scope(admin, user_id)
+    old_value = {
+        "trade_alert": bool(getattr(u, "trade_alert", False)),
+        "trade_alert_sound": getattr(u, "trade_alert_sound", "chime"),
+    }
+    if "enabled" in payload:
+        u.trade_alert = bool(payload.get("enabled"))
+    sound = str(payload.get("sound") or "").strip()
+    if sound:
+        u.trade_alert_sound = sound[:40]
+    await u.save()
+    await log_event(
+        action=AuditAction.SETTING_CHANGE,
+        entity_type="User",
+        entity_id=u.id,
+        actor_id=admin.id,
+        target_user_id=u.id,
+        old_values=old_value,
+        new_values={
+            "trade_alert": u.trade_alert,
+            "trade_alert_sound": u.trade_alert_sound,
+        },
+        metadata={"action": "TRADE_ALERT_TOGGLE"},
     )
     return APIResponse(data=_ser(u))
 

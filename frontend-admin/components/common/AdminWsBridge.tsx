@@ -10,6 +10,7 @@ import { ADMIN_API_KEY, STORAGE_KEYS, WS_URL } from "@/lib/constants";
 import {
   ensureNotificationPermission,
   playNotifyPing,
+  playSound,
   showNativeNotification,
   subscribeForWebPush,
 } from "@/lib/notify-sound";
@@ -147,6 +148,40 @@ export function AdminWsBridge() {
             qc.invalidateQueries({ queryKey: ["admin", "positions"] });
             qc.invalidateQueries({ queryKey: ["admin", "dashboard"] });
             qc.invalidateQueries({ queryKey: ["admin", "accounts"] });
+            // Per-user trade watch. The backend only attaches `alert` for
+            // users whose trade_alert flag is on (Users → user → Trade
+            // alerts), so there's nothing to filter by here beyond the
+            // same ownership scope the deposit toasts use.
+            if (msg.alert && notificationsEnabled()) {
+              const recipients: string[] | undefined = msg.recipient_admin_ids;
+              const myId = String(admin?.id || "");
+              if (Array.isArray(recipients) && myId && !recipients.includes(myId)) {
+                break;
+              }
+              const a = msg.alert;
+              const who = [a.user_name, a.user_code && `(${a.user_code})`]
+                .filter(Boolean)
+                .join(" ");
+              const verb =
+                a.event === "closed" ? "closed" : a.event === "opened" ? "opened" : "changed";
+              const body = [
+                `${a.action} ${a.qty} ${a.symbol}`,
+                a.price ? `@ ${Number(a.price).toLocaleString("en-IN")}` : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              const show = a.event === "closed" ? toast.warning : toast.success;
+              show(`${who} ${verb} a trade`, {
+                description: body,
+                duration: 8000,
+                action: {
+                  label: "View",
+                  onClick: () =>
+                    routerRef.current.push(`/users/${msg.user_id}#positions`),
+                },
+              });
+              playSound(a.sound);
+            }
             break;
           case "order_update":
             qc.invalidateQueries({ queryKey: ["admin", "orders"] });

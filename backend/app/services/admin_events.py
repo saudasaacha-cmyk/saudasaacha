@@ -49,3 +49,59 @@ async def publish_admin_event(event_type: str, payload: dict[str, Any] | None = 
         # request. The admin dashboard's polling still keeps numbers
         # eventually-consistent if a single publish is lost.
         logger.exception("admin_event_publish_failed", extra={"type": event_type})
+
+
+async def trade_alert_fields(
+    user_id: Any,
+    *,
+    action: str,
+    quantity: float,
+    price: Any,
+    symbol: str,
+    event: str,
+) -> dict[str, Any]:
+    """Extra publish fields for a fill on a user the admin is watching.
+
+    Returns ``{}`` — the normal case — when the user's `trade_alert` flag
+    is off, so the fill path costs exactly one projected read. When it IS
+    on, the payload carries everything the toast needs plus the
+    `recipient_admin_ids` scope filter the deposit / withdrawal toasts
+    already use, so one admin's watch never rings in another's panel.
+    """
+    from beanie import PydanticObjectId
+
+    from app.models.user import User
+
+    try:
+        doc = await User.get_motor_collection().find_one(
+            {"_id": PydanticObjectId(str(user_id))},
+            {
+                "trade_alert": 1,
+                "trade_alert_sound": 1,
+                "full_name": 1,
+                "user_code": 1,
+            },
+        )
+        if not doc or not doc.get("trade_alert"):
+            return {}
+        from app.services.push_service import _compute_recipient_admin_ids
+
+        recipients = await _compute_recipient_admin_ids(str(user_id))
+        return {
+            "recipient_admin_ids": [str(r) for r in recipients],
+            "alert": {
+                "sound": doc.get("trade_alert_sound") or "chime",
+                "user_name": doc.get("full_name") or "",
+                "user_code": doc.get("user_code") or "",
+                "action": action,
+                "qty": quantity,
+                "price": float(price),
+                "symbol": symbol,
+                "event": event,
+            },
+        }
+    except Exception:
+        # Never let the alert lookup break a fill — the publish still goes
+        # out without it and the admin's tables refresh as before.
+        logger.exception("trade_alert_fields_failed")
+        return {}

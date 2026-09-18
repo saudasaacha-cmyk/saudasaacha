@@ -58,6 +58,10 @@ async def apply_fill(
         Position.status == PositionStatus.OPEN,
     )
 
+    # Was there nothing open before this fill? Drives the admin trade
+    # alert's wording — "opened" vs a later add / reduce on the same row.
+    opened_new = pos is None
+
     signed_qty = quantity if action == OrderAction.BUY else -quantity
 
     # Capture the prevailing USD/INR rate at the moment of fill — used later
@@ -302,8 +306,22 @@ async def apply_fill(
     # so one publish at the bottom of `apply_fill` covers all of them.
     # Fire-and-forget; failures are swallowed inside `publish_admin_event`.
     try:
-        from app.services.admin_events import publish_admin_event
+        from app.services.admin_events import publish_admin_event, trade_alert_fields
 
+        # Only for users the admin has explicitly put a watch on — an
+        # empty dict otherwise, which is every user by default.
+        alert = await trade_alert_fields(
+            user_id,
+            action=action.value,
+            quantity=quantity,
+            price=price,
+            symbol=instrument.symbol,
+            event=(
+                "closed"
+                if pos.status == PositionStatus.CLOSED
+                else "opened" if opened_new else "changed"
+            ),
+        )
         await publish_admin_event(
             "position_update",
             {
@@ -311,6 +329,7 @@ async def apply_fill(
                 "user_id": str(user_id),
                 "position_id": str(pos.id),
                 "status": pos.status.value,
+                **alert,
             },
         )
     except Exception:  # pragma: no cover

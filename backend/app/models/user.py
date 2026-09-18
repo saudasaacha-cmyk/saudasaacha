@@ -317,6 +317,16 @@ class User(TimestampMixin):
     # `is_reducing` exemption).
     auto_settlement: bool = True
 
+    # Per-user admin trade alert (default OFF). When True, every fill on
+    # this user's positions also carries an `alert` block on the
+    # `admin:events` publish, so the owning admins get a side toast + a
+    # chosen sound the moment the user opens or closes a trade. Watching a
+    # handful of users is the point — turning it on for everybody would
+    # make the panel unusable. `trade_alert_sound` is one of the ids in
+    # frontend-admin/lib/notify-sound.ts.
+    trade_alert: bool = False
+    trade_alert_sound: str = "chime"
+
     # Per-admin support WhatsApp number, shown to that admin's downstream
     # users on the "Add funds → Support" button and any other Contact-
     # support affordance in the apk/user web. Cascade resolution: when a
