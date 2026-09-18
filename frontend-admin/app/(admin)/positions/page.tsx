@@ -196,7 +196,11 @@ function AdminPositionsInner() {
   const ownScope = isSuperAdmin || undefined;
   const searchParams = useSearchParams();
   const queryUserId = searchParams?.get("user_id") ?? null;
-  const [tab, setTab] = useState<"open" | "closed">("open");
+  // A trade-alert toast's "View" deep-links straight at the position it
+  // fired for: `?user_id=…&q=<symbol>&tab=closed` when the fill closed it.
+  const [tab, setTab] = useState<"open" | "closed">(
+    searchParams?.get("tab") === "closed" ? "closed" : "open",
+  );
   // FIFO closed view — shows the SAME per-opening-fill rows the USER sees in
   // their Closed history (one row per opening-fill × closing-fill pairing),
   // instead of one aggregated row per position. Only meaningful for a single
@@ -214,7 +218,7 @@ function AdminPositionsInner() {
   // the Closed tab paginates + searches SERVER-side, so its query depends
   // on these. The Open tab still filters/paginates client-side (it needs
   // the whole set in one shot for the live M2M aggregate + WS subscribe).
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(searchParams?.get("q") ?? "");
   // Type filter — one dropdown that narrows by PRODUCT (NRML/MIS/CNC) or by
   // ORDER TYPE (MARKET/LIMIT/SL_M). "ALL" = no filter.
   const [typeFilter, setTypeFilter] = useState("ALL");
@@ -228,6 +232,18 @@ function AdminPositionsInner() {
   // (last week + current week). Set → closed_at bounded by these dates.
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+
+  // Re-read the deep-link on every navigation. Next keeps this component
+  // mounted when the URL changes within the same route, so the useState
+  // seeds above only fire once — without this, a second trade-alert "View"
+  // (different user / symbol) would change the URL and nothing else.
+  const spKey = searchParams?.toString() ?? "";
+  useEffect(() => {
+    const sp = new URLSearchParams(spKey);
+    setSearch(sp.get("q") ?? "");
+    setTab(sp.get("tab") === "closed" ? "closed" : "open");
+    setPage(1);
+  }, [spKey]);
   // Closed search hits the backend — debounce so we don't fire a request
   // on every keystroke.
   const [debouncedSearch, setDebouncedSearch] = useState("");

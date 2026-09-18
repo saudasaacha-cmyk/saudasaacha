@@ -176,8 +176,14 @@ export function AdminWsBridge() {
                 duration: 8000,
                 action: {
                   label: "View",
+                  // Straight at the position: that user's book, filtered to
+                  // the symbol, on the tab the fill left it in.
                   onClick: () =>
-                    routerRef.current.push(`/users/${msg.user_id}#positions`),
+                    routerRef.current.push(
+                      `/positions?user_id=${encodeURIComponent(msg.user_id)}` +
+                        `&q=${encodeURIComponent(a.symbol || "")}` +
+                        (a.event === "closed" ? "&tab=closed" : ""),
+                    ),
                 },
               });
               playSound(a.sound);
