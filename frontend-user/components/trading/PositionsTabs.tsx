@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Pencil, X, Zap } from "lucide-react";
 import { InstrumentAPI, OrderAPI, PositionAPI } from "@/lib/api";
+import { isOptimisticId, resolveRealPositionId } from "@/lib/positionIds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -419,7 +420,15 @@ export function PositionsTabs({ positions, pendingOrders, history, cancelled, to
       duration: 1500,
     });
 
-    PositionAPI.squareoff(id)
+    // A row placed seconds ago still carries its synthetic id; the server
+    // can't parse that as an ObjectId and answers "Position not found".
+    (isOptimisticId(id)
+      ? resolveRealPositionId(qc, id).then((real) => {
+          if (!real) throw new Error("Order is still settling — try again in a moment");
+          return PositionAPI.squareoff(real);
+        })
+      : PositionAPI.squareoff(id)
+    )
       .then(() => {
         // DO NOT invalidate positions/active-trades here — see OrderPanel
         // comment. Atlas can briefly return the position as still-OPEN
@@ -1261,6 +1270,7 @@ function EditSlTpDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const qc = useQueryClient();
   const [sl, setSl] = useState<string>("");
   const [tp, setTp] = useState<string>("");
   const [saving, setSaving] = useState(false);
@@ -1294,7 +1304,19 @@ function EditSlTpDialog({
       if (position.__activeTradeId) {
         await PositionAPI.updateActiveTradeSlTp(position.__activeTradeId, body);
       } else {
-        await PositionAPI.updateSlTp(position.id, body);
+        // Setting SL/TP the instant a trade is taken hits the row while it is
+        // still optimistic, and the synthetic id can't be looked up server
+        // side — that is the "Position not found" toast.
+        let targetId = String(position.id);
+        if (isOptimisticId(targetId)) {
+          const real = await resolveRealPositionId(qc, targetId);
+          if (!real) {
+            toast.error("Order is still settling — set SL / TP again in a moment");
+            return;
+          }
+          targetId = real;
+        }
+        await PositionAPI.updateSlTp(targetId, body);
       }
       toast.success("SL / TP updated");
       onSaved();

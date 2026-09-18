@@ -5,6 +5,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { toast } from "sonner";
 import { Inbox, Layers, Lock, LogOut, Pencil, Shield, Target, X } from "lucide-react";
 import { OrderAPI, PositionAPI, WalletAPI } from "@/lib/api";
+import { resolveRealPositionId as resolveRealPositionIdShared } from "@/lib/positionIds";
 import { useMarketStream } from "@/lib/useMarketStream";
 import { usePriceFlash } from "@/lib/usePriceFlash";
 import { isInstrumentMarketOpen } from "@/lib/marketHours";
@@ -535,40 +536,9 @@ export default function PositionsPage() {
   // The backend ObjectId lands within ~500ms via the WS push / next poll, so
   // a couple of quick refetches almost always finds it — turning an instant
   // open→close into a smooth close instead of "Order still settling".
-  async function resolveRealPositionId(optimisticId: string): Promise<string | null> {
-    const cur = qc.getQueryData<any[]>(["positions", "open"]) ?? [];
-    const opt = cur.find((p) => p.id === optimisticId);
-    // Token from the optimistic row; fall back to the lone open row when the
-    // poll already swapped the optimistic id out from under the tap.
-    const tok =
-      String(opt?.instrument_token ?? opt?.token ?? "") ||
-      (cur.length === 1 ? String(cur[0]?.instrument_token ?? cur[0]?.token ?? "") : "");
-    if (!tok) return null;
-    // Be PATIENT: a "buy then instantly exit" taps Close while the BUY's
-    // own POST is still in flight, so the real position row may take up to
-    // ~1-2 s to land. 8 attempts × 400 ms (~3.2 s) almost always catches it
-    // — most fills resolve on the 1st-2nd try, only the sub-second
-    // open→close race needs the longer budget. Beats the old 3-try (~1.2 s)
-    // that surfaced "Order still settling" on a fast buy→exit.
-    const ATTEMPTS = 8;
-    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      try {
-        await qc.refetchQueries({ queryKey: ["positions", "open"] });
-      } catch {
-        /* ignore — try the cache anyway */
-      }
-      const fresh = qc.getQueryData<any[]>(["positions", "open"]) ?? [];
-      const real = fresh.find(
-        (p) =>
-          !String(p.id).startsWith("optimistic_") &&
-          String(p.instrument_token ?? p.token ?? "") === tok &&
-          (p.status ?? "OPEN") === "OPEN",
-      );
-      if (real?.id) return String(real.id);
-      if (attempt < ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 400));
-    }
-    return null;
-  }
+  // Same resolution the terminal panel uses — see lib/positionIds.ts.
+  const resolveRealPositionId = (optimisticId: string) =>
+    resolveRealPositionIdShared(qc, optimisticId);
 
   // A close error we treat as "reconcile, don't alarm": already gone / in
   // flight / network / timeout — the B-Book close usually went through anyway
