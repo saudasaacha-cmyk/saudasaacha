@@ -687,6 +687,14 @@ async def house_exposure(
                 "short_qty": {
                     "$sum": {"$cond": [{"$lt": ["$quantity", 0]}, {"$abs": "$quantity"}, 0]}
                 },
+                # How many open trades sit on each side, as distinct from how
+                # much quantity: "3 clients are long XAUUSD, 1 is short".
+                "long_positions": {
+                    "$sum": {"$cond": [{"$gt": ["$quantity", 0]}, 1, 0]}
+                },
+                "short_positions": {
+                    "$sum": {"$cond": [{"$lt": ["$quantity", 0]}, 1, 0]}
+                },
                 "users": {"$addToSet": "$user_id"},
                 "positions": {"$sum": 1},
                 "margin_used": {"$sum": {"$toDouble": "$margin_used"}},
@@ -710,6 +718,8 @@ async def house_exposure(
                 "net_qty": 1,
                 "long_qty": 1,
                 "short_qty": 1,
+                "long_positions": 1,
+                "short_positions": 1,
                 "positions": 1,
                 "users": {"$size": "$users"},
                 "margin_used": {"$round": ["$margin_used", 2]},

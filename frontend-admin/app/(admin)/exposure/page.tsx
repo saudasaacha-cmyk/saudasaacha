@@ -18,6 +18,8 @@ type ExposureRow = {
   net_qty: number;
   long_qty: number;
   short_qty: number;
+  long_positions: number;
+  short_positions: number;
   users: number;
   positions: number;
   notional: number;
@@ -87,16 +89,29 @@ export default function ExposurePage() {
       ),
     },
     {
-      key: "long_qty",
-      header: "Long",
+      key: "open_trades",
+      header: "Buy / Sell trades",
       align: "right" as const,
-      render: (r) => <span className="font-tabular text-muted-foreground">{num(r.long_qty, 2)}</span>,
+      // Counts, not quantity: how many open trades sit on each side.
+      render: (r) => (
+        <span className="font-tabular">
+          <span className="text-buy">{r.long_positions}</span>
+          <span className="text-muted-foreground"> / </span>
+          <span className="text-sell">{r.short_positions}</span>
+        </span>
+      ),
+    },
+    {
+      key: "long_qty",
+      header: "Buy qty",
+      align: "right" as const,
+      render: (r) => <span className="font-tabular text-buy">{num(r.long_qty, 2)}</span>,
     },
     {
       key: "short_qty",
-      header: "Short",
+      header: "Sell qty",
       align: "right" as const,
-      render: (r) => <span className="font-tabular text-muted-foreground">{num(r.short_qty, 2)}</span>,
+      render: (r) => <span className="font-tabular text-sell">{num(r.short_qty, 2)}</span>,
     },
     {
       key: "users",
