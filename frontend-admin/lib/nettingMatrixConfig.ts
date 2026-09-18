@@ -238,6 +238,14 @@ export const CATEGORY_FIELDS: Record<string, FieldDef[]> = {
     { key: "expiryProfitHoldMinSeconds", label: "Expiry profit hold (s)", type: "number" },
     { key: "expiryLossHoldMinSeconds", label: "Expiry loss hold (s)", type: "number" },
     {
+      key: "pendingOrderExpiryTime",
+      label: "Cancel pending orders at (IST)",
+      // Blank = never: this segment's unfilled LIMIT / SL-M orders carry.
+      // Set a time and they are cancelled once a day at it, and positions
+      // carrying overnight also lose their SL / TP.
+      type: "time",
+    },
+    {
       key: "expiryNoNewTradeDays",
       label: "No new trades in last N days",
       // Counts calendar days and includes expiry day itself: 3 on a Thursday

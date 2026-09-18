@@ -1,49 +1,48 @@
-"""End-of-day auto-cancel for parked DAY orders (NSE + MCX).
+"""End-of-day auto-cancel for parked DAY orders, per segment.
 
 WHY THIS EXISTS
 ---------------
-A LIMIT / SL-M order the user parks sits as ``OPEN`` in the ``orders``
-collection and the ``pending_order_poller`` only ever *fires* it when its
-trigger is hit — nothing ever *expires* it. So an unfilled NSE/MCX pending
-order (or an SL / TP leg) survived past the session and carried into the
-NEXT trading day, firing on the next day's prices. That's the operator-
-reported "pending order dusre din carry forward ho jaata hai" bug.
+A LIMIT / SL-M order the user parks sits as ``OPEN`` and the
+``pending_order_poller`` only ever *fires* it when its trigger is hit —
+nothing ever *expires* it. So an unfilled order carried into the NEXT
+trading day and fired on the next day's prices: the operator-reported
+"pending order dusre din carry forward ho jaata hai" bug.
 
-Real brokers treat a ``DAY`` order as valid for ONE session: if it hasn't
-filled by end of day it is cancelled. This loop restores that: a single
-sweep just after **00:00 IST** expires every still-parked ``LIMIT`` /
-``SL-M`` order on Indian exchange segments (NSE / BSE / NFO / BFO / MCX),
-releases the margin it had blocked, and marks it ``EXPIRED`` so it can't
-fire the next day.
+WHEN IT SWEEPS
+--------------
+Each settings row (Segment Settings) carries its own **pending order expiry
+time** in IST, because a forex session ends nowhere near an NSE one. At that
+time the row is swept once per IST day:
 
-SCOPE (operator decision, Jul 2026)
-------------------------------------
-  • Indian equity + F&O (NSE / BSE / NFO / BFO) and MCX ONLY.
-  • Forex (CDS, 24×5) and crypto (24×7) are EXEMPT — those markets trade
-    overnight, so a midnight cancel would kill live orders.
+  • unfilled LIMIT / SL-M orders on its instruments are marked ``EXPIRED``
+    and their blocked margin released;
+  • positions carrying overnight lose their SL / TP (operator decision —
+    brackets are day-scoped too). A carried position is therefore
+    unprotected until the user sets them again.
+
+A row with **no time set is never swept**, so its orders carry exactly as
+they did before this was configurable. ``00:00`` reproduces the original
+midnight sweep.
 
 AMO HANDLING
 ------------
-An AMO (After-Market Order) is placed in the evening FOR THE NEXT session,
-so it must survive the midnight that immediately follows its placement.
-It is given exactly one session: the sweep only expires an AMO once it is
-older than the START of the previous IST day (i.e. it has already lived
-through its intended session and still didn't fill). A normal DAY order is
-expired at the very next midnight after the calendar day it was placed on.
+An AMO is placed in the evening FOR THE NEXT session, so it must survive the
+sweep that immediately follows its placement. It is given exactly one
+session: expired only once it is older than the START of the previous IST
+day.
 
 SAFETY / PLACEMENT
 ------------------
-Mongo-only (no in-process price state), so it is safe on ANY worker and
-runs under its OWN ``leader:eod_order_cleanup`` lock (NOT the ``leader:feed``
-gate). The sweep is idempotent — a second run finds no OPEN/PARTIAL rows to
-expire — so an extra fire on a mid-day restart is harmless.
+Mongo-only (no in-process price state), so it is safe on ANY worker and runs
+under its OWN ``leader:eod_order_cleanup`` lock (NOT the ``leader:feed``
+gate). Idempotent — a second run finds nothing left to expire.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, time as _dtime, timedelta, timezone
 
 from app.models._base import OrderType
 from app.models.order import Order, OrderStatus
@@ -59,7 +58,8 @@ _UTC = timezone.utc
 # intraday→carry rollover loop). `_last_run_day` is the IST YYYYMMDD the
 # sweep last completed, so we fire exactly once per calendar day.
 _stop = False
-_last_run_day: str | None = None
+# Per settings row: the IST YYYYMMDD its cutoff last swept on.
+_last_run_day: dict[str, str] = {}
 
 
 def stop_eod_order_cleanup() -> None:
@@ -67,17 +67,111 @@ def stop_eod_order_cleanup() -> None:
     _stop = True
 
 
-def _is_nse_mcx_segment(segment: str | None) -> bool:
-    """True for Indian equity / F&O / MCX segments only.
+def parse_cutoff(value: str | None) -> _dtime | None:
+    """"HH:MM" (IST) → a time, or None when unset or unparseable.
 
-    Prefix match (not the fixed segment sets) so any Zerodha-CSV variant
-    — NSE_FUT / NFO_OPTION / BFO_OPT / MCX_FUT … — is caught. Deliberately
-    EXCLUDES CDS (forex, 24×5) and CRYPTO (24×7), which trade overnight and
-    must not be swept at midnight.
+    None means "this segment never expires parked orders" — the feature is
+    off until an admin types a time.
     """
-    if not segment:
+    s = (value or "").strip()
+    if not s:
+        return None
+    try:
+        hh, mm = s.split(":")
+        h, m = int(hh), int(mm)
+    except (ValueError, AttributeError):
+        return None
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return _dtime(hour=h, minute=m)
+
+
+def cutoff_reached(
+    cutoff: _dtime | None, now: datetime, last_run_day: str | None
+) -> bool:
+    """Is this segment due for its once-a-day sweep?
+
+    `00:00` behaves exactly like the old midnight sweep: the first tick of a
+    new IST day is already past it.
+    """
+    if cutoff is None:
         return False
-    return segment.upper().startswith(("NSE", "BSE", "NFO", "BFO", "MCX"))
+    if last_run_day == now.strftime("%Y%m%d"):
+        return False
+    return now.time() >= cutoff
+
+
+def admin_row_for_segment(segment: str | None) -> str | None:
+    """Instrument segment (NSE_FUTURE, FOREX…) → the settings row that owns
+    it. Unmapped segments own themselves, which is how FOREX / CRYPTO /
+    STOCKS already resolve."""
+    if not segment:
+        return None
+    from app.services.netting_service import _SEGMENT_NAME_MAP
+
+    seg = str(segment).upper()
+    return _SEGMENT_NAME_MAP.get(seg, seg)
+
+
+async def segment_cutoffs() -> dict[str, _dtime]:
+    """Configured cutoff per settings row. Only rows with a time appear."""
+    from app.models.netting import NettingSegment
+
+    out: dict[str, _dtime] = {}
+    try:
+        for seg in await NettingSegment.find_all().to_list():
+            cut = parse_cutoff(getattr(seg, "pendingOrderExpiryTime", None))
+            if cut is not None:
+                out[str(seg.name).upper()] = cut
+    except Exception:
+        logger.exception("eod_segment_cutoffs_failed")
+    return out
+
+
+async def clear_carry_brackets(seg_names: set[str]) -> int:
+    """Wipe SL / TP off positions carrying overnight in these segments.
+
+    Operator decision: brackets are day-scoped like the orders, so a carried
+    position starts the next session without them. NOTE this leaves the
+    position unprotected overnight — it is the reason the setting is per
+    segment rather than global.
+    """
+    from app.models.position import Position, PositionStatus
+
+    cleared = 0
+    try:
+        rows = await Position.find(
+            {
+                "status": PositionStatus.OPEN.value,
+                "$or": [
+                    {"stop_loss": {"$nin": [None, 0]}},
+                    {"target": {"$nin": [None, 0]}},
+                ],
+            }
+        ).to_list()
+    except Exception:
+        logger.exception("eod_bracket_scan_failed")
+        return 0
+
+    for pos in rows:
+        try:
+            if admin_row_for_segment(getattr(pos, "segment_type", None)) not in seg_names:
+                continue
+            pos.stop_loss = None
+            pos.target = None
+            await pos.save()
+            cleared += 1
+            logger.info(
+                "eod_carry_brackets_cleared",
+                extra={
+                    "position_id": str(pos.id),
+                    "user_id": str(pos.user_id),
+                    "symbol": pos.instrument.symbol,
+                },
+            )
+        except Exception:
+            logger.exception("eod_bracket_clear_failed", extra={"position_id": str(pos.id)})
+    return cleared
 
 
 async def expire_stale_day_orders() -> dict[str, int]:
@@ -85,7 +179,17 @@ async def expire_stale_day_orders() -> dict[str, int]:
     session is over, releasing their blocked margin. Never raises — one bad
     order must not stop the rest. Returns ``{scanned, expired}``.
     """
-    global _last_run_day  # noqa: F824 — documented; not mutated here
+    global _last_run_day
+
+    now = now_ist()
+    cutoffs = await segment_cutoffs()
+    due = {
+        name
+        for name, cut in cutoffs.items()
+        if cutoff_reached(cut, now, _last_run_day.get(name))
+    }
+    if not due:
+        return {"scanned": 0, "expired": 0, "brackets_cleared": 0}
 
     try:
         rows = await Order.find(
@@ -101,7 +205,6 @@ async def expire_stale_day_orders() -> dict[str, int]:
     if not rows:
         return {"scanned": 0, "expired": 0}
 
-    now = now_ist()
     today_start_utc = to_utc(start_of_day_ist(now.date()))
     # AMO gets one full session — only expired once older than the START of
     # the PREVIOUS IST day (it already had its session and didn't fill).
@@ -113,7 +216,7 @@ async def expire_stale_day_orders() -> dict[str, int]:
     for o in rows:
         try:
             seg = getattr(o.instrument, "segment", None)
-            if not _is_nse_mcx_segment(str(seg) if seg else None):
+            if admin_row_for_segment(str(seg) if seg else None) not in due:
                 continue
 
             created = o.created_at
@@ -182,24 +285,38 @@ async def expire_stale_day_orders() -> dict[str, int]:
         except Exception:
             logger.exception("eod_order_admin_event_failed")
 
-    return {"scanned": len(rows), "expired": expired}
+    # Brackets on positions carrying overnight go the same way as the parked
+    # orders — operator decision; see clear_carry_brackets.
+    brackets = await clear_carry_brackets(due)
+
+    day_key = now.strftime("%Y%m%d")
+    for name in due:
+        _last_run_day[name] = day_key
+
+    return {
+        "scanned": len(rows),
+        "expired": expired,
+        "brackets_cleared": brackets,
+        "segments": ",".join(sorted(due)),
+    }
 
 
 async def eod_order_cleanup_loop(interval_sec: float = 60.0) -> None:
-    """Wake every minute; run the EOD sweep exactly ONCE per IST calendar
-    day, the first tick after midnight (00:00 IST). Also runs once on boot
-    so anything left parked from a previous day is cleaned at startup.
+    """Wake every minute and sweep any segment whose cutoff has arrived.
+
+    Each settings row carries its own "pending order expiry time" (IST),
+    because a forex session ends nowhere near an NSE one. A row with no time
+    set is never swept — its parked orders carry, as they did before this
+    was configurable. Each row sweeps once per IST day.
     """
-    global _stop, _last_run_day
+    global _stop
     _stop = False
     logger.info("eod_order_cleanup_started", extra={"interval_sec": interval_sec})
     while not _stop:
         try:
-            day_key = now_ist().strftime("%Y%m%d")
-            if _last_run_day != day_key:
-                summary = await expire_stale_day_orders()
-                _last_run_day = day_key
-                logger.info("eod_order_cleanup_swept", extra={"day": day_key, **summary})
+            summary = await expire_stale_day_orders()
+            if summary.get("expired") or summary.get("brackets_cleared"):
+                logger.info("eod_order_cleanup_swept", extra=summary)
         except Exception:
             logger.exception("eod_order_cleanup_loop_failed")
         try:
