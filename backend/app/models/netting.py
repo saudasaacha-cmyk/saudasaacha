@@ -222,6 +222,7 @@ class NettingFieldsBase(BaseModel):
     # Expiry day
     expiryProfitHoldMinSeconds: int | None = None
     expiryLossHoldMinSeconds: int | None = None
+    expiryNoNewTradeDays: int | None = None
     expiryDayIntradayMargin: float | None = None
     expiryDayOptionBuyMargin: float | None = None
     expiryDayOptionSellMargin: float | None = None
@@ -309,6 +310,9 @@ class NettingFieldsRequired(BaseModel):
     # Expiry day
     expiryProfitHoldMinSeconds: int = 0
     expiryLossHoldMinSeconds: int = 0
+    # Final N calendar days of a contract's life (expiry day included) where
+    # only closing is allowed: no fresh position, no adding lots. 0 = off.
+    expiryNoNewTradeDays: int = 0
     # Default = None so the resolver's "or effective_margin_pct" fallback
     # makes expiry-day margin inherit the regular intraday tier when admin
     # hasn't explicitly set a stricter value. Previously seeded to

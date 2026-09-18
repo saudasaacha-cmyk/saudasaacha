@@ -158,6 +158,29 @@ def stale_feed_block_reason(
     )
 
 
+def expiry_window_blocks_new_trade(
+    *,
+    expiry: Any,
+    today: Any,
+    days: int,
+) -> bool:
+    """Is `today` inside the contract's final `days` calendar days?
+
+    Expiry day counts as one of them: 3 on a Thursday expiry covers Tue, Wed
+    and Thu, so Monday is the last day a position can be opened. 0 days, no
+    expiry, or an already-expired contract all mean "not this rule's business".
+    """
+    if days <= 0 or expiry is None or today is None:
+        return False
+    try:
+        remaining = (expiry - today).days
+    except TypeError:
+        return False
+    if remaining < 0:
+        return False  # already expired — the contract-live guard owns that
+    return remaining <= days - 1
+
+
 async def validate(
     *,
     user: User,
@@ -394,6 +417,29 @@ async def validate(
         raise OrderRejectedError(
             "Exit-only mode is active — only closing trades are allowed",
             code="EXIT_ONLY_MODE",
+        )
+
+    # ── Expiry run-in: closing only in a contract's final days ─────
+    # Segment setting: with 3 on a Thursday expiry, Tue / Wed / Thu accept
+    # closes but no fresh positions and no added lots, so nobody is still
+    # building exposure into settlement. Admin square-off and the risk
+    # engine are exempt — they exist to flatten.
+    _expiry_no_new_days = int(s.get("expiryNoNewTradeDays") or 0)
+    if (
+        _expiry_no_new_days > 0
+        and not is_squareoff
+        and not is_reducing
+        and expiry_window_blocks_new_trade(
+            expiry=instrument.expiry,
+            today=now_ist().date(),
+            days=_expiry_no_new_days,
+        )
+    ):
+        raise OrderRejectedError(
+            f"{instrument.symbol} expires on {instrument.expiry} — no new "
+            f"positions in the last {_expiry_no_new_days} day(s). Closing or "
+            "reducing what you hold still works.",
+            code="EXPIRY_NO_NEW_TRADE",
         )
 
     # ── Settlement-pending gate ────────────────────────────────────

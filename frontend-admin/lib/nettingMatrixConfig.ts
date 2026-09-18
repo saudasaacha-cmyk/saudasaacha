@@ -238,6 +238,13 @@ export const CATEGORY_FIELDS: Record<string, FieldDef[]> = {
     { key: "expiryProfitHoldMinSeconds", label: "Expiry profit hold (s)", type: "number" },
     { key: "expiryLossHoldMinSeconds", label: "Expiry loss hold (s)", type: "number" },
     {
+      key: "expiryNoNewTradeDays",
+      label: "No new trades in last N days",
+      // Counts calendar days and includes expiry day itself: 3 on a Thursday
+      // expiry blocks Tue, Wed and Thu. Closing stays allowed throughout.
+      type: "number",
+    },
+    {
       key: "expiryDayMarginAsPercent",
       label: "Expiry margin as %",
       // When Yes, the three expiry-day margin numbers below are percent
