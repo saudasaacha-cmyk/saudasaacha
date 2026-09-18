@@ -337,7 +337,7 @@ def _coerce_risk_value(field: str, v: Any) -> Any:
     them on the next read and crash the GET endpoint."""
     if v is None:
         return None
-    if field in ("profitTradeHoldMinSeconds", "lossTradeHoldMinSeconds"):
+    if field in ("profitTradeHoldMinSeconds", "lossTradeHoldMinSeconds", "staleFeedBlockSec"):
         try:
             return int(round(float(v)))
         except (TypeError, ValueError):
