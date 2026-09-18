@@ -734,6 +734,8 @@ async def house_exposure(
     totals = {
         "symbols": len(rows),
         "positions": sum(r["positions"] for r in rows),
+        "long_positions": sum(r["long_positions"] for r in rows),
+        "short_positions": sum(r["short_positions"] for r in rows),
         # INR everywhere, so this one total is comparable across symbols.
         "margin_used": round(sum(r["margin_used"] for r in rows), 2),
         "users": 0,

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
@@ -32,6 +33,8 @@ type ExposurePayload = {
   totals: {
     symbols: number;
     positions: number;
+    long_positions: number;
+    short_positions: number;
     users: number;
     margin_used: number;
   };
@@ -44,14 +47,38 @@ const num = (v: number, dp = 2) =>
   });
 
 export default function ExposurePage() {
+  const [segment, setSegment] = useState("ALL");
+
   const { data, isFetching } = useQuery<ExposurePayload>({
     queryKey: ["admin", "exposure"],
     queryFn: () => TradingAPI.exposure(),
     refetchInterval: 5000,
   });
 
-  const rows = data?.rows ?? [];
-  const totals = data?.totals;
+  const allRows = data?.rows ?? [];
+  // Segments present in the book right now — no point offering a filter for
+  // a segment nobody holds.
+  const segments = useMemo(
+    () => Array.from(new Set(allRows.map((r) => r.segment).filter(Boolean))).sort(),
+    [allRows],
+  );
+  const rows = useMemo(
+    () => (segment === "ALL" ? allRows : allRows.filter((r) => r.segment === segment)),
+    [allRows, segment],
+  );
+  // Totals follow the filter, so "options only" answers how many option
+  // trades are open on each side.
+  const totals = useMemo(
+    () => ({
+      symbols: rows.length,
+      positions: rows.reduce((n, r) => n + r.positions, 0),
+      long_positions: rows.reduce((n, r) => n + r.long_positions, 0),
+      short_positions: rows.reduce((n, r) => n + r.short_positions, 0),
+      users: segment === "ALL" ? (data?.totals.users ?? 0) : 0,
+      margin_used: rows.reduce((n, r) => n + r.margin_used, 0),
+    }),
+    [rows, segment, data],
+  );
 
   const columns: Column<ExposureRow>[] = [
     {
@@ -153,13 +180,29 @@ export default function ExposurePage() {
       <PageHeader
         title="Exposure"
         description="Every open client position folded together per symbol — the book the house is carrying. Refreshes every 5 seconds."
+        actions={
+          <select
+            value={segment}
+            onChange={(e) => setSegment(e.target.value)}
+            className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+            aria-label="Filter by segment"
+          >
+            <option value="ALL">All segments</option>
+            {segments.map((s) => (
+              <option key={s} value={s}>
+                {s.replaceAll("_", " ")}
+              </option>
+            ))}
+          </select>
+        }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Symbols in book" value={String(totals?.symbols ?? 0)} />
-        <Stat label="Open positions" value={String(totals?.positions ?? 0)} />
-        <Stat label="Clients holding" value={String(totals?.users ?? 0)} />
-        <Stat label="Margin used" value={formatINR(totals?.margin_used ?? 0)} />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Stat label="Symbols in book" value={String(totals.symbols)} />
+        <Stat label="Buy trades open" value={String(totals.long_positions)} tone="buy" />
+        <Stat label="Sell trades open" value={String(totals.short_positions)} tone="sell" />
+        <Stat label="Clients holding" value={segment === "ALL" ? String(totals.users) : "—"} />
+        <Stat label="Margin used" value={formatINR(totals.margin_used)} />
       </div>
 
       <DataTable
@@ -202,14 +245,30 @@ function HouseSide({ netQty }: { netQty: number }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "buy" | "sell";
+}) {
   return (
     <Card>
       <CardContent className="p-4">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
-        <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+        <div
+          className={cn(
+            "mt-1 text-xl font-semibold tabular-nums",
+            tone === "buy" && "text-buy",
+            tone === "sell" && "text-sell",
+          )}
+        >
+          {value}
+        </div>
       </CardContent>
     </Card>
   );
