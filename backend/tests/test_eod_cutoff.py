@@ -13,7 +13,11 @@ from datetime import datetime, time
 
 import pytest
 
-from app.services.eod_order_cleanup import cutoff_reached, parse_cutoff
+from app.services.eod_order_cleanup import (
+    apply_cutoff_override,
+    cutoff_reached,
+    parse_cutoff,
+)
 
 AFTERNOON = datetime(2026, 9, 18, 16, 0)
 
@@ -58,3 +62,31 @@ def test_only_once_per_day():
 def test_midnight_reproduces_the_original_sweep():
     # 00:00 means the first tick of a new IST day is already past the cutoff.
     assert cutoff_reached(time(0, 0), datetime(2026, 9, 18, 0, 0, 30), None) is True
+
+
+# ── Panel edits live in the super-admin override, not the seed ──────────
+
+
+def test_panel_value_overrides_the_seed():
+    out = {"FOREX": time(0, 0)}
+    apply_cutoff_override(out, "forex", "23:30")
+    assert out["FOREX"] == time(23, 30)
+
+
+def test_null_override_inherits_the_seed():
+    # Every other netting field treats null as "inherit"; so does this one.
+    out = {"NSE_EQ": time(0, 0)}
+    apply_cutoff_override(out, "NSE_EQ", None)
+    assert out["NSE_EQ"] == time(0, 0)
+
+
+def test_unparseable_override_turns_the_sweep_off():
+    out = {"NSE_EQ": time(0, 0)}
+    apply_cutoff_override(out, "NSE_EQ", "")
+    assert "NSE_EQ" not in out
+
+
+def test_override_on_a_segment_with_no_seed_time():
+    out: dict[str, time] = {}
+    apply_cutoff_override(out, "CRYPTO", "21:00")
+    assert out == {"CRYPTO": time(21, 0)}

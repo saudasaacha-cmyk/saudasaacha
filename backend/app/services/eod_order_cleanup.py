@@ -113,9 +113,40 @@ def admin_row_for_segment(segment: str | None) -> str | None:
     return _SEGMENT_NAME_MAP.get(seg, seg)
 
 
+def apply_cutoff_override(
+    out: dict[str, _dtime], segment_name: str, raw: str | None
+) -> None:
+    """Layer one override row's value over the seed cutoffs, in place.
+
+    `None` is the cascade's "inherit" everywhere else in netting, so it
+    means inherit here too: the seed's cutoff stands. A value that is set
+    but unparseable ("" can't reach us from the panel, but a hand-edited
+    doc can) turns the sweep OFF for that row.
+    """
+    if raw is None:
+        return
+    name = str(segment_name).upper()
+    cut = parse_cutoff(raw)
+    if cut is None:
+        out.pop(name, None)
+    else:
+        out[name] = cut
+
+
 async def segment_cutoffs() -> dict[str, _dtime]:
-    """Configured cutoff per settings row. Only rows with a time appear."""
-    from app.models.netting import NettingSegment
+    """Configured cutoff per settings row. Only rows with a time appear.
+
+    The panel does NOT write the `NettingSegment` seeds — a super-admin's
+    edit lands in `SuperAdminSegmentOverride` (the seeds are immutable
+    defaults). Reading only the seeds would mean a time typed into Segment
+    Settings silently never sweeps.
+
+    ponytail: the cutoff is platform-wide, so sub-admin / broker overrides
+    of this one field are ignored — honouring them means grouping every
+    parked order by its owner's pool. Split it if a broker ever needs a
+    session end of their own.
+    """
+    from app.models.netting import NettingSegment, SuperAdminSegmentOverride
 
     out: dict[str, _dtime] = {}
     try:
@@ -123,6 +154,12 @@ async def segment_cutoffs() -> dict[str, _dtime]:
             cut = parse_cutoff(getattr(seg, "pendingOrderExpiryTime", None))
             if cut is not None:
                 out[str(seg.name).upper()] = cut
+        for over in await SuperAdminSegmentOverride.find_all().to_list():
+            apply_cutoff_override(
+                out,
+                over.segment_name,
+                getattr(over, "pendingOrderExpiryTime", None),
+            )
     except Exception:
         logger.exception("eod_segment_cutoffs_failed")
     return out

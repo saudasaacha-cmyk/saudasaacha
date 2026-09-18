@@ -11,6 +11,10 @@ export interface FieldDef {
   optionOnly?: boolean;
   notForOption?: boolean;
   futureOnly?: boolean;
+  // Escape hatch for a field that lives in a gated category but applies to
+  // EVERY segment. "Cancel pending orders at" sits under Expiry day, yet
+  // forex — which has no expiry at all — is the main reason it exists.
+  allSegments?: boolean;
 }
 
 export interface CategoryDef {
@@ -240,6 +244,7 @@ export const CATEGORY_FIELDS: Record<string, FieldDef[]> = {
     {
       key: "pendingOrderExpiryTime",
       label: "Cancel pending orders at (IST)",
+      allSegments: true,
       // Blank = never: this segment's unfilled LIMIT / SL-M orders carry.
       // Set a time and they are cancelled once a day at it, and positions
       // carrying overnight also lose their SL / TP.
@@ -293,6 +298,7 @@ const OVERNIGHT_FIELD_KEYS = new Set([
 
 export function isFieldNA(segment: SegmentRow | undefined, categoryId: string, field: FieldDef): boolean {
   if (!segment) return true;
+  if (field.allSegments) return false;
   if (field.optionOnly && !segment.optionApplies) return true;
   if (field.notForOption && segment.optionApplies) return true;
   if (field.futureOnly && !segment.futureApplies) return true;

@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Save } from "lucide-react";
+import { ChevronsDown, Save } from "lucide-react";
 import { NettingAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { CATEGORY_FIELDS, isFieldNA, type SegmentRow } from "@/lib/nettingMatrixConfig";
+import { CATEGORY_FIELDS, isFieldNA, type FieldDef, type SegmentRow } from "@/lib/nettingMatrixConfig";
 import { Cell } from "./Cell";
 import { useAdminAuthStore } from "@/stores/authStore";
 import { canEdit } from "@/lib/permissions";
@@ -31,6 +31,42 @@ export function SegmentMatrix({ categoryId }: { categoryId: string }) {
   function getValue(seg: any, key: string) {
     if (edits[seg.id]?.[key] !== undefined) return edits[seg.id][key];
     return seg[key];
+  }
+  function rowOf(seg: any): SegmentRow {
+    return {
+      code: seg.name,
+      name: seg.displayName,
+      lotApplies: seg.lotApplies,
+      qtyApplies: seg.qtyApplies,
+      optionApplies: seg.optionApplies,
+      expiryHoldApplies: seg.expiryHoldApplies,
+      futureApplies: seg.futureApplies,
+    };
+  }
+
+  /** Copy the top row's value for one column down to every other segment
+   *  the field applies to. Sixteen segments is a lot of typing for a value
+   *  that is usually meant to be the same everywhere. Stages edits only —
+   *  nothing is written until Save. */
+  function fillDown(f: FieldDef) {
+    const rows = ((segments ?? []) as any[]).filter(
+      (seg) => !isFieldNA(rowOf(seg), categoryId, f)
+    );
+    const src = rows[0];
+    if (!src) return;
+    const val = getValue(src, f.key) ?? null;
+    setEdits((prev) => {
+      const next = { ...prev };
+      let n = 0;
+      for (const seg of rows.slice(1)) {
+        if ((getValue(seg, f.key) ?? null) === val) continue;
+        next[seg.id] = { ...(next[seg.id] || {}), [f.key]: val };
+        n++;
+      }
+      if (n === 0) toast.info(`Every segment already has this ${f.label}`);
+      else toast.success(`${f.label} copied to ${n} segment(s) — press Save`);
+      return next;
+    });
   }
 
   // Self-heal stored select values that are no longer a valid option
@@ -115,15 +151,7 @@ export function SegmentMatrix({ categoryId }: { categoryId: string }) {
       {/* ── Mobile: card per segment ─────────────────────────────── */}
       <div className="md:hidden space-y-2">
         {(segments ?? []).map((seg: any) => {
-          const segRow: SegmentRow = {
-            code: seg.name,
-            name: seg.displayName,
-            lotApplies: seg.lotApplies,
-            qtyApplies: seg.qtyApplies,
-            optionApplies: seg.optionApplies,
-            expiryHoldApplies: seg.expiryHoldApplies,
-            futureApplies: seg.futureApplies,
-          };
+          const segRow = rowOf(seg);
           const activeFields = fields.filter((f) => !isFieldNA(segRow, categoryId, f));
           if (activeFields.length === 0) return null;
           return (
@@ -175,22 +203,26 @@ export function SegmentMatrix({ categoryId }: { categoryId: string }) {
               </th>
               {fields.map((f) => (
                 <th key={f.key} className="whitespace-nowrap px-2 py-2 text-left text-muted-foreground">
-                  {f.label}
+                  <span className="inline-flex items-center gap-1">
+                    {f.label}
+                    {canMutate && (
+                      <button
+                        type="button"
+                        onClick={() => fillDown(f)}
+                        title="Copy the first segment's value to every segment"
+                        className="rounded p-0.5 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                      >
+                        <ChevronsDown className="size-3.5" />
+                      </button>
+                    )}
+                  </span>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {(segments ?? []).map((seg: any) => {
-              const segRow: SegmentRow = {
-                code: seg.name,
-                name: seg.displayName,
-                lotApplies: seg.lotApplies,
-                qtyApplies: seg.qtyApplies,
-                optionApplies: seg.optionApplies,
-                expiryHoldApplies: seg.expiryHoldApplies,
-                futureApplies: seg.futureApplies,
-              };
+              const segRow = rowOf(seg);
               return (
                 <tr key={seg.id} className="hover:bg-muted/30">
                   <td className="sticky left-0 z-0 whitespace-nowrap bg-card px-3 py-2">
