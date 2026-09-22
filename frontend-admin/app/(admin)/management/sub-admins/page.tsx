@@ -561,8 +561,8 @@ export default function SubAdminsPage() {
             </Button>
             <Button
               onClick={() => {
-                if (newPw.length < 8) {
-                  toast.error("Password must be at least 8 characters");
+                if (newPw.length < 6) {
+                  toast.error("Password must be at least 6 characters");
                   return;
                 }
                 if (resetPwTarget) {
@@ -796,8 +796,8 @@ function CreateSubAdminDialog({
   const [showPassword, setShowPassword] = useState(false);
 
   async function submit() {
-    if (form.password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    if (form.password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
     if (form.password !== form.confirm_password) {
@@ -1048,8 +1048,8 @@ function CreateBrokerForAdminDialog({
   const [showPassword, setShowPassword] = useState(false);
 
   async function submit() {
-    if (form.password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    if (form.password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
     if (form.password !== form.confirm_password) {

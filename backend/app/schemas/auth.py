@@ -14,7 +14,7 @@ from app.utils.validators import (
 
 class LoginRequest(BaseModel):
     identifier: str = Field(min_length=3, max_length=128, description="email or 10-digit mobile")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     two_fa_code: str | None = Field(default=None, min_length=6, max_length=8)
 
     @field_validator("identifier")
@@ -64,7 +64,7 @@ class AuthUserOut(BaseModel):
 class RegisterRequest(BaseModel):
     email: EmailStr
     mobile: str
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     full_name: str = Field(min_length=2, max_length=128)
     pan: str | None = None
     referral_code: str | None = None
@@ -119,12 +119,12 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     identifier: str
     otp: str = Field(min_length=4, max_length=8)
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class TwoFASetupResponse(BaseModel):

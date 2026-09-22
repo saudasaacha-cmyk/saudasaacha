@@ -9,9 +9,13 @@ from pydantic import BaseModel, Field
 
 class CreateUserRequest(BaseModel):
     full_name: str
-    email: str
-    mobile: str
-    password: str = Field(min_length=8)
+    # Optional for an admin-created account: those users log in with the
+    # user code they're handed. A self-signup still demands both — see
+    # `RegisterRequest`. Blank here means the backend stores a placeholder
+    # (the email / mobile columns are uniquely indexed and non-null).
+    email: str | None = None
+    mobile: str | None = None
+    password: str = Field(min_length=6)
     role: str = "CLIENT"
     parent_id: str | None = None
     # Broker / sub-broker to place this user under.  When the caller is

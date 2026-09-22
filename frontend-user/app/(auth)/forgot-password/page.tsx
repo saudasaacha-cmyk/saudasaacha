@@ -18,7 +18,7 @@ const resetSchema = z.object({
   otp: z.string().min(4).max(8),
   new_password: z
     .string()
-    .min(8)
+    .min(6)
     .regex(/[A-Z]/)
     .regex(/[a-z]/)
     .regex(/\d/),

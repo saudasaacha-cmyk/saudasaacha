@@ -23,23 +23,54 @@ from app.models.wallet import Wallet
 from app.utils.validators import is_valid_mobile_in, normalize_mobile_in
 
 
-def _role_prefix(role: UserRole) -> str:
-    return {
-        UserRole.SUPER_ADMIN: "SADM",
-        UserRole.ADMIN: "ADM",
-        UserRole.BROKER: "BRK",
-        UserRole.EMPLOYEE: "EMP",
-        UserRole.MASTER: "MAS",
-        UserRole.DEALER: "DLR",
-        UserRole.CLIENT: "CL",
-    }.get(role, "USR")
+# Stand-ins for a missing email / phone on an admin-created account.
+NO_EMAIL_DOMAIN = "noemail.sachchasauda.com"
+NO_MOBILE_PREFIX = "NOMOB"
+
+
+def is_placeholder_contact(value: str | None) -> bool:
+    """True for a generated stand-in — the UI shows a dash instead."""
+    v = (value or "").strip()
+    return v.endswith("@" + NO_EMAIL_DOMAIN) or v.startswith(NO_MOBILE_PREFIX)
+
+
+# Six characters, letters and digits mixed. O/0 and I/1/L are left out —
+# the code IS a login id now (operator: "user user id se login toh ho jata
+# hai"), so it gets read off a screen and typed on a phone.
+_CODE_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ"
+_CODE_DIGITS = "23456789"
+_CODE_LEN = 6
+
+
+def make_user_code() -> str:
+    """One candidate code, e.g. 'K7M2QX'. Always has a letter AND a digit.
+
+    The letter guarantee also keeps a code from ever looking like a phone
+    number, which matters because login resolves a bare identifier by
+    trying mobile before user_code.
+    """
+    pool = _CODE_LETTERS + _CODE_DIGITS
+    chars = [
+        secrets.choice(_CODE_LETTERS),
+        secrets.choice(_CODE_DIGITS),
+        *(secrets.choice(pool) for _ in range(_CODE_LEN - 2)),
+    ]
+    # Shuffle so the letter and digit aren't always in the first two slots.
+    for i in range(len(chars) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        chars[i], chars[j] = chars[j], chars[i]
+    return "".join(chars)
 
 
 async def generate_user_code(role: UserRole) -> str:
-    """Returns a unique user_code like 'CL12345678'. Retries on conflict."""
-    prefix = _role_prefix(role)
+    """Returns a unique 6-character user_code. Retries on conflict.
+
+    `role` is no longer part of the code — the old 'CL12345678' shape was
+    ten characters of which eight were noise. Existing codes keep working
+    untouched; nothing in the codebase parses the prefix.
+    """
     for _ in range(10):
-        code = f"{prefix}{secrets.randbelow(10**8):08d}"
+        code = make_user_code()
         existing = await User.find_one(User.user_code == code)
         if existing is None:
             return code
@@ -58,7 +89,7 @@ async def find_by_identifier(identifier: str) -> User | None:
     return await User.find_one(User.user_code == ident.upper())
 
 
-async def email_or_mobile_taken(email: str, mobile: str) -> str | None:
+async def email_or_mobile_taken(email: str | None, mobile: str | None) -> str | None:
     """Returns the field name that conflicts, or None.
 
     CLOSED rows (soft-deleted by admin → /admin/users/{id} DELETE) are
@@ -67,30 +98,33 @@ async def email_or_mobile_taken(email: str, mobile: str) -> str | None:
     email/mobile to a sentinel so the unique index doesn't fight a new
     insert either — this is defence-in-depth on the API side.
     """
+    # An admin-created user may have neither — only check what was given.
+    wanted: list[dict] = []
+    if email:
+        wanted.append({"email": email.lower()})
+    if mobile:
+        wanted.append({"mobile": mobile})
+    if not wanted:
+        return None
     existing = await User.find_one(
         {
             "$and": [
-                {
-                    "$or": [
-                        {"email": email.lower()},
-                        {"mobile": mobile},
-                    ]
-                },
+                {"$or": wanted},
                 {"status": {"$ne": UserStatus.CLOSED.value}},
             ]
         }
     )
     if existing is None:
         return None
-    if existing.email == email.lower():
+    if email and existing.email == email.lower():
         return "email"
     return "mobile"
 
 
 async def create_user(
     *,
-    email: str,
-    mobile: str,
+    email: str | None,
+    mobile: str | None,
     password: str,
     full_name: str,
     role: UserRole = UserRole.CLIENT,
@@ -105,8 +139,9 @@ async def create_user(
     broker_ancestry: list[PydanticObjectId] | None = None,
     signup_origin: str | None = None,
 ) -> User:
-    email_l = email.lower().strip()
-    mobile_n = normalize_mobile_in(mobile)
+    email_l = (email or "").lower().strip()
+    mobile_raw = (mobile or "").strip()
+    mobile_n = normalize_mobile_in(mobile_raw) if mobile_raw else ""
     conflict = await email_or_mobile_taken(email_l, mobile_n)
     if conflict:
         raise ConflictError(
@@ -114,8 +149,19 @@ async def create_user(
             details={"field": conflict},
         )
 
+    code = await generate_user_code(role)
+    # Both columns are uniquely indexed and non-null, so a user created
+    # without an email / phone (admin-created accounts log in with their
+    # user code) gets a placeholder derived from that code — unique by
+    # construction, and never a valid address or number, so it can't
+    # collide with a real one or be mistaken for it.
+    if not email_l:
+        email_l = f"{code.lower()}@{NO_EMAIL_DOMAIN}"
+    if not mobile_n:
+        mobile_n = f"{NO_MOBILE_PREFIX}{code}"
+
     user = User(
-        user_code=await generate_user_code(role),
+        user_code=code,
         email=email_l,
         mobile=mobile_n,
         password_hash=hash_password(password),

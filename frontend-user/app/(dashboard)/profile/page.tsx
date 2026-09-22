@@ -590,7 +590,7 @@ function SecurityForm({ me }: { me: any }) {
   const [busy, setBusy] = useState(false);
 
   async function changePassword() {
-    if (pwd.new_password.length < 8) return toast.error("Min 8 characters");
+    if (pwd.new_password.length < 6) return toast.error("Min 6 characters");
     setBusy(true);
     try {
       await AuthAPI.changePassword(pwd);
@@ -627,7 +627,7 @@ function SecurityForm({ me }: { me: any }) {
               onChange={(e) => setPwd((p) => ({ ...p, new_password: e.target.value }))}
               className="h-11"
             />
-            <p className="text-[11px] text-muted-foreground">Minimum 8 characters.</p>
+            <p className="text-[11px] text-muted-foreground">Minimum 6 characters.</p>
           </Field>
           <Button onClick={changePassword} loading={busy} className="w-full">
             <KeyRound className="size-4" /> Update password

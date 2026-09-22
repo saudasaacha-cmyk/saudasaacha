@@ -153,8 +153,8 @@ export default function UserDetailPage() {
   }
 
   async function submitResetPassword() {
-    if (resetPw.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    if (resetPw.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return;
     }
     if (resetPw !== resetPw2) {
@@ -411,7 +411,7 @@ export default function UserDetailPage() {
                   type={resetShow ? "text" : "password"}
                   autoFocus
                   autoComplete="new-password"
-                  placeholder="Minimum 8 characters"
+                  placeholder="Minimum 6 characters"
                   value={resetPw}
                   onChange={(e) => setResetPw(e.target.value)}
                   className="pr-10"
@@ -454,7 +454,7 @@ export default function UserDetailPage() {
                 loading={resetSaving}
                 disabled={
                   resetSaving ||
-                  resetPw.length < 8 ||
+                  resetPw.length < 6 ||
                   resetPw !== resetPw2
                 }
               >

@@ -23,13 +23,25 @@ import { cn } from "@/lib/utils";
 const schema = z
   .object({
     full_name: z.string().min(2),
-    mobile: z.string().regex(/^[6-9]\d{9}$/, "10-digit Indian mobile"),
-    password: z.string().min(8),
+    // Optional: an admin-created user logs in with the user code they're
+    // handed, so a phone / email the admin doesn't have yet shouldn't
+    // block the account. A self-signup still requires both.
+    mobile: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || /^[6-9]\d{9}$/.test(v), "10-digit Indian mobile")
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Invalid email")
+      .optional(),
+    password: z.string().min(6),
     // Confirmation field — added after a sub-admin typo'd the initial
     // password (Prachi / 18-May-2026) and the new user couldn't log in.
     // Backend never gets this field; the schema-level `refine` below
     // catches the mismatch client-side before submit.
-    confirm_password: z.string().min(8),
+    confirm_password: z.string().min(6),
     initial_balance: z.coerce.number().min(0).default(0),
     credit_limit: z.coerce.number().min(0).default(0),
     // "" = Self (keep user directly under caller).  Otherwise a broker /
@@ -52,6 +64,7 @@ export default function NewUserPage() {
     defaultValues: {
       full_name: "",
       mobile: "",
+      email: "",
       password: "",
       confirm_password: "",
       initial_balance: 0,
@@ -86,16 +99,12 @@ export default function NewUserPage() {
     // this field) doesn't reject the request as `extra=forbid`.
     const { confirm_password: _confirm, assign_to_broker_id, ...rest } = v;
     void _confirm;
-    // Email field removed from the form (operator: clients log in with mobile /
-    // user_code — no email needed). The backend still wants a unique email for
-    // its index, so synthesize a deterministic placeholder from the mobile.
-    // Never shown to or used by the user; the mobile's own uniqueness keeps it
-    // unique.
-    const payload: any = {
-      ...rest,
-      role: "CLIENT",
-      email: `${v.mobile}@noemail.sachchasauda.com`,
-    };
+    // Blank contacts are dropped rather than sent as "" — the backend
+    // fills in its own placeholder (email and mobile are uniquely indexed
+    // and non-null) and knows not to show it back as a real address.
+    const payload: any = { ...rest, role: "CLIENT" };
+    if (!payload.email) delete payload.email;
+    if (!payload.mobile) delete payload.mobile;
     if (assign_to_broker_id) payload.assign_to_broker_id = assign_to_broker_id;
     try {
       const created = await UsersAPI.create(payload);
@@ -134,8 +143,11 @@ export default function NewUserPage() {
             <Field label="Full name" error={form.formState.errors.full_name?.message}>
               <Input {...form.register("full_name")} />
             </Field>
-            <Field label="Mobile" error={form.formState.errors.mobile?.message}>
-              <Input maxLength={10} {...form.register("mobile")} />
+            <Field label="Mobile (optional)" error={form.formState.errors.mobile?.message}>
+              <Input maxLength={10} placeholder="Leave blank if unknown" {...form.register("mobile")} />
+            </Field>
+            <Field label="Email (optional)" error={form.formState.errors.email?.message}>
+              <Input placeholder="Leave blank if unknown" {...form.register("email")} />
             </Field>
             <Field label="Initial password" error={form.formState.errors.password?.message}>
               <div className="relative">

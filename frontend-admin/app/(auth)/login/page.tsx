@@ -17,7 +17,7 @@ import { InstallPWAButton } from "@/components/pwa/InstallPWAButton";
 
 const schema = z.object({
   identifier: z.string().min(3, "Enter your admin email or user code"),
-  password: z.string().min(8, "Minimum 8 characters"),
+  password: z.string().min(6, "Minimum 6 characters"),
 });
 type FormValues = z.infer<typeof schema>;
 

@@ -14,7 +14,7 @@ class CreateSubAdminRequest(BaseModel):
     full_name: str
     email: EmailStr
     mobile: str
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=6)
     permissions: AdminPermissions = Field(default_factory=AdminPermissions)
     pnl_share_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
@@ -54,7 +54,7 @@ class MarkPaidRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class SubAdminDTO(BaseModel):

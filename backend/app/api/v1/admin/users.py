@@ -830,8 +830,8 @@ async def admin_reset_password(
     # them reset their users' passwords.
     assert_role_aware_perm(admin, admin_perm="users", broker_perm="user_password", mode="write")
     new_pw = payload.get("new_password") or ""
-    if len(new_pw) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if len(new_pw) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     u = await assert_user_in_scope(admin, user_id)
     u.password_hash = hash_password(new_pw)
     u.must_change_password = True

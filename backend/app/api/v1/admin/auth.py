@@ -261,7 +261,7 @@ async def admin_me(admin: CurrentAdmin):
 
 class AdminChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=8, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 @router.post(

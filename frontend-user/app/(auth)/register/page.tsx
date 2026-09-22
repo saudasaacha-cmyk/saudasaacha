@@ -24,7 +24,7 @@ const schema = z.object({
     .regex(/^[6-9]\d{9}$/, "10-digit Indian mobile starting 6/7/8/9"),
   password: z
     .string()
-    .min(8, "Minimum 8 characters")
+    .min(6, "Minimum 6 characters")
     .regex(/[A-Z]/, "Must contain an uppercase letter")
     .regex(/[a-z]/, "Must contain a lowercase letter")
     .regex(/\d/, "Must contain a digit")
@@ -33,7 +33,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const PWD_RULES = [
-  { id: "len",   label: "At least 8 characters",       test: (s: string) => s.length >= 8 },
+  { id: "len",   label: "At least 6 characters",       test: (s: string) => s.length >= 6 },
   { id: "upper", label: "One uppercase letter (A–Z)",  test: (s: string) => /[A-Z]/.test(s) },
   { id: "lower", label: "One lowercase letter (a–z)",  test: (s: string) => /[a-z]/.test(s) },
   { id: "digit", label: "One number (0–9)",            test: (s: string) => /\d/.test(s) },

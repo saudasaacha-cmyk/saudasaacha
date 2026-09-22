@@ -21,7 +21,7 @@ class CreateBrokerRequest(BaseModel):
     full_name: str
     email: EmailStr
     mobile: str
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=6)
     permissions: BrokerPermissions = Field(default_factory=BrokerPermissions)
     pnl_share_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     brokerage_share_pct: Decimal = Field(default=Decimal("0"), ge=0, le=100)

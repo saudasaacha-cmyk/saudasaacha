@@ -9,7 +9,7 @@ from app.models.user import AdminPermissions, BrokerPermissions
 
 class AdminLoginRequest(BaseModel):
     identifier: str = Field(description="admin email or user_code")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     two_fa_code: str | None = Field(
         default=None,
         min_length=6,

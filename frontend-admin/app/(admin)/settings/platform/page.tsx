@@ -891,7 +891,7 @@ function ChangePasswordCard() {
 
   async function submit() {
     if (!current) return toast.error("Enter your current password");
-    if (next.length < 8) return toast.error("New password must be at least 8 characters");
+    if (next.length < 6) return toast.error("New password must be at least 6 characters");
     if (next !== confirm) return toast.error("New passwords don't match");
     if (next === current) return toast.error("New password must be different");
     setSaving(true);

@@ -18,8 +18,8 @@ import { Label } from "@/components/ui/label";
 import { InstallPwaButton } from "@/components/common/InstallPwaButton";
 
 const schema = z.object({
-  identifier: z.string().min(3, "Enter your email or mobile"),
-  password: z.string().min(8, "Minimum 8 characters"),
+  identifier: z.string().min(3, "Enter your user ID or mobile no."),
+  password: z.string().min(6, "Minimum 6 characters"),
   two_fa_code: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
@@ -213,13 +213,13 @@ function LoginPageInner() {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 lg:space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="identifier" className="text-xs font-medium lg:text-sm">
-            Email or Mobile
+            User ID or Mobile no.
           </Label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               id="identifier"
-              placeholder="you@example.com or 9999900000"
+              placeholder="K7M2QX or 9999900000"
               autoComplete="username"
               className="h-10 rounded-lg border-border/60 bg-muted/40 pl-9 text-sm transition-colors focus:border-primary/50 focus:bg-background lg:h-12 lg:rounded-xl lg:pl-10"
               {...form.register("identifier")}
