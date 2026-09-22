@@ -327,6 +327,12 @@ class User(TimestampMixin):
     trade_alert: bool = False
     trade_alert_sound: str = "chime"
 
+    # Tokens already seeded into this user's marketwatch by
+    # `default_watchlist.ensure_defaults`. Remembering them is what lets a
+    # user delete a default instrument and have it STAY deleted, while
+    # next month's contract — a token nobody has seen — still arrives.
+    default_watchlist_seeded: list[str] = []
+
     # Per-admin support WhatsApp number, shown to that admin's downstream
     # users on the "Add funds → Support" button and any other Contact-
     # support affordance in the apk/user web. Cascade resolution: when a

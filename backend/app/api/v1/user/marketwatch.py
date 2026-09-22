@@ -408,6 +408,11 @@ async def remove_segment_item(segment_name: str, token: str, user: CurrentUser):
 
 @router.get("", response_model=APIResponse[list])
 async def list_watchlists(user: CurrentUser):
+    # Top up the operator's default instruments first, so a new account
+    # (or a rolled monthly contract) shows up in this very response.
+    from app.services.default_watchlist import ensure_defaults
+
+    await ensure_defaults(user)
     # Filter out system segment watchlists — they're served by the
     # /segment/* endpoints above and shouldn't pollute the regular
     # favourites list rendering.
