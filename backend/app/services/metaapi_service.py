@@ -41,6 +41,12 @@ METAAPI_STATUS_KEY = "metaapi:status"
 # wait forever, so every connect stage is bounded — a stuck account must show
 # up in the admin panel as an error, not as silence.
 _CONNECT_TIMEOUT_SEC = 90
+# The initial synchronize is in a different league from the connect stages:
+# measured on this account it takes ~190s, and MetaApi's SDK resynchronizes
+# internally when its first attempt "did not finish in time". Their own
+# default is 300s. We used to allow 60s, which this account could never meet
+# — every attempt was killed mid-sync and retried, forever.
+_SYNC_TIMEOUT_SEC = 300
 # Heartbeat so the panel can tell "connecting" from "feed process is down".
 _STATUS_HEARTBEAT_SEC = 10
 
@@ -49,6 +55,18 @@ _STATUS_HEARTBEAT_SEC = 10
 # every minute is what keeps the account throttled.
 _SYNC_BACKOFF_BASE_SEC = 60
 _SYNC_BACKOFF_MAX_SEC = 900
+
+def sync_backoff_sec(consecutive_failures: int) -> float:
+    """Seconds to wait before retrying after `n` failed synchronizes."""
+    if consecutive_failures < 1:
+        return float(_SYNC_BACKOFF_BASE_SEC)
+    return float(
+        min(
+            _SYNC_BACKOFF_BASE_SEC * (2 ** (consecutive_failures - 1)),
+            _SYNC_BACKOFF_MAX_SEC,
+        )
+    )
+
 
 # The broker's full symbol universe, published by the feed process so the API
 # workers can search it without opening their own MetaAPI connection.
@@ -673,39 +691,43 @@ class MetaApiFeed:
         await self._publish_status()
 
     async def _run_loop(self) -> None:
-        backoff = 2
+        # Two ladders. An ordinary connection error doubles from 2s to a
+        # minute; a failed SYNC backs off much harder, because MetaApi
+        # rate-limits subscribe/synchronize per account and a fresh attempt
+        # every minute competes with the subscription their server is still
+        # holding from the last one.
+        delay = 2.0
         sync_failures = 0
         while not self._stop:
             try:
                 await self._connect_once()
-                backoff = 2
+                delay = 2.0
                 sync_failures = 0
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001
                 self._last_error = str(e)[:300]
                 logger.warning("metaapi_error: %s", e)
-                # A sync that times out is usually MetaApi throttling us:
-                # their docs rate-limit subscribe/synchronize per account, and
-                # retrying every minute for an hour keeps the account pinned
-                # in that state. Ordinary connection errors keep the quick
-                # ladder; sync timeouts back off to a quarter of an hour.
                 if "synchroniz" in str(e).lower() or "timed out" in str(e).lower():
                     sync_failures += 1
-                    backoff = min(_SYNC_BACKOFF_BASE_SEC * (2 ** (sync_failures - 1)), _SYNC_BACKOFF_MAX_SEC)
+                    delay = sync_backoff_sec(sync_failures)
                     logger.warning(
                         "metaapi_sync_backoff next_try_in_sec=%d consecutive=%d",
-                        backoff,
+                        delay,
                         sync_failures,
                     )
+                else:
+                    delay = min(delay * 2, 60.0)
             finally:
                 self._connected = False
                 await self._publish_status()
                 await self._teardown_client()
             if self._stop:
                 break
-            await asyncio.sleep(min(backoff, 60))
-            backoff = min(backoff * 2, 60)
+            # NOTE: sleep exactly what was decided above. An earlier
+            # `min(delay, 60)` here silently capped the sync ladder, so the
+            # log said "next_try_in_sec=900" and the loop retried in 60.
+            await asyncio.sleep(delay)
 
     async def _connect_once(self) -> None:
         from metaapi_cloud_sdk import MetaApi  # imported lazily so the dep is optional
@@ -744,8 +766,10 @@ class MetaApiFeed:
         self._conn = self._account.get_streaming_connection()
         await asyncio.wait_for(self._conn.connect(), _CONNECT_TIMEOUT_SEC)
         await asyncio.wait_for(
-            self._conn.wait_synchronized({"timeoutInSeconds": 60}),
-            _CONNECT_TIMEOUT_SEC,
+            self._conn.wait_synchronized({"timeoutInSeconds": _SYNC_TIMEOUT_SEC}),
+            # Outer guard sits ABOVE the SDK's own timeout so the SDK gets to
+            # report why it gave up instead of us cutting it off first.
+            _SYNC_TIMEOUT_SEC + 30,
         )
         await self._refresh_broker_symbols()
         self._connected = True
