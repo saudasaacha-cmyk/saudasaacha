@@ -667,6 +667,28 @@ def _instrument_matches_pattern(instrument_sym: str, base: str, suffix: str) -> 
     return s.startswith(base) and s.endswith(suffix)
 
 
+def _best_pattern_row(rows: list, instrument_sym: str):
+    """Pick the most specific shorthand row that covers this contract.
+
+    Longest matching base wins. `GOLDFUT` and `GOLDMFUT` BOTH match
+    GOLDM26DECFUT under the start/end rule — and they carry very different
+    margins (₹1L vs ₹3k per lot in production), so a first-wins scan hands
+    the mini contract the big contract's margin depending on document
+    order. Same for SILVER / SILVERM, ZINC / ZINCMINI, CRUDEOIL /
+    CRUDEOILM.
+    """
+    best = None
+    best_len = -1
+    for row in rows:
+        split = _split_pattern(getattr(row, "symbol", "") or "")
+        if split is None:
+            continue
+        base, suffix = split
+        if _instrument_matches_pattern(instrument_sym, base, suffix) and len(base) > best_len:
+            best, best_len = row, len(base)
+    return best
+
+
 async def _match_pattern_script(
     seg_name: str,
     instrument_sym: str,
@@ -694,14 +716,29 @@ async def _match_pattern_script(
         NettingScriptOverride.scope_admin_id == scope_admin_id,
         NettingScriptOverride.scope_broker_id == scope_broker_id,
     ).to_list()
-    for row in rows:
-        split = _split_pattern(row.symbol)
-        if split is None:
-            continue
-        base, suffix = split
-        if _instrument_matches_pattern(instrument_sym, base, suffix):
-            return row
-    return None
+    return _best_pattern_row(rows, instrument_sym)
+
+
+async def _match_pattern_user_override(
+    user_id: PydanticObjectId, seg_name: str, instrument_sym: str
+) -> "UserSegmentOverride | None":
+    """The per-user twin of `_match_pattern_script`.
+
+    Admins type the same derivative shorthand on the Script — User-wise tab
+    that they type on Script — Global: `CRUDEOILFUT`, `GOLDFUT`,
+    `SILVERMFUT`. The per-user lookup was exact-match only, so none of
+    those ever matched a real contract (`CRUDEOIL26OCTFUT`) and the
+    override silently did nothing — production had 19 such rows, every one
+    of them dead.
+
+    Exact rows are matched by the caller first; this only runs when that
+    misses, so an exact symbol still wins over a pattern.
+    """
+    rows = await UserSegmentOverride.find(
+        UserSegmentOverride.user_id == user_id,
+        UserSegmentOverride.segment_name == seg_name,
+    ).to_list()
+    return _best_pattern_row(rows, instrument_sym)
 
 
 async def get_segment(segment_id: str | PydanticObjectId) -> NettingSegment:
@@ -1433,6 +1470,19 @@ async def get_user_blocked_symbols(
         if sig is None:
             continue
         sym = r.symbol.strip().upper()
+        split = _split_pattern(sym)
+        if split is not None:
+            # Shorthand row (`CRUDEOILFUT`) — it has to cover every expiry,
+            # exactly like the script layer's patterns, and it outranks them
+            # all at priority 0. NOTE only a block travels this path; an
+            # ALLOW by pattern would need `is_symbol_blocked_for` to match
+            # patterns too, which it doesn't — allow stays exact-only.
+            base, suffix = split
+            pkey = (r.segment_name, base, suffix)
+            prev_p = patterns_layered.get(pkey)
+            if prev_p is None or 0 < prev_p[0]:
+                patterns_layered[pkey] = (0, sig)
+            continue
         key = (r.segment_name, sym)
         prev = by_exact.get(key)
         if prev is None or 0 < prev[0]:
@@ -2396,6 +2446,14 @@ async def get_effective_settings(
         UserSegmentOverride.segment_name == seg_name,
         UserSegmentOverride.symbol == (symbol.strip().upper() if symbol else None),
     )
+    # Exact miss → try the shorthand rows (`CRUDEOILFUT`), same as the
+    # script layer does. Without this a per-user script override only ever
+    # applied if the admin typed the full contract, which nobody does
+    # because it changes every month.
+    if user_override_symbol is None and symbol:
+        user_override_symbol = await _match_pattern_user_override(
+            PydanticObjectId(user_id), seg_name, symbol.strip().upper()
+        )
     user_override_segment = await UserSegmentOverride.find_one(
         UserSegmentOverride.user_id == PydanticObjectId(user_id),
         UserSegmentOverride.segment_name == seg_name,
