@@ -1424,6 +1424,48 @@ async def ensure_open_position_subscriptions() -> dict[str, int]:
     }
 
 
+# Segments quoted by MetaAPI / Infoway rather than Zerodha. Their instrument
+# tokens are symbol-style ("EURUSD", "CRYPTO_BTCUSD"), not numeric.
+_INTERNATIONAL_SEGMENTS = ("FOREX", "COMMODITIES", "INDICES", "STOCKS", "CRYPTO_SPOT")
+
+
+async def ensure_international_subscriptions() -> int:
+    """Keep every symbol-style instrument in the publish set. Returns how
+    many were newly added.
+
+    `_subscribed` lives in memory, so a restart empties it — and a
+    symbol-style token only re-enters it when some client happens to ask
+    for that instrument. The MetaAPI / Infoway feeds stream these symbols
+    upstream from boot regardless, so the price sits in the process and is
+    simply never mirrored into `mdlive`: the terminal then shows a frozen
+    quote for the whole FOREX / INDICES / STOCKS list, and every restart
+    brings it back. Measured on production: 23 of 23 such instruments had
+    no `mdlive` key at all, and one `feed:subscribe` lit 22 of them up
+    within seconds (USDINR isn't offered by the broker).
+
+    Already-subscribed tokens are filtered out before forwarding, so the
+    periodic pass costs one Mongo read and sends nothing upstream —
+    re-subscribing 40 symbols at MetaAPI every two minutes is exactly the
+    traffic their per-account rate limit punishes.
+    """
+    from app.models.instrument import Instrument
+
+    rows = await Instrument.find(
+        {"is_active": True, "segment": {"$in": list(_INTERNATIONAL_SEGMENTS)}}
+    ).to_list()
+    tokens = [
+        str(i.token)
+        for i in rows
+        if i.token
+        and not str(i.token).lstrip("-").isdigit()
+        and str(i.token) not in _subscribed
+    ]
+    if tokens:
+        await _forward_feed_subscription(tokens)
+        logger.info("international_subscriptions_added count=%d", len(tokens))
+    return len(tokens)
+
+
 async def open_position_subscription_loop(interval_sec: float = 120.0) -> None:
     """Leader-only: periodically reconcile OPEN-position subscriptions so a
     held token can never silently fall off the live feed mid-session — which
@@ -1438,6 +1480,13 @@ async def open_position_subscription_loop(interval_sec: float = 120.0) -> None:
             await ensure_open_position_subscriptions()
         except Exception:  # noqa: BLE001
             logger.exception("open_position_subscription_loop_iter_failed")
+        # Same idea, other feed: forex / indices / international stocks are
+        # streamed upstream from boot but only reach `mdlive` once something
+        # subscribes them.
+        try:
+            await ensure_international_subscriptions()
+        except Exception:  # noqa: BLE001
+            logger.exception("international_subscription_loop_iter_failed")
         await _asyncio.sleep(interval_sec)
 
 
