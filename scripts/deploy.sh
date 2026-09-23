@@ -77,8 +77,15 @@ if [ "$backend_changed" = "1" ]; then
   echo "── Backend ──"
   if [ "$backend_deps_changed" = "1" ]; then
     echo "  pip install (requirements changed)…"
-    "$VENV/bin/pip" install --quiet --upgrade pip
-    "$VENV/bin/pip" install --quiet -r "$BACKEND_DIR/requirements.txt"
+    # The venv was created by `uv venv`, which does NOT put pip inside it —
+    # $VENV/bin/pip does not exist and neither does `python -m pip`. Use uv
+    # when it is there, and fall back to pip for a venv made the old way.
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install --python "$VENV/bin/python" -q -r "$BACKEND_DIR/requirements.txt"
+    else
+      "$VENV/bin/python" -m pip install --quiet --upgrade pip
+      "$VENV/bin/python" -m pip install --quiet -r "$BACKEND_DIR/requirements.txt"
+    fi
     # Deps (or the systemd unit / env) changed → full restart so the new
     # packages + ExecStart/Environment are actually loaded. A reload won't
     # pick those up.
