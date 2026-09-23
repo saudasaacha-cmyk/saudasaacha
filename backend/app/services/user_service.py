@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from typing import Iterable
+from typing import Any, Iterable
 
 from beanie import PydanticObjectId
 from beanie.operators import Or
@@ -26,6 +26,14 @@ from app.utils.validators import is_valid_mobile_in, normalize_mobile_in
 # Stand-ins for a missing email / phone on an admin-created account.
 NO_EMAIL_DOMAIN = "noemail.sachchasauda.com"
 NO_MOBILE_PREFIX = "NOMOB"
+
+
+def placeholder_email(user_code: str) -> str:
+    return f"{user_code.lower()}@{NO_EMAIL_DOMAIN}"
+
+
+def placeholder_mobile(user_code: str) -> str:
+    return f"{NO_MOBILE_PREFIX}{user_code}"
 
 
 def is_placeholder_contact(value: str | None) -> bool:
@@ -89,7 +97,11 @@ async def find_by_identifier(identifier: str) -> User | None:
     return await User.find_one(User.user_code == ident.upper())
 
 
-async def email_or_mobile_taken(email: str | None, mobile: str | None) -> str | None:
+async def email_or_mobile_taken(
+    email: str | None,
+    mobile: str | None,
+    exclude_user_id: PydanticObjectId | None = None,
+) -> str | None:
     """Returns the field name that conflicts, or None.
 
     CLOSED rows (soft-deleted by admin → /admin/users/{id} DELETE) are
@@ -106,14 +118,14 @@ async def email_or_mobile_taken(email: str | None, mobile: str | None) -> str | 
         wanted.append({"mobile": mobile})
     if not wanted:
         return None
-    existing = await User.find_one(
-        {
-            "$and": [
-                {"$or": wanted},
-                {"status": {"$ne": UserStatus.CLOSED.value}},
-            ]
-        }
-    )
+    query: list[dict[str, Any]] = [
+        {"$or": wanted},
+        {"status": {"$ne": UserStatus.CLOSED.value}},
+    ]
+    # Editing an existing user: their OWN row is not a conflict.
+    if exclude_user_id is not None:
+        query.append({"_id": {"$ne": exclude_user_id}})
+    existing = await User.find_one({"$and": query})
     if existing is None:
         return None
     if email and existing.email == email.lower():
@@ -156,9 +168,9 @@ async def create_user(
     # construction, and never a valid address or number, so it can't
     # collide with a real one or be mistaken for it.
     if not email_l:
-        email_l = f"{code.lower()}@{NO_EMAIL_DOMAIN}"
+        email_l = placeholder_email(code)
     if not mobile_n:
-        mobile_n = f"{NO_MOBILE_PREFIX}{code}"
+        mobile_n = placeholder_mobile(code)
 
     user = User(
         user_code=code,

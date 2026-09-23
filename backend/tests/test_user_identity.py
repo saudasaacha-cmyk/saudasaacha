@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import pytest
 
+from app.api.v1.admin.users import _EMAIL_RE
 from app.services.user_service import (
     NO_EMAIL_DOMAIN,
     NO_MOBILE_PREFIX,
     email_or_mobile_taken,
     is_placeholder_contact,
     make_user_code,
+    placeholder_email,
+    placeholder_mobile,
 )
 
 AMBIGUOUS = set("O0I1L")
@@ -60,3 +63,34 @@ async def test_a_user_with_neither_contact_never_conflicts():
     through to a query that matches every placeholder row."""
     assert await email_or_mobile_taken("", "") is None
     assert await email_or_mobile_taken(None, None) is None
+
+
+# ── Admin edits the contact details later ───────────────────────────
+
+
+def test_clearing_a_contact_restores_a_recognisable_placeholder():
+    """Blanking email / phone can't store "" — both columns are uniquely
+    indexed and non-null, so a second blanked user would collide."""
+    code = make_user_code()
+    assert is_placeholder_contact(placeholder_email(code))
+    assert is_placeholder_contact(placeholder_mobile(code))
+    # Unique per user, so two blanked accounts never clash.
+    other = "ZZZZZZ"
+    assert placeholder_email(code) != placeholder_email(other)
+    assert placeholder_mobile(code) != placeholder_mobile(other)
+
+
+@pytest.mark.parametrize(
+    ("value", "ok"),
+    [
+        ("ravi@gmail.com", True),
+        ("a.b+tag@sub.domain.co.in", True),
+        ("ravi@gmail", False),
+        ("ravi.gmail.com", False),
+        ("two words@gmail.com", False),
+        ("@gmail.com", False),
+        ("", False),
+    ],
+)
+def test_email_shape_check(value, ok):
+    assert bool(_EMAIL_RE.match(value)) is ok

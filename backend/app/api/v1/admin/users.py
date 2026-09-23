@@ -36,6 +36,12 @@ router = APIRouter(prefix="/users", tags=["admin-users"])
 logger = logging.getLogger(__name__)
 
 
+# Deliberately loose: the column also stores sentinels for closed accounts
+# ("<orig>+deleted-<id>") and our own no-email placeholder, so this only
+# rejects what is obviously not an address.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 def _ser(u: User) -> dict:
     return {
         "id": str(u.id),
@@ -683,6 +689,47 @@ async def update_user(
     for k in ("full_name", "photo_url", "is_demo"):
         if k in payload and payload[k] is not None:
             setattr(u, k, payload[k])
+
+    # Contact details. An admin-created account often starts with neither,
+    # and the real email / phone turn up later — so both are editable here,
+    # blank included: clearing one puts back the placeholder rather than an
+    # empty string, because both columns are uniquely indexed and non-null.
+    if "email" in payload or "mobile" in payload:
+        from app.utils.validators import is_valid_mobile_in, normalize_mobile_in
+
+        new_email = u.email
+        new_mobile = u.mobile
+        if "email" in payload:
+            raw = str(payload.get("email") or "").strip().lower()
+            if not raw:
+                new_email = user_service.placeholder_email(u.user_code)
+            elif not _EMAIL_RE.match(raw):
+                raise HTTPException(status_code=400, detail="Invalid email address")
+            else:
+                new_email = raw
+        if "mobile" in payload:
+            raw = str(payload.get("mobile") or "").strip()
+            if not raw:
+                new_mobile = user_service.placeholder_mobile(u.user_code)
+            else:
+                normalised = normalize_mobile_in(raw)
+                if not is_valid_mobile_in(normalised):
+                    raise HTTPException(
+                        status_code=400, detail="Invalid Indian mobile number"
+                    )
+                new_mobile = normalised
+        # Only the values that actually changed are worth a conflict check,
+        # and the user's own row must never count as the conflict.
+        conflict = await user_service.email_or_mobile_taken(
+            new_email if new_email != u.email else None,
+            new_mobile if new_mobile != u.mobile else None,
+            exclude_user_id=u.id,
+        )
+        if conflict:
+            raise HTTPException(
+                status_code=409, detail=f"Another user already has this {conflict}"
+            )
+        u.email, u.mobile = new_email, new_mobile
     if "permissions" in payload and payload["permissions"]:
         for k, v in payload["permissions"].items():
             if hasattr(u.permissions, k):

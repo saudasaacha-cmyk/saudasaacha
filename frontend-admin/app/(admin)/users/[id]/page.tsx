@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAdminAuthStore } from "@/stores/authStore";
@@ -21,6 +21,7 @@ import {
   TrendingUp,
   UserCog,
   Volume2,
+  Mail,
 } from "lucide-react";
 import { UsersAPI } from "@/lib/api";
 import { NOTIFY_SOUNDS, playSound } from "@/lib/notify-sound";
@@ -106,6 +107,39 @@ export default function UserDetailPage() {
     onError: (e: any) => toast.error(e.message || "Failed"),
   });
 
+  // Contact details. An admin-created account can start with no email and
+  // no phone (the backend stores a placeholder in those uniquely-indexed
+  // columns), so the form shows a placeholder as blank — the admin fills in
+  // the real one whenever they get it.
+  // A placeholder contact is an absence, not a value — the header and the
+  // form below both render it as one.
+  const isPlaceholder = (v: string | undefined | null) =>
+    !!v && (v.endsWith("@noemail.sachchasauda.com") || v.startsWith("NOMOB"));
+  const [contact, setContact] = useState({ full_name: "", email: "", mobile: "" });
+  const [contactDirty, setContactDirty] = useState(false);
+  useEffect(() => {
+    if (!data) return;
+    // Don't stomp on what the admin is typing when the query refetches.
+    if (contactDirty) return;
+    setContact({
+      full_name: data.full_name ?? "",
+      email: isPlaceholder(data.email) ? "" : (data.email ?? ""),
+      mobile: isPlaceholder(data.mobile) ? "" : (data.mobile ?? ""),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.id, data?.email, data?.mobile, data?.full_name, contactDirty]);
+
+  const contactMut = useMutation({
+    mutationFn: () => UsersAPI.update(id, contact),
+    onSuccess: () => {
+      setContactDirty(false);
+      qc.invalidateQueries({ queryKey: ["admin", "user", id] });
+      qc.invalidateQueries({ queryKey: ["admin", "users"] });
+      toast.success("Contact details saved");
+    },
+    onError: (e: any) => toast.error(e.message || "Failed"),
+  });
+
   const [adjAmount, setAdjAmount] = useState("");
   const [adjNote, setAdjNote] = useState("");
   const [adjType, setAdjType] = useState("ADJUSTMENT");
@@ -182,7 +216,9 @@ export default function UserDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={u.full_name}
-        description={`${u.user_code} · ${u.email} · ${u.mobile}`}
+        description={[u.user_code, isPlaceholder(u.email) ? null : u.email, isPlaceholder(u.mobile) ? null : u.mobile]
+          .filter(Boolean)
+          .join(" · ")}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
@@ -317,6 +353,71 @@ export default function UserDetailPage() {
                 Apply
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card id="contact">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="size-4" /> Contact details
+            </CardTitle>
+            <CardDescription>
+              Name, email and phone. Leave email or phone blank if you don't
+              have it — the user logs in with their user ID either way.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Full name
+              </Label>
+              <Input
+                value={contact.full_name}
+                onChange={(e) => {
+                  setContactDirty(true);
+                  setContact((c) => ({ ...c, full_name: e.target.value }));
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Email
+              </Label>
+              <Input
+                placeholder="Not set"
+                value={contact.email}
+                onChange={(e) => {
+                  setContactDirty(true);
+                  setContact((c) => ({ ...c, email: e.target.value }));
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+                Mobile
+              </Label>
+              <Input
+                placeholder="Not set"
+                maxLength={10}
+                value={contact.mobile}
+                onChange={(e) => {
+                  setContactDirty(true);
+                  setContact((c) => ({ ...c, mobile: e.target.value }));
+                }}
+              />
+            </div>
+            <Button
+              className="w-full"
+              loading={contactMut.isPending}
+              disabled={!contactDirty || contactMut.isPending}
+              onClick={() => contactMut.mutate()}
+            >
+              Save contact details
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              The user ID ({u.user_code}) never changes — changing the email or
+              phone doesn't affect how they log in.
+            </p>
           </CardContent>
         </Card>
 
