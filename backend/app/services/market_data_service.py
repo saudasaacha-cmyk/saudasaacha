@@ -498,6 +498,11 @@ async def _infoway_overlay(token: str, base_quote: dict[str, Any]) -> dict[str, 
             if depth and depth.get("bids") and depth.get("asks"):
                 merged["depth"] = {"bids": depth["bids"], "asks": depth["asks"]}
         merged["source"] = source
+        # Provider's own tick time, for the stale-price guard. Set it even
+        # when absent (None) so a fresh quote can never inherit the previous
+        # tick's timestamp from `base_quote` and look older than it is.
+        _fts = live.get("feed_ts")
+        merged["feed_ts"] = float(_fts) if _fts else None
         # USD/INR snapshot so the frontend can show margin in real INR
         # rather than displaying the USD number with a ₹ symbol (which is
         # how users end up trying to place orders worth 80× their wallet).

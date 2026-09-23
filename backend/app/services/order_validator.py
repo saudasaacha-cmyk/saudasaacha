@@ -1376,6 +1376,14 @@ async def validate(
             _SESSION_STALE_SEC = 600
 
             _ex_age: float | None = None
+            # Same question for a symbol Zerodha never quotes: forex, metals,
+            # indices and US stocks come from MetaAPI / Infoway, which send no
+            # exchange packet time. Their quote carries the PROVIDER's tick
+            # time as `feed_ts` instead, so the stale-price guard covers them
+            # too. Kept separate from `_ex_age` on purpose — the 600 s
+            # "session looks closed" check below is about Indian exchange
+            # sessions and its advice (place an AMO) doesn't apply here.
+            _feed_age: float | None = None
             try:
                 _ex_age = _zerodha_for_tick_check.get_exchange_ts_age_sec(instrument.token)
             except Exception:
@@ -1385,10 +1393,13 @@ async def validate(
             # non-leader reads the live-session signal from there.
             if _ex_age is None:
                 try:
-                    _snap = await _read_mdlive(instrument.token)
-                    _ets = float((_snap or {}).get("exchange_timestamp") or 0)
+                    _snap = await _read_mdlive(instrument.token) or {}
+                    _ets = float(_snap.get("exchange_timestamp") or 0)
                     if _ets > 0:
                         _ex_age = _vt.time() - _ets
+                    _fts = float(_snap.get("feed_ts") or 0)
+                    if _fts > 0:
+                        _feed_age = _vt.time() - _fts
                 except Exception:
                     _ex_age = None
 
@@ -1424,7 +1435,7 @@ async def validate(
                     _warm_age = None
                 _stale_msg = stale_feed_block_reason(
                     symbol=instrument.symbol,
-                    price_age_sec=_ex_age,
+                    price_age_sec=_ex_age if _ex_age is not None else _feed_age,
                     threshold_sec=_stale_block_sec,
                     feed_warm_age_sec=_warm_age,
                 )

@@ -74,3 +74,65 @@ def test_unknown_feed_warm_time_still_blocks():
         symbol="X", price_age_sec=120, threshold_sec=30, feed_warm_age_sec=None
     )
     assert msg is not None
+
+
+# ── MetaAPI symbols (forex / metals / indices / US stocks) ───────────
+#
+# These carry no exchange packet time, so until now the guard above could
+# never fire for them: our own writer re-stamps `ts` every tick whether or
+# not the price moved. The provider's own tick time rides as `feed_ts`.
+
+import datetime as _dt
+
+from app.services.metaapi_service import MetaApiFeed
+
+
+class _FakeTerminalState:
+    def __init__(self, price):
+        self._price = price
+
+    def price(self, symbol=None):  # noqa: ARG002 - mirrors the SDK signature
+        return self._price
+
+
+class _FakeConn:
+    def __init__(self, price):
+        self.terminal_state = _FakeTerminalState(price)
+
+
+def _feed_with(price):
+    feed = MetaApiFeed()
+    feed._conn = _FakeConn(price)
+    return feed
+
+
+def test_tick_carries_the_brokers_own_time():
+    when = _dt.datetime(2026, 9, 23, 6, 0, tzinfo=_dt.timezone.utc)
+    tick = _feed_with({"bid": 1.1, "ask": 1.2, "time": when}).get_tick("EURUSD")
+    assert tick is not None
+    assert tick["feed_ts"] == when.timestamp()
+
+
+def test_tick_without_a_time_is_unknown_not_fresh():
+    """No provider timestamp must read as "can't tell" (guard skipped), never
+    as "just now" — which is what our own write time would have claimed."""
+    tick = _feed_with({"bid": 1.1, "ask": 1.2}).get_tick("EURUSD")
+    assert tick is not None
+    assert tick["feed_ts"] is None
+    assert stale_feed_block_reason(
+        symbol="EURUSD", price_age_sec=None, threshold_sec=30, feed_warm_age_sec=None
+    ) is None
+
+
+def test_a_frozen_metaapi_stream_blocks_the_trade():
+    """The failure this closes: the stream stops, our loop keeps republishing
+    the same price with a fresh `ts`, and the trade goes through at a price
+    that is minutes old."""
+    when = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=90)
+    tick = _feed_with({"bid": 1.1, "ask": 1.2, "time": when}).get_tick("EURUSD")
+    age = _dt.datetime.now(_dt.timezone.utc).timestamp() - tick["feed_ts"]
+    assert age > 30
+    msg = stale_feed_block_reason(
+        symbol="EURUSD", price_age_sec=age, threshold_sec=30, feed_warm_age_sec=None
+    )
+    assert msg is not None and "EURUSD" in msg

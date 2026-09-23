@@ -511,6 +511,17 @@ class MetaApiFeed:
         st["bid"] = bid
         st["ask"] = ask
         self._last_rx = time.time()
+        # The BROKER's own tick time, not our read time. terminal_state keeps
+        # the last price it received, so when the stream freezes this stops
+        # advancing while `ts` below keeps ticking — which is the whole point:
+        # the stale-price guard needs a signal our own loop can't fake.
+        feed_ts = None
+        _t = price.get("time")
+        if hasattr(_t, "timestamp"):
+            try:
+                feed_ts = _t.timestamp()
+            except Exception:
+                feed_ts = None
         change = ltp - st["open"]
         return {
             "ltp": ltp,
@@ -524,6 +535,7 @@ class MetaApiFeed:
             "low": st["low"],
             "close_24h": st["open"],  # no true prev-close from MT → session open
             "ts": self._last_rx,
+            "feed_ts": feed_ts,
         }
 
     # ── config ────────────────────────────────────────────────────────
