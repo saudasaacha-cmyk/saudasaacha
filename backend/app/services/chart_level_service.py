@@ -18,6 +18,7 @@ from io import BytesIO
 from typing import Any
 
 from beanie import PydanticObjectId
+from beanie.operators import In
 from bson import Decimal128
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -490,7 +491,9 @@ async def list_for_admin(admin: User, segment: str | None = None) -> list[dict[s
 
         quotes = await market_data_service.get_quotes(tokens)
         for token, q2 in zip(tokens, quotes, strict=False):
-            ltps[token] = float(q2.get("ltp") or 0)
+            ltps[token] = float(
+                _round_like_tick(to_decimal(q2.get("ltp") or 0), ticks.get(token))
+            )
     except Exception:  # noqa: BLE001
         pass
     out = []
@@ -566,13 +569,22 @@ async def resolve_for_user(user: User, token: str) -> list[dict[str, Any]]:
         # sub-admin's users (same rule as company banks).
         tried.append({"owner_admin_id": None, "owner_broker_id": None})
 
+    # The chart addresses some instruments by SYMBOL where the catalog keys
+    # them by token — crypto is "BTCUSD" on screen and "CRYPTO_BTCUSD" in the
+    # collection — so a token-only match silently returned no lines there.
+    inst = await Instrument.find_one(Instrument.token == token)
+    if inst is None:
+        inst = await Instrument.find_one(Instrument.symbol == token)
+    tokens = {token}
+    if inst is not None:
+        tokens.add(inst.token)
+
     for f in tried:
         doc = await ChartLevel.find_one(
             ChartLevel.owner_admin_id == f["owner_admin_id"],
             ChartLevel.owner_broker_id == f["owner_broker_id"],
-            ChartLevel.token == token,
+            In(ChartLevel.token, list(tokens)),
         )
         if doc is not None and doc.levels:
-            inst = await Instrument.find_one(Instrument.token == token)
             return to_dict(doc, inst.tick_size if inst else None)["levels"]
     return []

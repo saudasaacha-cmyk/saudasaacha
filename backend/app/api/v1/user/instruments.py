@@ -910,6 +910,35 @@ _YAHOO_FX_PAIRS = {
 }
 
 
+# International instruments Yahoo carries under a name of its own. Energy and
+# index CFDs quote a contract/index whose absolute level differs from ours by a
+# small offset; `_align_candles_to_live` shifts it onto our live scale, so only
+# the SHAPE of the history has to match.
+#
+# These used to render TradingView's free embed widget instead of our own
+# chart. That widget is a cross-origin iframe: admin chart lines can't be drawn
+# on it and the price it shows isn't the price on our BUY/SELL buttons. Now
+# that every one of them has history here, the licensed chart serves them all.
+_YAHOO_DIRECT: dict[str, str] = {
+    # Spot metals → the COMEX/NYMEX front-month future. Yahoo's "XAUUSD=X"
+    # form exists but serves NO intraday candles (measured: 0 bars, while
+    # EURUSD=X gives 1295) — that, not the tick, is why metals had no chart
+    # of their own.
+    "XAUUSD": "GC=F", "XAGUSD": "SI=F", "XPTUSD": "PL=F", "XPDUSD": "PA=F",
+    # Energy CFDs → front-month future.
+    "USOIL": "CL=F", "WTI": "CL=F", "UKOIL": "BZ=F", "BRENT": "BZ=F",
+    "NATGAS": "NG=F",
+    # Index CFDs → the underlying index.
+    "US30": "^DJI", "NAS100": "^NDX", "SPX500": "^GSPC", "UK100": "^FTSE",
+    "DE40": "^GDAXI", "JPN225": "^N225", "HK50": "^HSI",
+    # US stocks we list — Yahoo uses the plain ticker. Listed explicitly
+    # rather than "any short alpha token" so a stray symbol-style Indian
+    # token can never be charted off the wrong market. Add new listings here.
+    "AAPL": "AAPL", "AMZN": "AMZN", "GOOGL": "GOOGL", "META": "META",
+    "MSFT": "MSFT", "NFLX": "NFLX", "NVDA": "NVDA", "TSLA": "TSLA",
+}
+
+
 def _yahoo_symbol_for(token: str) -> str | None:
     """Map our internal forex / spot-commodity token to a Yahoo Finance
     chart symbol. Returns None for tokens that should not hit Yahoo
@@ -919,7 +948,7 @@ def _yahoo_symbol_for(token: str) -> str | None:
       "FX_EURUSD"  → "EURUSD=X"
       "FX_USDINR"  → "USDINR=X"
       "EURUSD"     → "EURUSD=X"   (bare forex pair)
-      "XAUUSD"     → "XAUUSD=X"   (spot gold — Yahoo accepts metals too)
+      "XAUUSD"     → "GC=F"       (spot gold → COMEX front month)
       "NIFTY"      → None         (handled by Zerodha)
     """
     if not token:
@@ -929,13 +958,15 @@ def _yahoo_symbol_for(token: str) -> str | None:
         if t.startswith(pref):
             t = t[len(pref):]
             break
+    # Named instruments first: XAUUSD is six alpha characters but it is NOT an
+    # FX pair on Yahoo — "XAUUSD=X" resolves yet serves no intraday candles.
+    direct = _YAHOO_DIRECT.get(t)
+    if direct is not None:
+        return direct
     # Yahoo forex symbols are 6 alpha chars + "=X".
     if len(t) == 6 and t.isalpha():
         if t in _YAHOO_FX_PAIRS or t.endswith("USD") or t.startswith("USD") or t.endswith("INR"):
             return f"{t}=X"
-    # Spot metals: XAUUSD / XAGUSD / XPTUSD / XPDUSD.
-    if t in {"XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"}:
-        return f"{t}=X"
     return None
 
 

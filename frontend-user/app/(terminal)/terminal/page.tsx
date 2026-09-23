@@ -12,8 +12,6 @@ import { useMarketStream } from "@/lib/useMarketStream";
 import { OrderPanel } from "@/components/trading/OrderPanel";
 import { PositionsTabs } from "@/components/trading/PositionsTabs";
 import { TradingViewChart } from "@/components/trading/TradingViewChart";
-import { FreeTradingViewChart } from "@/components/trading/FreeTradingViewChart";
-import { toPublicTvSymbol } from "@/lib/publicTvSymbol";
 import { ChartTabs, type ChartTab } from "@/components/trading/ChartTabs";
 import { TIMEFRAMES, type Timeframe } from "@/components/trading/ChartToolbar";
 import { MobileQuickTradeBar } from "@/components/trading/MobileQuickTradeBar";
@@ -651,21 +649,14 @@ export default function TradingTerminalPage() {
                 (() => {
                   const tvInterval =
                     tf.interval === "minute" ? "1" : tf.interval === "3minute" ? "3" : tf.interval === "5minute" ? "5" : tf.interval === "15minute" ? "15" : tf.interval === "30minute" ? "30" : tf.interval === "60minute" ? "60" : "1D";
-                  // International (forex / metals / energy / crypto) → free
-                  // TradingView Advanced widget with real OANDA/Binance data.
-                  // Indian (NSE/BSE/NFO/BFO/MCX) → licensed chart on our feed.
-                  const publicTv = toPublicTvSymbol(
-                    instrument?.symbol,
-                    instrument?.exchange,
-                    (instrument as any)?.segment,
-                  );
-                  return publicTv ? (
-                    <FreeTradingViewChart
-                      tvSymbol={publicTv}
-                      interval={tvInterval}
-                      theme={chartTheme}
-                    />
-                  ) : (
+                  // EVERY instrument — Indian, forex, metals, energy, crypto,
+                  // US stocks — renders on the licensed chart over our own
+                  // datafeed. The free TradingView embed that used to serve
+                  // the international ones is gone: being a cross-origin
+                  // iframe, admin chart lines could not be drawn on it and it
+                  // quoted TradingView's liquidity rather than the price on
+                  // our own BUY/SELL buttons.
+                  return (
                     <TradingViewChart
                       token={selectedToken}
                       symbol={instrument?.symbol}
