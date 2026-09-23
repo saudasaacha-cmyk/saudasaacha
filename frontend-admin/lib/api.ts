@@ -615,11 +615,15 @@ export type CryptoConfig = {
   webhook_url: string;
 };
 
+export type ChartLevelEntry = { price: number; color: string; label: string | null };
+
 export type ChartLevelRow = {
   token: string;
   symbol: string;
   segment: string;
-  levels: { price: number; color: string; label: string | null }[];
+  levels: ChartLevelEntry[];
+  /** Live price, so a level that is nowhere near it is obvious. */
+  ltp: number | null;
 };
 
 export type ChartSegmentOption = { value: string; label: string; count: number };
@@ -643,12 +647,22 @@ export const ChartLevelsAPI = {
   import: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return unwrap<{ updated: number; cleared: number; errors: string[] }>(
+    return unwrap<{
+      updated: number;
+      cleared: number;
+      errors: string[];
+      warnings: string[];
+    }>(
       api.post("/admin/chart-levels/import", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       }),
     );
   },
+  /** Replace one instrument's lines without the Excel trip. */
+  save: (token: string, levels: { price: string; color: string; label: string }[]) =>
+    unwrap<{ saved: boolean; levels: number }>(
+      api.put(`/admin/chart-levels/${token}`, { levels }),
+    ),
   clear: (token: string) =>
     unwrap<{ cleared: boolean }>(api.delete(`/admin/chart-levels/${token}`)),
 };

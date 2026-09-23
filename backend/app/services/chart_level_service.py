@@ -13,6 +13,7 @@ second, subtly different one would be a bug waiting to happen.
 from __future__ import annotations
 
 import re
+from decimal import ROUND_HALF_EVEN, Decimal
 from io import BytesIO
 from typing import Any
 
@@ -27,11 +28,13 @@ from app.models.instrument import Instrument
 from app.models.user import User, UserRole
 from app.utils.decimal_utils import to_decimal
 
-MAX_LEVELS = 4
+MAX_LEVELS = 6
 
 # Readable defaults so a sheet filled in without touching the colour columns
-# still yields four DISTINGUISHABLE lines rather than four identical ones.
-DEFAULT_COLORS = ["#E31E24", "#0EA5E9", "#16A34A", "#F59E0B"]
+# still yields DISTINGUISHABLE lines rather than six identical ones.
+DEFAULT_COLORS = [
+    "#E31E24", "#0EA5E9", "#16A34A", "#F59E0B", "#7C3AED", "#EC4899",
+]
 
 _HEX_RE = re.compile(r"^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$")
 
@@ -46,7 +49,32 @@ _NAMED: dict[str, str] = {
 
 HEADERS = ["Token", "Symbol", "Segment"]
 for _i in range(1, MAX_LEVELS + 1):
-    HEADERS += [f"Price {_i}", f"Color {_i}", f"Label {_i}"]
+    # Line (the text on the line), then its colour, then the price it sits at
+    # — the order the operator fills them in.
+    HEADERS += [f"Line {_i}", f"Color {_i}", f"Price {_i}"]
+
+
+def _round_like_tick(price: Decimal, tick: Any) -> Decimal:
+    """Trim a price to the instrument's DECIMAL PLACES — not to a tick multiple.
+
+    Excel hands back the cached value of a formula, so a cell that reads
+    4249.17 arrives as 4249.17065447777 and every chip and line label then
+    carries fourteen digits. Rounding to the tick's precision fixes that
+    while leaving the operator's own number alone; snapping to a tick
+    MULTIPLE would silently move 4249.17 to 4249.15 on a 0.05-tick
+    instrument, and a level is a marker, not an order.
+    """
+    exp = -2
+    try:
+        t = to_decimal(tick)
+        if t > 0 and isinstance(t.as_tuple().exponent, int):
+            exp = int(t.as_tuple().exponent)
+    except Exception:  # noqa: BLE001
+        pass
+    places = min(max(-exp, 0), 8)
+    q = price.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_EVEN).normalize()
+    # normalize() turns 100.00 into 1E+2 — put it back into plain notation.
+    return q.quantize(Decimal(1)) if q.as_tuple().exponent > 0 else q
 
 
 # ── segment labels ───────────────────────────────────────────────────
@@ -185,16 +213,22 @@ async def build_template(admin: User, segment: str) -> bytes:
         ws.cell(row=r, column=3, value=segment_label(str(inst.segment)))
         saved = existing.get(inst.token)
         for i in range(MAX_LEVELS):
-            base = 4 + i * 3
+            base = 4 + i * 3  # Line, Color, Price
             entry = saved.levels[i] if saved and i < len(saved.levels) else None
+            ws.cell(row=r, column=base, value=(entry.label or "") if entry else None)
+            # The colour is seeded even on an empty line, so typing only a
+            # price still yields six distinct colours.
+            ws.cell(
+                row=r,
+                column=base + 1,
+                value=entry.color if entry else DEFAULT_COLORS[i],
+            )
             if entry is not None:
-                ws.cell(row=r, column=base, value=float(entry.price.to_decimal()))
-                ws.cell(row=r, column=base + 1, value=entry.color)
-                ws.cell(row=r, column=base + 2, value=entry.label or "")
-            else:
-                # Price stays blank (blank = no line) but the colour is seeded,
-                # so typing only a price still gives four distinct colours.
-                ws.cell(row=r, column=base + 1, value=DEFAULT_COLORS[i])
+                ws.cell(
+                    row=r,
+                    column=base + 2,
+                    value=float(_round_like_tick(entry.price.to_decimal(), inst.tick_size)),
+                )
 
     for c in range(1, len(HEADERS) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 16
@@ -206,12 +240,13 @@ async def build_template(admin: User, segment: str) -> bytes:
     rows = [
         ("Column", "What to put"),
         ("Token / Symbol / Segment", "Leave as-is. Token identifies the instrument."),
-        ("Price 1..4", "The price to draw a line at. Leave blank for no line."),
-        ("Color 1..4", "Hex like #E31E24, or a name: red, green, blue, orange, purple, ..."),
-        ("Label 1..4", "Optional text shown on the line."),
+        (f"Line 1..{MAX_LEVELS}", "Optional text shown on the line, e.g. R1, Support."),
+        (f"Color 1..{MAX_LEVELS}", "Hex like #E31E24, or a name: red, green, blue, orange, purple, ..."),
+        (f"Price 1..{MAX_LEVELS}", "The price to draw the line at. Leave blank for no line."),
         ("", ""),
         ("Note", "Re-uploading REPLACES that instrument's lines with what the sheet says."),
         ("Note", "A row with every price blank CLEARS that instrument's lines."),
+        ("Note", "Columns are found by their HEADING, so a sheet from an older build still imports."),
     ]
     for r, (a, b) in enumerate(rows, start=1):
         guide.cell(row=r, column=1, value=a).font = Font(bold=(r == 1))
@@ -225,6 +260,30 @@ async def build_template(admin: User, segment: str) -> bytes:
 
 
 # ── import ───────────────────────────────────────────────────────────
+_COL_RE = re.compile(r"\s*(price|colou?r|line|label)\s*#?\s*(\d+)\s*$", re.I)
+
+
+def _column_map(header: tuple[Any, ...]) -> dict[int, dict[str, int]]:
+    """{level index: {"price"/"color"/"label": column index}} read off the
+    HEADING row rather than fixed offsets, so a sheet downloaded from an
+    older build (Price / Color / Label, four levels) imports exactly as well
+    as the current one (Line / Color / Price, six)."""
+    out: dict[int, dict[str, int]] = {}
+    for idx, cell in enumerate(header or ()):
+        m = _COL_RE.match(str(cell or ""))
+        if not m:
+            continue
+        kind = m.group(1).lower()
+        key = "price" if kind == "price" else "color" if kind.startswith("col") else "label"
+        out.setdefault(int(m.group(2)) - 1, {})[key] = idx
+    return {k: v for k, v in out.items() if "price" in v}
+
+
+def _cell(row: tuple[Any, ...], cols: dict[str, int], key: str) -> Any:
+    idx = cols.get(key)
+    return row[idx] if idx is not None and len(row) > idx else None
+
+
 async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
     """Parse an uploaded template and upsert this admin's rows.
 
@@ -237,13 +296,24 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
         raise ValueError(f"Not a readable .xlsx file: {exc}") from exc
     ws = wb.worksheets[0]
 
+    rows = list(ws.iter_rows(min_row=1, values_only=True))
+    if not rows:
+        raise ValueError("The sheet is empty.")
+    cols = _column_map(rows[0])
+    if not cols:
+        raise ValueError(
+            "Could not find the 'Price 1' / 'Color 1' headings — upload the "
+            "sheet downloaded from this page, with its heading row intact."
+        )
+
     f = owner_filter_for_admin(admin)
     known = {i.token: i for i in await Instrument.find().to_list()}
 
     updated = cleared = 0
     errors: list[str] = []
+    touched: dict[str, list[Decimal]] = {}
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
+    for row in rows[1:]:
         if not row or row[0] in (None, ""):
             continue
         token = str(row[0]).strip()
@@ -253,66 +323,140 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
             continue
 
         entries: list[ChartLevelEntry] = []
-        for i in range(MAX_LEVELS):
-            base = 3 + i * 3  # values_only rows are 0-indexed
-            price_raw = row[base] if len(row) > base else None
+        for i in sorted(cols):
+            c = cols[i]
+            price_raw = row[c["price"]] if len(row) > c["price"] else None
             if price_raw in (None, ""):
                 continue
             try:
-                price = to_decimal(price_raw)
+                # Operators paste formatted numbers ("4,249.17") straight out
+                # of another sheet — a comma shouldn't reject the row.
+                raw = price_raw.replace(",", "").strip() if isinstance(price_raw, str) else price_raw
+                price = _round_like_tick(to_decimal(raw), inst.tick_size)
             except Exception:  # noqa: BLE001
                 errors.append(f"{inst.symbol}: 'Price {i + 1}' = {price_raw!r} is not a number")
                 continue
             if price <= 0:
                 errors.append(f"{inst.symbol}: 'Price {i + 1}' must be greater than 0")
                 continue
-            color_raw = row[base + 1] if len(row) > base + 1 else None
-            label_raw = row[base + 2] if len(row) > base + 2 else None
+
+            label = _cell(row, c, "label")
             entries.append(
                 ChartLevelEntry(
                     price=Decimal128(str(price)),
-                    color=normalize_color(color_raw, DEFAULT_COLORS[i]),
-                    label=(str(label_raw).strip() or None) if label_raw else None,
+                    color=normalize_color(
+                        _cell(row, c, "color"), DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
+                    ),
+                    label=(str(label).strip() or None) if label else None,
                 )
             )
 
-        doc = await ChartLevel.find_one(
-            ChartLevel.owner_admin_id == f["owner_admin_id"],
-            ChartLevel.owner_broker_id == f["owner_broker_id"],
-            ChartLevel.token == token,
-        )
-        if not entries:
-            # Every price blank = clear this instrument's lines.
-            if doc is not None:
-                await doc.delete()
-                cleared += 1
+        n = await _upsert(admin, inst, entries, f)
+        if n is None:
             continue
-        if doc is None:
-            doc = ChartLevel(
-                owner_admin_id=f["owner_admin_id"],
-                owner_broker_id=f["owner_broker_id"],
-                token=token,
-                symbol=inst.symbol,
-                segment=str(inst.segment),
-            )
-        doc.symbol = inst.symbol
-        doc.segment = str(inst.segment)
-        doc.levels = entries
-        await doc.save()
-        updated += 1
+        if n:
+            updated += 1
+            touched[token] = [e.price.to_decimal() for e in entries]
+        else:
+            cleared += 1
 
-    return {"updated": updated, "cleared": cleared, "errors": errors}
+    return {
+        "updated": updated,
+        "cleared": cleared,
+        "errors": errors,
+        "warnings": await _offscreen_warnings(touched, known),
+    }
+
+
+async def _upsert(
+    admin: User,
+    inst: Instrument,
+    entries: list[ChartLevelEntry],
+    f: dict[str, PydanticObjectId | None],
+) -> bool | None:
+    """Write one instrument's lines. True = saved, False = cleared, None =
+    nothing to do. Shared by the Excel import and the inline editor so the
+    two can never drift apart."""
+    doc = await ChartLevel.find_one(
+        ChartLevel.owner_admin_id == f["owner_admin_id"],
+        ChartLevel.owner_broker_id == f["owner_broker_id"],
+        ChartLevel.token == inst.token,
+    )
+    if not entries:
+        # Every price blank = clear this instrument's lines.
+        if doc is None:
+            return None
+        await doc.delete()
+        return False
+    if doc is None:
+        doc = ChartLevel(
+            owner_admin_id=f["owner_admin_id"],
+            owner_broker_id=f["owner_broker_id"],
+            token=inst.token,
+            symbol=inst.symbol,
+            segment=str(inst.segment),
+        )
+    doc.symbol = inst.symbol
+    doc.segment = str(inst.segment)
+    doc.levels = entries
+    await doc.save()
+    return True
+
+
+# How far from the live price a level has to be before it is almost certainly
+# a mistake. A line ten times off isn't "wrong", it is simply drawn where no
+# one will ever scroll to — which reads as "the feature does nothing".
+_OFFSCREEN_RATIO = Decimal("10")
+_OFFSCREEN_MAX_CHECKS = 60
+
+
+async def _offscreen_warnings(
+    touched: dict[str, list[Decimal]], known: dict[str, Instrument]
+) -> list[str]:
+    """Flag levels that sit nowhere near the instrument's live price.
+
+    This is the whole of the "I uploaded prices and no line appeared" report:
+    XAUUSD trades near 4300 and had lines at 63, so they were drawn miles
+    below the visible range. Cheap to check, and it names the row to fix.
+    """
+    tokens = list(touched)[:_OFFSCREEN_MAX_CHECKS]
+    if not tokens:
+        return []
+    from app.services import market_data_service
+
+    try:
+        quotes = await market_data_service.get_quotes(tokens)
+    except Exception:  # noqa: BLE001
+        return []
+    out: list[str] = []
+    for token, q in zip(tokens, quotes, strict=False):
+        try:
+            ltp = to_decimal(q.get("ltp") or 0)
+        except Exception:  # noqa: BLE001
+            continue
+        if ltp <= 0:
+            continue
+        sym = known[token].symbol if token in known else token
+        for price in touched[token]:
+            if price > ltp * _OFFSCREEN_RATIO or price * _OFFSCREEN_RATIO < ltp:
+                out.append(
+                    f"{sym}: {price} is far from the live price {ltp} — that line "
+                    f"is drawn off-screen. Check the row."
+                )
+    return out
 
 
 # ── reads ────────────────────────────────────────────────────────────
-def to_dict(doc: ChartLevel) -> dict[str, Any]:
+def to_dict(doc: ChartLevel, tick: Any = None) -> dict[str, Any]:
     return {
         "token": doc.token,
         "symbol": doc.symbol,
         "segment": doc.segment,
         "levels": [
             {
-                "price": float(e.price.to_decimal()),
+                # Rounded on the way out as well as in: rows written before the
+                # rounding existed still hold Excel's fourteen-digit float.
+                "price": float(_round_like_tick(e.price.to_decimal(), tick)),
                 "color": e.color,
                 "label": e.label,
             }
@@ -329,7 +473,67 @@ async def list_for_admin(admin: User, segment: str | None = None) -> list[dict[s
     )
     if segment:
         q = q.find(ChartLevel.segment == segment)
-    return [to_dict(d) for d in await q.to_list()]
+    docs = await q.to_list()
+    if not docs:
+        return []
+    tokens = [d.token for d in docs]
+    ticks = {
+        i.token: i.tick_size
+        for i in await Instrument.find({"token": {"$in": tokens}}).to_list()
+    }
+    # The live price next to the lines is what makes a fat-fingered row
+    # obvious — a level ten times off the LTP draws off-screen and reads as
+    # "the feature is broken".
+    ltps: dict[str, float] = {}
+    try:
+        from app.services import market_data_service
+
+        quotes = await market_data_service.get_quotes(tokens)
+        for token, q2 in zip(tokens, quotes, strict=False):
+            ltps[token] = float(q2.get("ltp") or 0)
+    except Exception:  # noqa: BLE001
+        pass
+    out = []
+    for d in docs:
+        row = to_dict(d, ticks.get(d.token))
+        row["ltp"] = ltps.get(d.token) or None
+        out.append(row)
+    return out
+
+
+async def save_levels(
+    admin: User, token: str, levels: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Inline editor: replace one instrument's lines without the Excel trip.
+
+    Same validation and the same writer as the import, so a price typed here
+    is rounded and colour-checked exactly like one typed in the sheet.
+    """
+    inst = await Instrument.find_one(Instrument.token == token)
+    if inst is None:
+        raise ValueError("Not an instrument on this platform.")
+    entries: list[ChartLevelEntry] = []
+    for i, lv in enumerate(levels[:MAX_LEVELS]):
+        raw = lv.get("price")
+        if raw in (None, ""):
+            continue
+        try:
+            clean = raw.replace(",", "").strip() if isinstance(raw, str) else raw
+            price = _round_like_tick(to_decimal(clean), inst.tick_size)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"Price {i + 1} is not a number.") from exc
+        if price <= 0:
+            raise ValueError(f"Price {i + 1} must be greater than 0.")
+        label = str(lv.get("label") or "").strip() or None
+        entries.append(
+            ChartLevelEntry(
+                price=Decimal128(str(price)),
+                color=normalize_color(lv.get("color"), DEFAULT_COLORS[i % len(DEFAULT_COLORS)]),
+                label=label,
+            )
+        )
+    saved = await _upsert(admin, inst, entries, owner_filter_for_admin(admin))
+    return {"saved": bool(saved), "levels": len(entries)}
 
 
 async def clear_for_admin(admin: User, token: str) -> bool:
@@ -369,5 +573,6 @@ async def resolve_for_user(user: User, token: str) -> list[dict[str, Any]]:
             ChartLevel.token == token,
         )
         if doc is not None and doc.levels:
-            return to_dict(doc)["levels"]
+            inst = await Instrument.find_one(Instrument.token == token)
+            return to_dict(doc, inst.tick_size if inst else None)["levels"]
     return []

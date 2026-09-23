@@ -1,8 +1,9 @@
 """Admin chart lines — Excel round-trip.
 
-Download a template for a segment, fill in up to four price/colour pairs per
-instrument, upload it back. Each price becomes a horizontal line on that
-instrument's chart, in the colour given, for the users under this admin.
+Download a template for a segment, fill in up to six line/colour/price sets
+per instrument, upload it back. Single rows can also be edited in place.
+Each price becomes a horizontal line on that instrument's chart, in the
+colour given, for the users under this admin.
 
 Rows are owned per admin tier (super-admin / admin / broker), same cascade as
 crypto configs and company banks.
@@ -15,6 +16,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from app.core.dependencies import CurrentAdmin
 from app.schemas.common import APIResponse
@@ -108,3 +110,30 @@ async def clear_levels(token: str, admin: CurrentAdmin):
         raise HTTPException(status_code=400, detail="Invalid token.")
     removed = await chart_level_service.clear_for_admin(admin, token)
     return APIResponse(data={"cleared": removed})
+
+
+class LevelIn(BaseModel):
+    price: str | float | None = None
+    color: str | None = None
+    label: str | None = Field(default=None, max_length=40)
+
+
+class LevelsIn(BaseModel):
+    levels: list[LevelIn] = Field(default_factory=list, max_length=20)
+
+
+@router.put("/{token}", response_model=APIResponse[dict])
+async def save_levels(token: str, body: LevelsIn, admin: CurrentAdmin):
+    """Replace one instrument's lines from the inline editor. An empty list
+    clears them, same as an all-blank row in the sheet."""
+    if not re.fullmatch(r"[A-Za-z0-9_:.\-]{1,64}", token):
+        raise HTTPException(status_code=400, detail="Invalid token.")
+    try:
+        result = await chart_level_service.save_levels(
+            admin, token, [lv.model_dump() for lv in body.levels]
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return APIResponse(data=result)
