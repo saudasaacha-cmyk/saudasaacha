@@ -315,18 +315,20 @@ function TradingViewChartInner({
   const levelShapesRef = useRef<any[]>([]);
   useEffect(() => {
     let cancelled = false;
+    let dataSub: any = null;
 
     const clear = () => {
       const w = widgetRef.current;
+      const ids = levelShapesRef.current;
+      levelShapesRef.current = [];
       if (!w) return;
-      for (const id of levelShapesRef.current) {
+      for (const id of ids) {
         try {
           w.activeChart().removeEntity(id);
         } catch {
           // Entity already gone (symbol switch, widget rebuild) — nothing to do.
         }
       }
-      levelShapesRef.current = [];
     };
 
     const draw = async () => {
@@ -339,54 +341,77 @@ function TradingViewChartInner({
         return; // no lines configured, or the call failed — draw nothing
       }
       if (cancelled || !levels.length) return;
-      try {
-        w.onChartReady(() => {
-          if (cancelled) return;
-          clear();
-          const chart = w.activeChart();
-          // A horizontal line still needs a time coordinate. The visible
-          // range can be empty on the first ready tick, which makes
-          // createShape throw — fall back to "now" so the line is placed
-          // either way (the time is irrelevant once it spans the pane).
-          let anchor = Math.floor(Date.now() / 1000);
+
+      const paint = async () => {
+        if (cancelled) return;
+        const chart = w.activeChart();
+        clear();
+        // A horizontal line still needs a time coordinate. The visible range
+        // can be empty on the first ready tick, so fall back to "now" — the
+        // time is irrelevant once the line spans the pane.
+        let anchor = Math.floor(Date.now() / 1000);
+        try {
+          const vr = chart.getVisibleRange?.();
+          if (vr && Number.isFinite(vr.from) && vr.from > 0) anchor = vr.from;
+        } catch {}
+        for (const lv of levels) {
+          if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
           try {
-            const vr = chart.getVisibleRange?.();
-            if (vr && Number.isFinite(vr.from) && vr.from > 0) anchor = vr.from;
-          } catch {}
-          for (const lv of levels) {
-            if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
-            try {
-              const id = chart.createShape(
-                { time: anchor, price: lv.price },
-                {
-                  shape: "horizontal_line",
-                  lock: true,          // an admin level is not the user's to drag
-                  disableSelection: true,
-                  disableSave: true,
-                  text: lv.label || "",
-                  overrides: {
-                    linecolor: lv.color,
-                    linewidth: 2,
-                    linestyle: 0,
-                    showLabel: !!lv.label,
-                    textcolor: lv.color,
-                    horzLabelsAlign: "right",
-                    vertLabelsAlign: "bottom",
-                  },
+            // createShape resolves to the id — it does NOT return it. Reading
+            // the promise as an id meant every failure below surfaced as an
+            // unhandled rejection: nothing drawn, nothing logged, and the
+            // "ids" we kept for cleanup were promises.
+            const id = await chart.createShape(
+              { time: anchor, price: lv.price },
+              {
+                shape: "horizontal_line",
+                lock: true, // an admin level is not the user's to drag
+                disableSelection: true,
+                disableSave: true,
+                disableUndo: true,
+                zOrder: "top",
+                text: lv.label || "",
+                // Drawing overrides are namespaced per tool. The unprefixed
+                // "linecolor" form is not a property this library knows, and
+                // one unknown key rejects the whole call — which is why no
+                // admin line has ever appeared on any chart.
+                overrides: {
+                  "linetoolhorzline.linecolor": lv.color,
+                  "linetoolhorzline.linewidth": 2,
+                  "linetoolhorzline.linestyle": 0,
+                  "linetoolhorzline.showPrice": true,
+                  "linetoolhorzline.textcolor": lv.color,
+                  "linetoolhorzline.horzLabelsAlign": "right",
+                  "linetoolhorzline.vertLabelsAlign": "bottom",
                 },
-              );
-              if (id) levelShapesRef.current.push(id);
-            } catch (e) {
-              console.error("chart level draw failed", lv, e);
-            }
+              },
+            );
+            if (cancelled) break;
+            if (id) levelShapesRef.current.push(id);
+          } catch (e) {
+            console.error("chart level draw failed", lv, e);
           }
-        });
-      } catch {}
+        }
+      };
+
+      w.onChartReady(() => {
+        if (cancelled) return;
+        void paint();
+        try {
+          // Bars land AFTER onChartReady and reload on every symbol switch;
+          // repaint so the levels survive both.
+          dataSub = w.activeChart().onDataLoaded();
+          dataSub.subscribe(null, () => void paint());
+        } catch {}
+      });
     };
 
     if (chartReady > 0) void draw();
     return () => {
       cancelled = true;
+      try {
+        dataSub?.unsubscribeAll?.(null);
+      } catch {}
       clear();
     };
   }, [token, chartReady]);
