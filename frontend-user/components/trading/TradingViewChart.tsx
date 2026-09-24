@@ -371,23 +371,43 @@ function TradingViewChartInner({
                 disableUndo: true,
                 zOrder: "top",
                 text: lv.label || "",
-                // Drawing overrides are namespaced per tool. The unprefixed
-                // "linecolor" form is not a property this library knows, and
-                // one unknown key rejects the whole call — which is why no
-                // admin line has ever appeared on any chart.
+                // Per-shape overrides are the TOOL's own property names —
+                // `linecolor`, not `linetoolhorzline.linecolor`. The prefixed
+                // form belongs to widget.applyOverrides() (global defaults).
+                //
+                // Getting this wrong is SILENT: the library walks the keys
+                // with `properties.hasChild(key)` and just skips anything it
+                // doesn't recognise. No throw, no warning — every line simply
+                // kept the tool's factory default #2962FF, which is why they
+                // all came out the same blue however many colours the admin
+                // set. Hence the read-back check below.
                 overrides: {
-                  "linetoolhorzline.linecolor": lv.color,
-                  "linetoolhorzline.linewidth": 2,
-                  "linetoolhorzline.linestyle": 0,
-                  "linetoolhorzline.showPrice": true,
-                  "linetoolhorzline.textcolor": lv.color,
-                  "linetoolhorzline.horzLabelsAlign": "right",
-                  "linetoolhorzline.vertLabelsAlign": "bottom",
+                  linecolor: lv.color,
+                  linewidth: 2,
+                  linestyle: 0,
+                  showPrice: true,
+                  textcolor: lv.color,
+                  horzLabelsAlign: "right",
+                  vertLabelsAlign: "bottom",
                 },
               },
             );
             if (cancelled) break;
-            if (id) levelShapesRef.current.push(id);
+            if (id) {
+              levelShapesRef.current.push(id);
+              // The override API can't report a key it ignored, so confirm the
+              // colour actually landed. One line in the console beats every
+              // line on the chart being the same colour and nobody knowing why.
+              try {
+                const applied = chart.getShapeById(id)?.getProperties?.()?.linecolor;
+                if (applied && String(applied).toLowerCase() !== lv.color.toLowerCase()) {
+                  console.warn(
+                    "chart level colour was ignored by the library",
+                    { wanted: lv.color, applied, label: lv.label },
+                  );
+                }
+              } catch {}
+            }
           } catch (e) {
             console.error("chart level draw failed", lv, e);
           }
