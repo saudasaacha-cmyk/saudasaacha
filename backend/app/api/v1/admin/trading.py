@@ -493,7 +493,7 @@ async def order_quotes(
     if not tok_list:
         return APIResponse(data=[])
     results = await asyncio.gather(
-        *[market_data_service.get_ltp(tok) for tok in tok_list],
+        *[market_data_service.get_display_ltp(tok) for tok in tok_list],
         return_exceptions=True,
     )
     out = []
@@ -943,7 +943,7 @@ async def list_positions(
     # the query is CLOSED-only. Saves the slowest part of the Closed tab.
     if norm_status != PositionStatus.CLOSED.value:
         ltp_results = await asyncio.gather(
-            *[market_data_service.get_ltp(tok) for tok in unique_tokens],
+            *[market_data_service.get_display_ltp(tok) for tok in unique_tokens],
             return_exceptions=True,
         )
         for tok, res in zip(unique_tokens, ltp_results):
@@ -2401,7 +2401,7 @@ async def positions_pnl_summary(
     # adding seconds of blank time to every admin navigation.
     unique_tokens = list({p.instrument.token for p in open_positions if p.quantity != 0})
     ltp_results = await asyncio.gather(
-        *[market_data_service.get_ltp(tok) for tok in unique_tokens],
+        *[market_data_service.get_display_ltp(tok) for tok in unique_tokens],
         return_exceptions=True,
     )
     ltp_map: dict[str, float | None] = {}

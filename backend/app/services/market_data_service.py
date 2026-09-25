@@ -1163,6 +1163,30 @@ async def get_ltp(token: str) -> Decimal:
     return quantize_money(to_decimal(q["ltp"]))
 
 
+async def get_display_ltp(token: str) -> Decimal:
+    """LTP for a BLOTTER — the live price, else the last one we saw.
+
+    `get_ltp` is deliberately strict: no live price means 0, and every
+    execution path leans on that (a fill must never use a stale quote).
+    A blotter is not an execution path, and 0 there is read as a fact —
+    it zeroes the M2M and the net P&L of a perfectly good open position.
+
+    Measured 2026-09-25, MCX open: far-month contracts (SILVER26DECFUT,
+    CRUDEOIL26OCTFUT) trade a few times an hour, while the live snapshot
+    every non-leader worker reads lives for 30 s. Between two trades the
+    snapshot expires, so the admin Positions page swung between a real
+    M2M and zero every few seconds — while `mdlast` held the right price
+    the whole time.
+
+    Never use this to price an order.
+    """
+    q = await get_quote(token)
+    live = to_decimal(q.get("ltp") or 0)
+    if live > 0:
+        return quantize_money(live)
+    return quantize_money(to_decimal(q.get("last_ltp") or 0))
+
+
 def get_ltp_instant(token: str) -> Decimal | None:
     """Read LTP from the in-memory WS state with ZERO network calls.
 

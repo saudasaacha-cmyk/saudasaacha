@@ -1025,7 +1025,7 @@ async def list_active_trades(user: CurrentUser):
     # network round-trip instead of N sequential awaits (was ~50 ms × N).
     unique_toks = list(set(tokens))
     _ltp_results = await asyncio.gather(
-        *[market_data_service.get_ltp(tok) for tok in unique_toks],
+        *[market_data_service.get_display_ltp(tok) for tok in unique_toks],
         return_exceptions=True,
     )
     ltp_by_token: dict[str, float] = {

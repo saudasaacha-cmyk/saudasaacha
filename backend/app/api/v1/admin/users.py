@@ -425,7 +425,7 @@ async def users_live_stats(
     # ── 4. Parallel LTP fan-out across UNIQUE tokens ─────────────────
     unique_tokens = list({p.instrument.token for p in open_positions})
     ltp_results = await asyncio.gather(
-        *[market_data_service.get_ltp(tok) for tok in unique_tokens],
+        *[market_data_service.get_display_ltp(tok) for tok in unique_tokens],
         return_exceptions=True,
     )
     ltp_map: dict[str, Any] = {}
@@ -1426,7 +1426,7 @@ async def live_trade_stats(user_id: str, admin: CurrentAdmin):
     # response time — multi-second blank state on a busy account.
     unique_tokens = list({p.instrument.token for p in open_positions})
     ltp_results = await asyncio.gather(
-        *[market_data_service.get_ltp(tok) for tok in unique_tokens],
+        *[market_data_service.get_display_ltp(tok) for tok in unique_tokens],
         return_exceptions=True,
     )
     ltp_map: dict[str, Any] = {}
