@@ -162,7 +162,13 @@ async def fetch_contracts() -> list[dict[str, Any]]:
     return [
         s
         for s in (data.get("symbols") or [])
-        if s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"
+        if s.get("status") == "TRADING"
+        and s.get("quoteAsset") == "USDT"
+        # Perpetuals only. Binance also lists dated quarterlies
+        # (BTCUSDT_251226) whose base asset is just "BTC", so letting them
+        # through put three Bitcoin rows in the browse — the perp, the
+        # March contract and the June one, all called BTC.
+        and s.get("contractType") in ("PERPETUAL", "TRADIFI_PERPETUAL")
     ]
 
 
