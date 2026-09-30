@@ -67,6 +67,33 @@ _ALIASES: dict[str, str] = {
 }
 
 
+def contract_for(sym: str, known: set[str] | Any) -> str | None:
+    """Platform symbol → the Binance contract that carries its price.
+
+    Tried most-specific first: the contract name itself (AAPLUSDT), an
+    explicit rename (USOIL → CLUSDT), the USD→USDT swap our crypto
+    instruments already rely on (BTCUSD → BTCUSDT), then the plain quote
+    suffix (AAPL → AAPLUSDT).
+
+    Shared with the catalogue sync so "which contract feeds this
+    instrument" has exactly one answer — a second copy of these rules is
+    how you end up seeding a duplicate instrument for a symbol that was
+    already covered.
+    """
+    s = (sym or "").upper()
+    if not s:
+        return None
+    if s in known:
+        return s
+    alias = _ALIASES.get(s)
+    if alias and alias in known:
+        return alias
+    for cand in (s + "T", s + "USDT"):
+        if cand in known:
+            return cand
+    return None
+
+
 def _f(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -96,29 +123,10 @@ class BinanceFuturesFeed:
     def is_connected(self) -> bool:
         return self._connected
 
-    def _binance_symbol(self, sym: str) -> str | None:
-        """Platform symbol → the contract that carries its price.
-
-        Tried in order so the most specific wins: the contract name itself
-        (AAPLUSDT), an explicit rename (USOIL → CLUSDT), the USD→USDT swap
-        our crypto instruments use (BTCUSD → BTCUSDT), then the plain
-        quote suffix (AAPL → AAPLUSDT).
-        """
-        s = sym.upper()
-        if s in self._ticks:
-            return s
-        alias = _ALIASES.get(s)
-        if alias:
-            return alias
-        for cand in (s + "T", s + "USDT"):
-            if cand in self._ticks:
-                return cand
-        return None
-
     def get_tick(self, symbol: str | None) -> dict[str, Any] | None:
         if not symbol:
             return None
-        key = self._binance_symbol(symbol)
+        key = contract_for(symbol, self._ticks)
         if key is None:
             return None
         t = self._ticks.get(key)

@@ -226,6 +226,12 @@ class BinanceFeed:
                 )
                 return
             t["ltp"] = price
+            # Binance's own event time, so the stale-price guard measures the
+            # exchange's clock rather than our writer's `ts` below (which is
+            # re-stamped every tick whether or not the price moved).
+            ev = _f(data.get("E"))
+            if ev > 0:
+                t["feed_ts"] = ev / 1000.0
             if "change" in t:
                 t["close_24h"] = price - _f(t.get("change"))
         elif stream.endswith("@bookTicker"):
