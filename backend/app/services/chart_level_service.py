@@ -1,8 +1,9 @@
 """Admin chart lines: Excel round-trip + the user-side resolver.
 
 The admin picks a segment, downloads a workbook pre-filled with every
-instrument in it, types up to ``MAX_LEVELS`` price/colour pairs per row, and
-uploads it back. Each price becomes a horizontal line on that instrument's
+instrument in it, types a price under each line column, and uploads it
+back. The colour and the label of each line are set ONCE at the top of the
+sheet and apply to every instrument. Each price becomes a horizontal line on that instrument's
 chart in the colour that was given.
 
 Ownership and the user-side cascade mirror ``crypto_config_service`` exactly —
@@ -23,19 +24,36 @@ from bson import Decimal128
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.models.chart_level import ChartLevel, ChartLevelEntry
 from app.models.instrument import Instrument
 from app.models.user import User, UserRole
 from app.utils.decimal_utils import to_decimal
 
-MAX_LEVELS = 6
+# How many line columns a FRESH template ships with, and how many slots the
+# inline editor shows. The import has no cap: the operator adds as many
+# "Line N" columns as they want and every one of them is read.
+DEFAULT_LEVELS = 6
 
-# Readable defaults so a sheet filled in without touching the colour columns
+# Readable defaults so a sheet filled in without touching the colour row
 # still yields DISTINGUISHABLE lines rather than six identical ones.
 DEFAULT_COLORS = [
     "#E31E24", "#0EA5E9", "#16A34A", "#F59E0B", "#7C3AED", "#EC4899",
 ]
+
+TREND_VALUES = ("Uptrend", "Downtrend", "Sideways")
+
+# What an operator actually types. Anything unrecognised is dropped rather
+# than stored, so a typo shows as "no trend" instead of a chip reading "Dwn".
+_TREND_ALIASES: dict[str, str] = {
+    "UP": "Uptrend", "UPTREND": "Uptrend", "UP TREND": "Uptrend",
+    "BULLISH": "Uptrend", "BULL": "Uptrend", "BUY": "Uptrend",
+    "DOWN": "Downtrend", "DOWNTREND": "Downtrend", "DOWN TREND": "Downtrend",
+    "BEARISH": "Downtrend", "BEAR": "Downtrend", "SELL": "Downtrend",
+    "SIDE": "Sideways", "SIDEWAYS": "Sideways", "SIDE WAYS": "Sideways",
+    "FLAT": "Sideways", "NEUTRAL": "Sideways", "RANGE": "Sideways",
+}
 
 _HEX_RE = re.compile(r"^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$")
 
@@ -48,11 +66,10 @@ _NAMED: dict[str, str] = {
     "lime": "#84CC16", "magenta": "#D946EF", "gold": "#D4AF37", "silver": "#C0C0C0",
 }
 
-HEADERS = ["Token", "Symbol", "Segment"]
-for _i in range(1, MAX_LEVELS + 1):
-    # Line (the text on the line), then its colour, then the price it sits at
-    # — the order the operator fills them in.
-    HEADERS += [f"Line {_i}", f"Color {_i}", f"Price {_i}"]
+# The columns that come before the line columns. Everything to the RIGHT of
+# Trend is a line, whatever its heading says — that is what "Line N" means:
+# the operator adds columns and the parser reads as many as it finds.
+FIXED_HEADERS = ["Token", "Symbol", "Segment", "Trend"]
 
 
 def _round_like_tick(price: Decimal, tick: Any) -> Decimal:
@@ -177,7 +194,48 @@ def normalize_color(raw: Any, fallback: str) -> str:
     return _NAMED.get(s.lower(), fallback)
 
 
+def normalize_trend(raw: Any) -> str | None:
+    """'down', 'DOWNTREND', 'Bearish' -> 'Downtrend'. Unknown -> None."""
+    s = " ".join(str(raw or "").split()).upper()
+    if not s:
+        return None
+    return _TREND_ALIASES.get(s)
+
+
 # ── template ─────────────────────────────────────────────────────────
+# Sheet shape (the operator's own design):
+#
+#   row 1   Token | Symbol | Segment | Trend | Line 1 | Line 2 | ... | Line N
+#   row 2   Color |        |         |       | #E31E24| #0EA5E9| ... <- ONE colour per line, all instruments
+#   row 3   Label |        |         |       | MF     | D1     | ... <- ONE label  per line, all instruments
+#   row 4+  NATGAS| NATGAS | Commod. | Down  | 1      | 1.1    | ...  <- just prices
+#
+# The colour and the label used to be repeated on every single row, which
+# meant retyping them for all 742 instruments to change one colour. They are
+# now set once at the top and applied to every row below.
+LINE_ROW_COLOR = 2
+LINE_ROW_LABEL = 3
+DATA_ROW_START = 4
+
+
+def _line_settings(
+    saved: list[ChartLevel], count: int
+) -> tuple[list[str], list[str]]:
+    """The colour + label to put in rows 2 and 3.
+
+    Seeded from whichever saved instrument carries the most lines, so a
+    downloaded sheet round-trips what is already configured instead of
+    resetting it to the defaults.
+    """
+    src = max(saved, key=lambda r: len(r.levels), default=None)
+    colors, labels = [], []
+    for i in range(count):
+        entry = src.levels[i] if src and i < len(src.levels) else None
+        colors.append(entry.color if entry else DEFAULT_COLORS[i % len(DEFAULT_COLORS)])
+        labels.append((entry.label or "") if entry else "")
+    return colors, labels
+
+
 async def build_template(admin: User, segment: str) -> bytes:
     """Workbook of every instrument in `segment`, pre-filled with whatever
     this admin already saved so editing is a round-trip, not a retype."""
@@ -194,6 +252,12 @@ async def build_template(admin: User, segment: str) -> bytes:
         ).to_list()
     }
 
+    # Ship enough line columns for everything already saved — downloading a
+    # sheet must never silently drop lines the admin had configured.
+    saved = list(existing.values())
+    n_lines = max(DEFAULT_LEVELS, max((len(r.levels) for r in saved), default=0))
+    colors, labels = _line_settings(saved, n_lines)
+
     wb = Workbook()
     ws = wb.active
     # Sheet tab and the Segment column both show the friendly label, matching
@@ -203,57 +267,84 @@ async def build_template(admin: User, segment: str) -> bytes:
 
     head_fill = PatternFill("solid", fgColor="0B1220")
     head_font = Font(bold=True, color="FFFFFF")
-    for c, h in enumerate(HEADERS, start=1):
+    headers = FIXED_HEADERS + [f"Line {i + 1}" for i in range(n_lines)]
+    for c, h in enumerate(headers, start=1):
         cell = ws.cell(row=1, column=c, value=h)
         cell.fill, cell.font = head_fill, head_font
         cell.alignment = Alignment(horizontal="center")
 
-    for r, inst in enumerate(instruments, start=2):
+    # Rows 2 and 3: one colour and one label per line, for every instrument.
+    setting_fill = PatternFill("solid", fgColor="E2E8F0")
+    for row_no, title, values in (
+        (LINE_ROW_COLOR, "Color", colors),
+        (LINE_ROW_LABEL, "Label", labels),
+    ):
+        marker = ws.cell(row=row_no, column=1, value=title)
+        marker.font = Font(bold=True)
+        marker.fill = setting_fill
+        for i, v in enumerate(values):
+            cell = ws.cell(row=row_no, column=len(FIXED_HEADERS) + 1 + i, value=v)
+            cell.fill = setting_fill
+            cell.alignment = Alignment(horizontal="center")
+
+    trend_col = FIXED_HEADERS.index("Trend") + 1
+    for r, inst in enumerate(instruments, start=DATA_ROW_START):
         ws.cell(row=r, column=1, value=inst.token)
         ws.cell(row=r, column=2, value=inst.symbol)
         ws.cell(row=r, column=3, value=segment_label(str(inst.segment)))
-        saved = existing.get(inst.token)
-        for i in range(MAX_LEVELS):
-            base = 4 + i * 3  # Line, Color, Price
-            entry = saved.levels[i] if saved and i < len(saved.levels) else None
-            ws.cell(row=r, column=base, value=(entry.label or "") if entry else None)
-            # The colour is seeded even on an empty line, so typing only a
-            # price still yields six distinct colours.
+        saved_row = existing.get(inst.token)
+        ws.cell(row=r, column=trend_col, value=saved_row.trend if saved_row else None)
+        for i in range(n_lines):
+            entry = (
+                saved_row.levels[i]
+                if saved_row and i < len(saved_row.levels)
+                else None
+            )
+            if entry is None:
+                continue
             ws.cell(
                 row=r,
-                column=base + 1,
-                value=entry.color if entry else DEFAULT_COLORS[i],
+                column=len(FIXED_HEADERS) + 1 + i,
+                value=float(_round_like_tick(entry.price.to_decimal(), inst.tick_size)),
             )
-            if entry is not None:
-                ws.cell(
-                    row=r,
-                    column=base + 2,
-                    value=float(_round_like_tick(entry.price.to_decimal(), inst.tick_size)),
-                )
 
-    for c in range(1, len(HEADERS) + 1):
+    for c in range(1, len(headers) + 1):
         ws.column_dimensions[get_column_letter(c)].width = 16
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = f"A{DATA_ROW_START}"
+
+    # A validation dropdown on Trend beats an operator guessing the spelling.
+    dv = DataValidation(
+        type="list", formula1='"' + ",".join(TREND_VALUES) + '"', allow_blank=True
+    )
+    ws.add_data_validation(dv)
+    col = get_column_letter(trend_col)
+    last = max(DATA_ROW_START, DATA_ROW_START + len(instruments) - 1)
+    dv.add(f"{col}{DATA_ROW_START}:{col}{last}")
 
     # A second sheet documenting the columns — whoever fills this in is not
     # the person who wrote the parser.
     guide = wb.create_sheet("How to fill")
     rows = [
-        ("Column", "What to put"),
-        ("Token / Symbol / Segment", "Leave as-is. Token identifies the instrument."),
-        (f"Line 1..{MAX_LEVELS}", "Optional text shown on the line, e.g. R1, Support."),
-        (f"Color 1..{MAX_LEVELS}", "Hex like #E31E24, or a name: red, green, blue, orange, purple, ..."),
-        (f"Price 1..{MAX_LEVELS}", "The price to draw the line at. Leave blank for no line."),
+        ("Column / Row", "What to put"),
+        ("Token", "Leave as-is. This is what identifies the instrument."),
+        ("Symbol / Segment", "Leave as-is. For reading only."),
+        ("Trend", "Uptrend, Downtrend or Sideways. Shown on the user's chart. Blank = no trend."),
+        ("Line 1 ... Line N", "The price to draw that line at. Blank = no line on that instrument."),
+        ("", "Add as many Line columns as you need — every column to the right of Trend is read."),
+        ("Row 2 (Color)", "ONE colour per line, used for every instrument. "
+         "Hex like #E31E24, or a name: red, green, blue, orange, purple, ..."),
+        ("Row 3 (Label)", "ONE label per line, used for every instrument. e.g. MF, D1, D2, S2, DN."),
         ("", ""),
+        ("Note", "Colour and label are set ONCE at the top — you no longer repeat them on every instrument."),
         ("Note", "Re-uploading REPLACES that instrument's lines with what the sheet says."),
         ("Note", "A row with every price blank CLEARS that instrument's lines."),
-        ("Note", "Columns are found by their HEADING, so a sheet from an older build still imports."),
+        ("Note", "An older sheet with Line/Color/Price per instrument still imports as before."),
     ]
     for r, (a, b) in enumerate(rows, start=1):
         guide.cell(row=r, column=1, value=a).font = Font(bold=(r == 1))
         guide.cell(row=r, column=2, value=b).font = Font(bold=(r == 1))
     guide.column_dimensions["A"].width = 26
-    guide.column_dimensions["B"].width = 78
+    guide.column_dimensions["B"].width = 96
 
     buf = BytesIO()
     wb.save(buf)
@@ -265,10 +356,14 @@ _COL_RE = re.compile(r"\s*(price|colou?r|line|label)\s*#?\s*(\d+)\s*$", re.I)
 
 
 def _column_map(header: tuple[Any, ...]) -> dict[int, dict[str, int]]:
-    """{level index: {"price"/"color"/"label": column index}} read off the
-    HEADING row rather than fixed offsets, so a sheet downloaded from an
-    older build (Price / Color / Label, four levels) imports exactly as well
-    as the current one (Line / Color / Price, six)."""
+    """LEGACY layout only: {level index: {"price"/"color"/"label": column}}.
+
+    Sheets downloaded before the colour/label moved to their own rows carry
+    a Price/Color/Line trio per level. They are read off the HEADING rather
+    than fixed offsets, so an old sheet — four levels or six, Price first or
+    Line first — still imports. Returns {} for the current layout, which has
+    no "Price 1" column at all; that is what selects the new parser.
+    """
     out: dict[int, dict[str, int]] = {}
     for idx, cell in enumerate(header or ()):
         m = _COL_RE.match(str(cell or ""))
@@ -283,6 +378,153 @@ def _column_map(header: tuple[Any, ...]) -> dict[int, dict[str, int]]:
 def _cell(row: tuple[Any, ...], cols: dict[str, int], key: str) -> Any:
     idx = cols.get(key)
     return row[idx] if idx is not None and len(row) > idx else None
+
+
+def _text(cell: Any) -> str:
+    return str(cell).strip() if cell is not None else ""
+
+
+# Row 2 and row 3 carry the colours and the labels rather than an instrument.
+# Recognised by a blank Token cell — which is how the operator's own sheet
+# has them — or by the marker word the downloaded template writes there.
+_SETTING_MARKERS = {"color", "colour", "colors", "colours", "label", "labels"}
+
+
+def _is_setting_row(row: tuple[Any, ...]) -> bool:
+    return _text(row[0] if row else None).lower() in _SETTING_MARKERS | {""}
+
+
+def _looks_like_colors(row: tuple[Any, ...], line_cols: list[int]) -> bool:
+    """A colour row has hex codes / colour names in it; a label row has MF,
+    D1, S2. Checked by content so the two can be in either order, and a
+    sheet with only one of them still reads correctly."""
+    for idx in line_cols:
+        v = _text(row[idx] if len(row) > idx else None)
+        if v and (_HEX_RE.match(v) or _HEX_RE.match("#" + v) or v.lower() in _NAMED):
+            return True
+    return False
+
+
+def _new_layout(rows: list[tuple[Any, ...]]) -> dict[str, Any]:
+    """Read the header, the colour row and the label row off a current sheet.
+
+    Every column to the RIGHT of Trend (or of Segment, on a sheet without
+    one) is a line — heading text is ignored entirely, so "Line N",
+    "Line 12" and "R3" all work and the operator can add as many as they
+    like. Trailing spreadsheet padding is dropped: a column counts only if
+    it has a heading, a colour or a label.
+    """
+    header = rows[0]
+    fixed = [_text(c).lower() for c in header[: len(FIXED_HEADERS) + 1]]
+    trend_idx = fixed.index("trend") if "trend" in fixed else None
+    start = (trend_idx + 1) if trend_idx is not None else (
+        fixed.index("segment") + 1 if "segment" in fixed else 3
+    )
+
+    settings: list[tuple[Any, ...]] = []
+    body_start = 1
+    while body_start < len(rows) and len(settings) < 2 and _is_setting_row(rows[body_start]):
+        settings.append(rows[body_start])
+        body_start += 1
+
+    width = max((len(r) for r in [header, *settings]), default=start)
+    line_cols = [
+        i
+        for i in range(start, width)
+        if _text(header[i] if len(header) > i else None)
+        or any(_text(r[i] if len(r) > i else None) for r in settings)
+    ]
+
+    colors_row = next((r for r in settings if _looks_like_colors(r, line_cols)), None)
+    labels_row = next((r for r in settings if r is not colors_row), None)
+
+    colors, labels = [], []
+    for n, idx in enumerate(line_cols):
+        raw_c = colors_row[idx] if colors_row is not None and len(colors_row) > idx else None
+        raw_l = labels_row[idx] if labels_row is not None and len(labels_row) > idx else None
+        colors.append(normalize_color(raw_c, DEFAULT_COLORS[n % len(DEFAULT_COLORS)]))
+        labels.append(_text(raw_l) or None)
+
+    return {
+        "line_cols": line_cols,
+        "colors": colors,
+        "labels": labels,
+        "trend_idx": trend_idx,
+        "body_start": body_start,
+    }
+
+
+def _parse_price(
+    raw: Any, inst: Instrument, slot: int, errors: list[str]
+) -> Decimal | None:
+    """One price cell. None = no line here; problems are collected, not
+    raised, because an operator with forty rows wants every error at once."""
+    if raw in (None, ""):
+        return None
+    try:
+        # Operators paste formatted numbers ("4,249.17") straight out of
+        # another sheet — a comma shouldn't reject the row.
+        clean = raw.replace(",", "").strip() if isinstance(raw, str) else raw
+        price = _round_like_tick(to_decimal(clean), inst.tick_size)
+    except Exception:  # noqa: BLE001
+        errors.append(f"{inst.symbol}: 'Line {slot}' = {raw!r} is not a number")
+        return None
+    if price <= 0:
+        errors.append(f"{inst.symbol}: 'Line {slot}' must be greater than 0")
+        return None
+    return price
+
+
+def _legacy_entries(
+    row: tuple[Any, ...],
+    cols: dict[int, dict[str, int]],
+    inst: Instrument,
+    errors: list[str],
+) -> list[ChartLevelEntry]:
+    """Old layout: colour and label repeated on every instrument's row."""
+    entries: list[ChartLevelEntry] = []
+    for i in sorted(cols):
+        c = cols[i]
+        raw = row[c["price"]] if len(row) > c["price"] else None
+        price = _parse_price(raw, inst, i + 1, errors)
+        if price is None:
+            continue
+        lbl = _cell(row, c, "label")
+        entries.append(
+            ChartLevelEntry(
+                price=Decimal128(str(price)),
+                color=normalize_color(
+                    _cell(row, c, "color"), DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
+                ),
+                label=(str(lbl).strip() or None) if lbl else None,
+            )
+        )
+    return entries
+
+
+def _line_entries(
+    row: tuple[Any, ...],
+    layout: dict[str, Any],
+    inst: Instrument,
+    errors: list[str],
+) -> list[ChartLevelEntry]:
+    """Current layout: the row carries prices only. Colour and label come
+    from rows 2 and 3, so they are the same on every instrument."""
+    entries: list[ChartLevelEntry] = []
+    for n, idx in enumerate(layout["line_cols"]):
+        price = _parse_price(
+            row[idx] if len(row) > idx else None, inst, n + 1, errors
+        )
+        if price is None:
+            continue
+        entries.append(
+            ChartLevelEntry(
+                price=Decimal128(str(price)),
+                color=layout["colors"][n],
+                label=layout["labels"][n],
+            )
+        )
+    return entries
 
 
 async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
@@ -300,12 +542,15 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
     rows = list(ws.iter_rows(min_row=1, values_only=True))
     if not rows:
         raise ValueError("The sheet is empty.")
-    cols = _column_map(rows[0])
-    if not cols:
+
+    legacy = _column_map(rows[0])
+    layout = None if legacy else _new_layout(rows)
+    if not legacy and not layout["line_cols"]:
         raise ValueError(
-            "Could not find the 'Price 1' / 'Color 1' headings — upload the "
-            "sheet downloaded from this page, with its heading row intact."
+            "No line columns found — upload the sheet downloaded from this "
+            "page, with its heading row intact."
         )
+    body_start = 1 if legacy else layout["body_start"]
 
     f = owner_filter_for_admin(admin)
     known = {i.token: i for i in await Instrument.find().to_list()}
@@ -314,48 +559,30 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
     errors: list[str] = []
     touched: dict[str, list[Decimal]] = {}
 
-    for row in rows[1:]:
+    for row in rows[body_start:]:
         if not row or row[0] in (None, ""):
             continue
         token = str(row[0]).strip()
+        if token.lower() in _SETTING_MARKERS:
+            continue
         inst = known.get(token)
         if inst is None:
             errors.append(f"{token}: not an instrument on this platform - skipped")
             continue
 
-        entries: list[ChartLevelEntry] = []
-        for i in sorted(cols):
-            c = cols[i]
-            price_raw = row[c["price"]] if len(row) > c["price"] else None
-            if price_raw in (None, ""):
-                continue
-            try:
-                # Operators paste formatted numbers ("4,249.17") straight out
-                # of another sheet — a comma shouldn't reject the row.
-                raw = price_raw.replace(",", "").strip() if isinstance(price_raw, str) else price_raw
-                price = _round_like_tick(to_decimal(raw), inst.tick_size)
-            except Exception:  # noqa: BLE001
-                errors.append(f"{inst.symbol}: 'Price {i + 1}' = {price_raw!r} is not a number")
-                continue
-            if price <= 0:
-                errors.append(f"{inst.symbol}: 'Price {i + 1}' must be greater than 0")
-                continue
+        trend: str | None = None
+        if legacy:
+            entries = _legacy_entries(row, legacy, inst, errors)
+        else:
+            t_idx = layout["trend_idx"]
+            if t_idx is not None and len(row) > t_idx:
+                trend = normalize_trend(row[t_idx])
+            entries = _line_entries(row, layout, inst, errors)
 
-            label = _cell(row, c, "label")
-            entries.append(
-                ChartLevelEntry(
-                    price=Decimal128(str(price)),
-                    color=normalize_color(
-                        _cell(row, c, "color"), DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
-                    ),
-                    label=(str(label).strip() or None) if label else None,
-                )
-            )
-
-        n = await _upsert(admin, inst, entries, f)
-        if n is None:
+        n_saved = await _upsert(admin, inst, entries, f, trend=trend)
+        if n_saved is None:
             continue
-        if n:
+        if n_saved:
             updated += 1
             touched[token] = [e.price.to_decimal() for e in entries]
         else:
@@ -374,6 +601,7 @@ async def _upsert(
     inst: Instrument,
     entries: list[ChartLevelEntry],
     f: dict[str, PydanticObjectId | None],
+    trend: str | None = None,
 ) -> bool | None:
     """Write one instrument's lines. True = saved, False = cleared, None =
     nothing to do. Shared by the Excel import and the inline editor so the
@@ -383,8 +611,8 @@ async def _upsert(
         ChartLevel.owner_broker_id == f["owner_broker_id"],
         ChartLevel.token == inst.token,
     )
-    if not entries:
-        # Every price blank = clear this instrument's lines.
+    if not entries and not trend:
+        # Every price blank and no trend = clear this instrument entirely.
         if doc is None:
             return None
         await doc.delete()
@@ -400,8 +628,11 @@ async def _upsert(
     doc.symbol = inst.symbol
     doc.segment = str(inst.segment)
     doc.levels = entries
+    doc.trend = trend
     await doc.save()
-    return True
+    # A trend with no lines is a legitimate row, but it is not an "updated
+    # lines" one — report it as cleared so the count still adds up.
+    return bool(entries)
 
 
 # How far from the live price a level has to be before it is almost certainly
@@ -453,6 +684,7 @@ def to_dict(doc: ChartLevel, tick: Any = None) -> dict[str, Any]:
         "token": doc.token,
         "symbol": doc.symbol,
         "segment": doc.segment,
+        "trend": doc.trend,
         "levels": [
             {
                 # Rounded on the way out as well as in: rows written before the
@@ -505,7 +737,10 @@ async def list_for_admin(admin: User, segment: str | None = None) -> list[dict[s
 
 
 async def save_levels(
-    admin: User, token: str, levels: list[dict[str, Any]]
+    admin: User,
+    token: str,
+    levels: list[dict[str, Any]],
+    trend: Any = None,
 ) -> dict[str, Any]:
     """Inline editor: replace one instrument's lines without the Excel trip.
 
@@ -516,7 +751,7 @@ async def save_levels(
     if inst is None:
         raise ValueError("Not an instrument on this platform.")
     entries: list[ChartLevelEntry] = []
-    for i, lv in enumerate(levels[:MAX_LEVELS]):
+    for i, lv in enumerate(levels):
         raw = lv.get("price")
         if raw in (None, ""):
             continue
@@ -535,7 +770,9 @@ async def save_levels(
                 label=label,
             )
         )
-    saved = await _upsert(admin, inst, entries, owner_filter_for_admin(admin))
+    saved = await _upsert(
+        admin, inst, entries, owner_filter_for_admin(admin), trend=normalize_trend(trend)
+    )
     return {"saved": bool(saved), "levels": len(entries)}
 
 
@@ -552,9 +789,10 @@ async def clear_for_admin(admin: User, token: str) -> bool:
     return True
 
 
-async def resolve_for_user(user: User, token: str) -> list[dict[str, Any]]:
-    """Lines the USER should see for `token`. Closest owner in the cascade
-    wins — identical ordering to ``crypto_config_service.resolve_for_user``."""
+async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
+    """What the USER's chart should draw for `token`: the lines and the
+    trend. Closest owner in the cascade wins — identical ordering to
+    ``crypto_config_service.resolve_for_user``."""
     tried: list[dict[str, PydanticObjectId | None]] = []
     if user.assigned_broker_id is not None:
         tried.append({"owner_admin_id": None, "owner_broker_id": user.assigned_broker_id})
@@ -585,6 +823,7 @@ async def resolve_for_user(user: User, token: str) -> list[dict[str, Any]]:
             ChartLevel.owner_broker_id == f["owner_broker_id"],
             In(ChartLevel.token, list(tokens)),
         )
-        if doc is not None and doc.levels:
-            return to_dict(doc, inst.tick_size if inst else None)["levels"]
-    return []
+        if doc is not None and (doc.levels or doc.trend):
+            full = to_dict(doc, inst.tick_size if inst else None)
+            return {"levels": full["levels"], "trend": full["trend"]}
+    return {"levels": [], "trend": None}

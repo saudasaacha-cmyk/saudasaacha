@@ -14,11 +14,13 @@ from decimal import Decimal
 
 from app.services.chart_level_service import (
     DEFAULT_COLORS,
-    HEADERS,
-    MAX_LEVELS,
+    DEFAULT_LEVELS,
+    FIXED_HEADERS,
     _column_map,
+    _new_layout,
     _round_like_tick,
     normalize_color,
+    normalize_trend,
 )
 
 
@@ -45,29 +47,104 @@ def test_unknown_and_blank_fall_back():
 
 
 def test_header_layout():
-    """Line, then its colour, then the price it sits at — the order the
-    operator fills them in."""
-    assert HEADERS[:3] == ["Token", "Symbol", "Segment"]
-    assert len(HEADERS) == 3 + MAX_LEVELS * 3
-    for i in range(MAX_LEVELS):
-        base = 3 + i * 3
-        assert HEADERS[base] == f"Line {i + 1}"
-        assert HEADERS[base + 1] == f"Color {i + 1}"
-        assert HEADERS[base + 2] == f"Price {i + 1}"
+    """Token, Symbol, Segment, Trend — then the line columns."""
+    assert FIXED_HEADERS == ["Token", "Symbol", "Segment", "Trend"]
 
 
 def test_default_colors_are_distinct():
-    """A sheet filled in without touching the colour columns must still give
+    """A sheet filled in without touching the colour row must still give
     lines that can be told apart."""
-    assert len(DEFAULT_COLORS) == MAX_LEVELS
-    assert len(set(DEFAULT_COLORS)) == MAX_LEVELS
+    assert len(DEFAULT_COLORS) == DEFAULT_LEVELS
+    assert len(set(DEFAULT_COLORS)) == DEFAULT_LEVELS
 
 
-def test_column_map_reads_the_current_sheet():
-    cols = _column_map(tuple(HEADERS))
-    assert len(cols) == MAX_LEVELS
-    for i in range(MAX_LEVELS):
-        assert cols[i] == {"label": 3 + i * 3, "color": 4 + i * 3, "price": 5 + i * 3}
+def test_trend_words_operators_actually_type():
+    assert normalize_trend("down") == "Downtrend"
+    assert normalize_trend("  DOWNTREND ") == "Downtrend"
+    assert normalize_trend("Bullish") == "Uptrend"
+    assert normalize_trend("side ways") == "Sideways"
+    # Unknown is dropped, never stored — the chart chip can't read as garbage.
+    assert normalize_trend("dwn") is None
+    assert normalize_trend("") is None
+    assert normalize_trend(None) is None
+
+
+# ── the current layout: colour and label set ONCE at the top ─────────
+def _sheet(lines=("Line 1", "Line 2", "Line N")):
+    """Header + colour row + label row, exactly as the template writes them."""
+    return [
+        tuple(FIXED_HEADERS) + lines,
+        ("Color", None, None, None, "#E31E24", "sky", "#F59E0B"),
+        ("Label", None, None, None, "MF", "D1", "DN"),
+        ("NATGAS", "NATGAS", "Commodities", "Downtrend", 1, 1.1, 88),
+    ]
+
+
+def test_new_layout_reads_one_colour_and_label_per_column():
+    got = _new_layout(_sheet())
+    assert got["line_cols"] == [4, 5, 6]
+    # "sky" is a name, not hex — it still has to resolve.
+    assert got["colors"] == ["#E31E24", "#0EA5E9", "#F59E0B"]
+    assert got["labels"] == ["MF", "D1", "DN"]
+    assert got["trend_idx"] == 3
+    assert got["body_start"] == 3  # data starts at sheet row 4
+
+
+def test_line_columns_are_positional_not_numbered():
+    """'Line N' is the operator's own wording, and the numbering skips — the
+    parser must key off POSITION, never the heading text."""
+    got = _new_layout(_sheet(lines=("Line 1", "Line 4", "Line N")))
+    assert got["line_cols"] == [4, 5, 6]
+    assert got["labels"] == ["MF", "D1", "DN"]
+
+
+def test_colour_and_label_rows_can_be_in_either_order():
+    rows = _sheet()
+    rows[1], rows[2] = rows[2], rows[1]
+    got = _new_layout(rows)
+    assert got["colors"] == ["#E31E24", "#0EA5E9", "#F59E0B"]
+    assert got["labels"] == ["MF", "D1", "DN"]
+
+
+def test_setting_rows_may_have_a_blank_token_cell():
+    """The operator's own sheet leaves A2 and A3 empty rather than writing
+    'Color' / 'Label' in them."""
+    rows = _sheet()
+    rows[1] = (None,) + rows[1][1:]
+    rows[2] = (None,) + rows[2][1:]
+    got = _new_layout(rows)
+    assert got["body_start"] == 3
+    assert got["colors"][0] == "#E31E24"
+
+
+def test_unfilled_columns_fall_back_to_distinct_defaults():
+    """Add a Line column and type nothing in the colour row — the line still
+    has to be a different colour from its neighbours."""
+    rows = [
+        tuple(FIXED_HEADERS) + ("Line 1", "Line 2"),
+        ("Color", None, None, None, None, None),
+        ("Label", None, None, None, None, None),
+    ]
+    got = _new_layout(rows)
+    assert got["colors"] == DEFAULT_COLORS[:2]
+    assert got["labels"] == [None, None]
+
+
+def test_trailing_spreadsheet_padding_is_not_a_line():
+    """Numbers/Excel pad rows out to the sheet width with None. Those columns
+    have no heading, no colour and no label — they are not lines."""
+    rows = [
+        tuple(FIXED_HEADERS) + ("Line 1", None, None),
+        ("Color", None, None, None, "#E31E24", None, None),
+        ("Label", None, None, None, "MF", None, None),
+    ]
+    assert _new_layout(rows)["line_cols"] == [4]
+
+
+def test_the_current_sheet_is_not_mistaken_for_the_old_one():
+    """`_column_map` returning {} is what selects the new parser — a sheet
+    with no 'Price 1' column must not fall into the legacy path."""
+    assert _column_map(tuple(FIXED_HEADERS) + ("Line 1", "Line 2")) == {}
 
 
 def test_column_map_still_reads_the_old_four_column_sheet():

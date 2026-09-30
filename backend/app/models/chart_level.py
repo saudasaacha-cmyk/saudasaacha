@@ -42,6 +42,10 @@ class ChartLevel(TimestampMixin):
 
     levels: list[ChartLevelEntry] = Field(default_factory=list)
 
+    # "Uptrend" / "Downtrend" / "Sideways", set per instrument in the sheet
+    # and shown as a chip on the user's chart. None = the admin said nothing.
+    trend: str | None = None
+
     class Settings:
         name = "chart_levels"
         indexes = [

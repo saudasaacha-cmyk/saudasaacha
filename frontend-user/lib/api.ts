@@ -490,6 +490,9 @@ export const MarketwatchAPI = {
     unwrap<any>(api.delete(`/user/marketwatch/segment/${segmentName}/items/${token}`)),
 };
 
+export type ChartLevel = { price: number; color: string; label: string | null };
+export type ChartLevelsResponse = { levels: ChartLevel[]; trend: string | null };
+
 export const InstrumentAPI = {
   search: (
     q?: string,
@@ -504,9 +507,10 @@ export const InstrumentAPI = {
       }),
     ),
   detail: (token: string) => unwrap<any>(api.get(`/user/instruments/${token}`)),
-  /** Admin-defined horizontal price lines for this instrument's chart. */
+  /** Admin-defined horizontal price lines + trend for this chart. Older
+   *  builds returned the bare array, so the caller accepts both shapes. */
   chartLevels: (token: string) =>
-    unwrap<{ price: number; color: string; label: string | null }[]>(
+    unwrap<ChartLevelsResponse | ChartLevel[]>(
       api.get(`/user/instruments/${token}/chart-levels`),
     ),
   quote: (token: string) => unwrap<any>(api.get(`/user/instruments/${token}/quote`)),

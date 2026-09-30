@@ -21,15 +21,16 @@ import { DataTable, type Column } from "@/components/common/DataTable";
  * Chart lines — Excel round-trip, plus an inline editor for one-off fixes.
  *
  * Pick a segment, download the template (pre-filled with whatever is already
- * saved), fill in up to six line / colour / price sets per instrument, upload
- * it back. Each price is drawn as a horizontal line on that instrument's
- * chart, in the colour given, for the users under this admin.
+ * saved), type a price under each line column, upload it back. Colour and
+ * label are set ONCE at the top of the sheet and apply to every instrument;
+ * this editor is for one-off fixes, where per-line colour still makes sense.
  */
 
-// Mirrors MAX_LEVELS / DEFAULT_COLORS in chart_level_service.py. The server
-// truncates anything beyond MAX_LINES, so drift here can only ever show fewer
-// boxes — it can never save more lines than the sheet allows.
+// Mirrors DEFAULT_LEVELS / DEFAULT_COLORS in chart_level_service.py. The
+// sheet accepts any number of lines; this editor shows a fixed set of boxes,
+// so it also shows as many as the row already has.
 const MAX_LINES = 6;
+const TRENDS = ["Uptrend", "Downtrend", "Sideways"] as const;
 const DEFAULT_COLORS = [
   "#E31E24",
   "#0EA5E9",
@@ -58,6 +59,7 @@ export default function ChartLevelsPage() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<ChartLevelRow | null>(null);
   const [draft, setDraft] = useState<Draft[]>([]);
+  const [draftTrend, setDraftTrend] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: segments } = useQuery({
@@ -127,12 +129,13 @@ export default function ChartLevelsPage() {
 
   function openEdit(r: ChartLevelRow) {
     setEditing(r);
+    setDraftTrend(r.trend ?? "");
     setDraft(
-      Array.from({ length: MAX_LINES }, (_, i) => {
+      Array.from({ length: Math.max(MAX_LINES, r.levels.length) }, (_, i) => {
         const lv = r.levels[i];
         return {
           price: lv ? String(lv.price) : "",
-          color: lv?.color ?? DEFAULT_COLORS[i],
+          color: lv?.color ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length],
           label: lv?.label ?? "",
         };
       }),
@@ -144,7 +147,7 @@ export default function ChartLevelsPage() {
     setBusy(true);
     try {
       const levels = draft.filter((d) => d.price.trim() !== "");
-      await ChartLevelsAPI.save(editing.token, levels);
+      await ChartLevelsAPI.save(editing.token, levels, draftTrend || null);
       toast.success(
         levels.length
           ? `${editing.symbol} — ${levels.length} line${levels.length === 1 ? "" : "s"} saved`
@@ -179,6 +182,26 @@ export default function ChartLevelsPage() {
       render: (r) => (
         <span className="text-xs tabular-nums text-muted-foreground">{r.ltp ? r.ltp : "—"}</span>
       ),
+    },
+    {
+      key: "trend",
+      header: "Trend",
+      render: (r) =>
+        r.trend ? (
+          <span
+            className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+              r.trend === "Uptrend"
+                ? "bg-[#10b981]/15 text-[#10b981]"
+                : r.trend === "Downtrend"
+                  ? "bg-[#ef4444]/15 text-[#ef4444]"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {r.trend}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
     },
     {
       key: "levels",
@@ -289,10 +312,12 @@ export default function ChartLevelsPage() {
 
       <p className="text-xs leading-relaxed text-muted-foreground">
         The sheet carries {MAX_LINES} sets of <b>Line · Colour · Price</b> per instrument.
-        Re-uploading replaces the lines for every instrument listed in it; a row with all prices
-        blank clears that instrument. Colours accept hex (<code>#E31E24</code>) or names (red,
-        green, blue, orange, purple…). A price far from the live price is drawn off-screen — those
-        are flagged in red.
+        Row 2 of the sheet sets each line&apos;s colour and row 3 its label — once, for every
+        instrument — and row 4 onwards holds just the prices. Add as many <code>Line</code>
+        columns as you need. Re-uploading replaces the lines for every instrument listed; a row
+        with all prices blank clears that instrument. Colours accept hex (<code>#E31E24</code>) or
+        names (red, green, blue…). A price far from the live price is drawn off-screen — flagged
+        in red.
       </p>
 
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
@@ -307,6 +332,24 @@ export default function ChartLevelsPage() {
               ) : null}
             </DialogTitle>
           </DialogHeader>
+
+          <div className="flex items-center gap-2 pb-1">
+            <span className="text-xs text-muted-foreground">Trend</span>
+            {["", ...TRENDS].map((t) => (
+              <button
+                key={t || "none"}
+                type="button"
+                onClick={() => setDraftTrend(t)}
+                className={`rounded px-2 py-1 text-xs ${
+                  draftTrend === t
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                {t || "None"}
+              </button>
+            ))}
+          </div>
 
           <div className="space-y-2">
             <div className="grid grid-cols-[1.5rem_1fr_3rem_1fr] items-center gap-2 text-xs text-muted-foreground">

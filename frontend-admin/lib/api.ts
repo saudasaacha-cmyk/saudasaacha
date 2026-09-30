@@ -624,6 +624,8 @@ export type ChartLevelRow = {
   levels: ChartLevelEntry[];
   /** Live price, so a level that is nowhere near it is obvious. */
   ltp: number | null;
+  /** "Uptrend" | "Downtrend" | "Sideways", shown on the user's chart. */
+  trend: string | null;
 };
 
 export type ChartSegmentOption = { value: string; label: string; count: number };
@@ -659,9 +661,13 @@ export const ChartLevelsAPI = {
     );
   },
   /** Replace one instrument's lines without the Excel trip. */
-  save: (token: string, levels: { price: string; color: string; label: string }[]) =>
+  save: (
+    token: string,
+    levels: { price: string; color: string; label: string }[],
+    trend?: string | null,
+  ) =>
     unwrap<{ saved: boolean; levels: number }>(
-      api.put(`/admin/chart-levels/${token}`, { levels }),
+      api.put(`/admin/chart-levels/${token}`, { levels, trend: trend || null }),
     ),
   clear: (token: string) =>
     unwrap<{ cleared: boolean }>(api.delete(`/admin/chart-levels/${token}`)),

@@ -1,9 +1,10 @@
 """Admin chart lines — Excel round-trip.
 
-Download a template for a segment, fill in up to six line/colour/price sets
-per instrument, upload it back. Single rows can also be edited in place.
-Each price becomes a horizontal line on that instrument's chart, in the
-colour given, for the users under this admin.
+Download a template for a segment, type a price under each line column,
+upload it back. Each line's colour and label are set once at the top of the
+sheet and apply to every instrument. Single rows can also be edited in
+place. Each price becomes a horizontal line on that instrument's chart for
+the users under this admin.
 
 Rows are owned per admin tier (super-admin / admin / broker), same cascade as
 crypto configs and company banks.
@@ -119,7 +120,10 @@ class LevelIn(BaseModel):
 
 
 class LevelsIn(BaseModel):
-    levels: list[LevelIn] = Field(default_factory=list, max_length=20)
+    levels: list[LevelIn] = Field(default_factory=list, max_length=200)
+    # Uptrend / Downtrend / Sideways. Anything else is dropped by the
+    # service rather than stored, so the chart chip can't read as garbage.
+    trend: str | None = Field(default=None, max_length=20)
 
 
 @router.put("/{token}", response_model=APIResponse[dict])
@@ -130,7 +134,7 @@ async def save_levels(token: str, body: LevelsIn, admin: CurrentAdmin):
         raise HTTPException(status_code=400, detail="Invalid token.")
     try:
         result = await chart_level_service.save_levels(
-            admin, token, [lv.model_dump() for lv in body.levels]
+            admin, token, [lv.model_dump() for lv in body.levels], body.trend
         )
     except ValueError as exc:
         raise HTTPException(

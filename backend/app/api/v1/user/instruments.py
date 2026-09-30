@@ -1085,13 +1085,14 @@ async def _align_candles_to_live(token: str, candles: list[dict]) -> list[dict]:
     return candles
 
 
-@router.get("/{token}/chart-levels", response_model=APIResponse[list[dict]])
+@router.get("/{token}/chart-levels", response_model=APIResponse[dict])
 async def chart_levels(token: str, user: CurrentUser):
-    """Admin-defined horizontal lines for this instrument.
+    """Admin-defined horizontal lines + trend for this instrument.
 
     Resolved through the user's ownership cascade, so a broker's clients see
-    that broker's lines and nobody sees another tenant's. Empty list when the
-    admin has set none — the chart simply draws nothing.
+    that broker's lines and nobody sees another tenant's. Returns
+    ``{"levels": [], "trend": null}`` when the admin has set none — the chart
+    then draws nothing.
     """
     from app.services import chart_level_service
 

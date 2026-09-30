@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, memo } from "react";
 import { CustomDatafeed, pushLiveQuote } from "@/lib/tradingview-datafeed";
-import { InstrumentAPI } from "@/lib/api";
+import { InstrumentAPI, type ChartLevel } from "@/lib/api";
 
 interface TradingViewChartProps {
   token: string;
@@ -313,6 +313,10 @@ function TradingViewChartInner({
   // first — TradingView keeps shapes on the chart across a setSymbol(), so
   // without this the last symbol's levels stay floating over the new one.
   const levelShapesRef = useRef<any[]>([]);
+  // Uptrend / Downtrend / Sideways, as the admin marked it in the levels
+  // sheet. Drawn as a chip over the chart rather than as a shape — a shape
+  // would sit at a price, and a trend doesn't have one.
+  const [trend, setTrend] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     let dataSub: any = null;
@@ -334,9 +338,18 @@ function TradingViewChartInner({
     const draw = async () => {
       const w = widgetRef.current;
       if (!w || !token) return;
-      let levels: { price: number; color: string; label: string | null }[] = [];
+      let levels: ChartLevel[] = [];
       try {
-        levels = (await InstrumentAPI.chartLevels(token)) ?? [];
+        // The endpoint returned a bare array before the trend was added; a
+        // browser running yesterday's bundle against today's API (or the
+        // reverse) must still draw its lines.
+        const res = await InstrumentAPI.chartLevels(token);
+        if (Array.isArray(res)) {
+          levels = res;
+        } else {
+          levels = res?.levels ?? [];
+          if (!cancelled) setTrend(res?.trend ?? null);
+        }
       } catch {
         return; // no lines configured, or the call failed — draw nothing
       }
@@ -426,6 +439,7 @@ function TradingViewChartInner({
       });
     };
 
+    setTrend(null); // the last symbol's trend must not linger on this one
     if (chartReady > 0) void draw();
     return () => {
       cancelled = true;
@@ -447,7 +461,7 @@ function TradingViewChartInner({
     }
   }, [interval]);
 
-  return (
+  const chart = (
     <div
       ref={containerRef}
       // `absolute inset-0` forces the container to fill its (relative)
@@ -464,7 +478,30 @@ function TradingViewChartInner({
       className={`block ${className}`}
     />
   );
+
+  // The container belongs to TradingView — it replaces its contents — so the
+  // chip is a SIBLING positioned over it, not a child.
+  return trend ? (
+    <>
+      {chart}
+      <div
+        className={`pointer-events-none absolute bottom-10 left-2 z-10 rounded px-2 py-0.5 text-[11px] font-semibold tracking-wide ${TREND_STYLE[trend] ?? "bg-white/10 text-white/70"}`}
+      >
+        {trend.toUpperCase()}
+      </div>
+    </>
+  ) : (
+    chart
+  );
 }
+
+// Buy-green / sell-red are the locked theme colours; sideways is deliberately
+// neutral so it doesn't read as a signal.
+const TREND_STYLE: Record<string, string> = {
+  Uptrend: "bg-[#10b981]/15 text-[#10b981]",
+  Downtrend: "bg-[#ef4444]/15 text-[#ef4444]",
+  Sideways: "bg-white/10 text-white/70",
+};
 
 // Add TradingView type declaration
 declare global {
