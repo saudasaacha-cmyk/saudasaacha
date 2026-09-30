@@ -1556,9 +1556,13 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
     logger.info("market_tick_loop_started")
     await _warm_token_symbol_cache()
     _pass = 0
-    _pass_t0 = time.time()
     try:
+        # NOTE: `time` is function-local here, which makes the name local for
+        # the WHOLE function — touching it above this line is an
+        # UnboundLocalError that kills the pump on its first iteration.
         import time
+
+        _pass_t0 = time.time()
 
         while _running:
             try:
