@@ -248,26 +248,6 @@ class Settings(BaseSettings):
     # there is no symbol list to configure and no per-symbol cost. On by
     # default — turning it off leaves those segments with no feed at all.
     BINANCE_FUTURES_FEED: bool = True
-    # ── MetaAPI (MetaTrader) feed for forex / metals / indices / commodities ──
-    # When True, those segments get their live price from a connected MT4/MT5
-    # account via metaapi.cloud instead of Infoway (crypto stays on Binance).
-    # Infoway remains the automatic FALLBACK when MetaAPI has no tick for a
-    # symbol. METAAPI_SYMBOLS defaults to the INFOWAY_DEFAULT_FOREX/METALS/
-    # ENERGY/INDICES lists; METAAPI_SYMBOL_MAP handles per-broker name
-    # differences ("US30:DJ30,USOIL:WTI,EURUSD:EURUSD.raw").
-    METAAPI_FEED: bool = False
-    METAAPI_TOKEN: SecretStr = Field(default=SecretStr(""))
-    METAAPI_ACCOUNT_ID: str = ""
-    METAAPI_REGION: str = ""            # optional MetaAPI region (e.g. "new-york")
-    METAAPI_SYMBOLS: str = ""           # blank → forex+metals+energy+indices defaults
-    METAAPI_SYMBOL_MAP: str = ""        # "PLATFORM:MT,..." per-broker symbol aliases
-    # International equities subscribe through Infoway's dedicated `stock`
-    # WebSocket business channel (US / HK / A-share coverage). Indices
-    # share the `common` channel with forex/metals/energy. Both are
-    # treated as explicit allowlists by `_classify_infoway_code` so an
-    # AAPL-shaped string can't be mis-routed as a forex pair.
-    # Defaults cover the most-traded US tickers + global indices; admin
-    # can override via env without code changes.
     INFOWAY_DEFAULT_STOCKS: str = "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,NFLX"
     INFOWAY_DEFAULT_INDICES: str = "SPX500,NAS100,US30,UK100,DE40,JPN225,HK50"
 
@@ -388,7 +368,6 @@ class Settings(BaseSettings):
         "INFOWAY_AUTO_CONNECT",
         "BINANCE_CRYPTO_FEED",
         "BINANCE_FUTURES_FEED",
-        "METAAPI_FEED",
         "SMTP_TLS",
         "LOG_JSON",
         "RUN_SEED_ON_STARTUP",

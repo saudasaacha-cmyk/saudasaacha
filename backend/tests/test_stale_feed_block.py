@@ -76,63 +76,53 @@ def test_unknown_feed_warm_time_still_blocks():
     assert msg is not None
 
 
-# ── MetaAPI symbols (forex / metals / indices / US stocks) ───────────
+# ── Binance symbols (metals, energy, indices, stocks, crypto) ────────
 #
-# These carry no exchange packet time, so until now the guard above could
-# never fire for them: our own writer re-stamps `ts` every tick whether or
-# not the price moved. The provider's own tick time rides as `feed_ts`.
+# These carry no exchange packet time of the Indian kind, so the guard
+# above could never fire for them until the tick started carrying the
+# exchange's own clock as `feed_ts`. Our writer re-stamps `ts` on every
+# pass whether or not the price moved, so it can't be the measure.
 
-import datetime as _dt
+import time as _time
 
-from app.services.metaapi_service import MetaApiFeed
-
-
-class _FakeTerminalState:
-    def __init__(self, price):
-        self._price = price
-
-    def price(self, symbol=None):  # noqa: ARG002 - mirrors the SDK signature
-        return self._price
+from app.services.binance_futures_service import BinanceFuturesFeed
 
 
-class _FakeConn:
-    def __init__(self, price):
-        self.terminal_state = _FakeTerminalState(price)
-
-
-def _feed_with(price):
-    feed = MetaApiFeed()
-    feed._conn = _FakeConn(price)
+def _feed_with(book):
+    feed = BinanceFuturesFeed()
+    feed._handle_book(book)
     return feed
 
 
-def test_tick_carries_the_brokers_own_time():
-    when = _dt.datetime(2026, 9, 23, 6, 0, tzinfo=_dt.timezone.utc)
-    tick = _feed_with({"bid": 1.1, "ask": 1.2, "time": when}).get_tick("EURUSD")
+def _book(symbol, bid, ask, event_ms):
+    return {"e": "bookTicker", "s": symbol, "b": str(bid), "a": str(ask), "E": event_ms}
+
+
+def test_tick_carries_the_exchanges_own_time():
+    when_ms = 1790000000000
+    tick = _feed_with(_book("XAUUSDT", 4200.0, 4200.1, when_ms)).get_tick("XAUUSD")
     assert tick is not None
-    assert tick["feed_ts"] == when.timestamp()
+    assert tick["feed_ts"] == when_ms / 1000.0
 
 
-def test_tick_without_a_time_is_unknown_not_fresh():
-    """No provider timestamp must read as "can't tell" (guard skipped), never
-    as "just now" — which is what our own write time would have claimed."""
-    tick = _feed_with({"bid": 1.1, "ask": 1.2}).get_tick("EURUSD")
-    assert tick is not None
-    assert tick["feed_ts"] is None
-    assert stale_feed_block_reason(
-        symbol="EURUSD", price_age_sec=None, threshold_sec=30, feed_warm_age_sec=None
-    ) is None
-
-
-def test_a_frozen_metaapi_stream_blocks_the_trade():
-    """The failure this closes: the stream stops, our loop keeps republishing
-    the same price with a fresh `ts`, and the trade goes through at a price
-    that is minutes old."""
-    when = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=90)
-    tick = _feed_with({"bid": 1.1, "ask": 1.2, "time": when}).get_tick("EURUSD")
-    age = _dt.datetime.now(_dt.timezone.utc).timestamp() - tick["feed_ts"]
+def test_a_frozen_stream_blocks_the_trade():
+    """The failure this closes: the stream stops, our loop keeps
+    republishing the same price with a fresh `ts`, and the trade goes
+    through at a price that is minutes old."""
+    stale_ms = int((_time.time() - 90) * 1000)
+    tick = _feed_with(_book("XAUUSDT", 4200.0, 4200.1, stale_ms)).get_tick("XAUUSD")
+    age = _time.time() - tick["feed_ts"]
     assert age > 30
     msg = stale_feed_block_reason(
-        symbol="EURUSD", price_age_sec=age, threshold_sec=30, feed_warm_age_sec=None
+        symbol="XAUUSD", price_age_sec=age, threshold_sec=30, feed_warm_age_sec=None
     )
-    assert msg is not None and "EURUSD" in msg
+    assert msg is not None and "XAUUSD" in msg
+
+
+def test_an_unknown_symbol_is_unknown_not_fresh():
+    """Nothing to judge must skip the guard, never read as "just now"."""
+    feed = _feed_with(_book("XAUUSDT", 4200.0, 4200.1, 1790000000000))
+    assert feed.get_tick("NOTLISTED") is None
+    assert stale_feed_block_reason(
+        symbol="NOTLISTED", price_age_sec=None, threshold_sec=30, feed_warm_age_sec=None
+    ) is None

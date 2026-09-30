@@ -15,7 +15,6 @@ from app.api.v1.admin import (
     employees,
     expiry_overrides,
     infoway,
-    metaapi,
     instruments,
     kyc,
     ledger,
@@ -59,7 +58,6 @@ router.include_router(reports.router)
 router.include_router(platform_reports.router)
 router.include_router(settings.router)
 router.include_router(expiry_overrides.router)
-router.include_router(metaapi.router)
 router.include_router(zerodha.router)
 router.include_router(zerodha_auto_login.router)
 router.include_router(infoway.router)

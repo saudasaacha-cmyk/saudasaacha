@@ -109,7 +109,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/chart-levels", label: "Chart Lines", icon: Ruler, perm: "trading_view", empPerm: "marketwatch" },
       { href: "/instruments", label: "Instruments", icon: ListChecks, superOnly: true },
       { href: "/zerodha", label: "Zerodha Connect", icon: Plug, superOnly: true },
-      { href: "/metaapi", label: "MetaAPI Connect", icon: Plug, superOnly: true },
     ],
   },
   {
