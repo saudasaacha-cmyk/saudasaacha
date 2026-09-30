@@ -50,6 +50,11 @@ class Instrument(TimestampMixin):
     upper_circuit: Money | None = None
     lower_circuit: Money | None = None
 
+    # Browse order. Lower sorts first; 9999 = unranked. Set from 24 h turnover
+    # when the Binance catalogue syncs, because a plain alphabetical browse of
+    # 531 crypto contracts opens on 0G and 1000000BOB and never reaches BTC.
+    feed_rank: int = 9999
+
     # Status
     is_active: bool = True
     is_tradable: bool = True
@@ -76,6 +81,9 @@ class Instrument(TimestampMixin):
             IndexModel([("is_active", ASCENDING), ("symbol_lc", ASCENDING)]),
             IndexModel([("is_active", ASCENDING), ("trading_symbol_lc", ASCENDING)]),
             IndexModel([("is_active", ASCENDING), ("name_lc", ASCENDING)]),
+            # Browse sorts by turnover then symbol; without this the sort on a
+            # segment with hundreds of rows is an in-memory one.
+            IndexModel([("segment", ASCENDING), ("feed_rank", ASCENDING)]),
         ]
 
     @before_event(Insert, Replace, Save, SaveChanges)

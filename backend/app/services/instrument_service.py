@@ -202,7 +202,16 @@ async def search(
             {"token": q},
         ]
 
-    cursor = Instrument.find(query).sort([("symbol", ASCENDING)]).limit(limit)
+    # Most-traded first, then alphabetical. Straight alphabetical opened the
+    # crypto browse on 0G and 1000000BOB — a hundred rows of nothing anyone
+    # asked for, with BTC nowhere in sight. `feed_rank` defaults to 9999, so
+    # Indian instruments (which have no turnover figure here) keep the
+    # alphabetical order they always had.
+    cursor = (
+        Instrument.find(query)
+        .sort([("feed_rank", ASCENDING), ("symbol", ASCENDING)])
+        .limit(limit)
+    )
     return await cursor.to_list()
 
 

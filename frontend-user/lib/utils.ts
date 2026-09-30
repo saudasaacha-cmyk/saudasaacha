@@ -76,7 +76,19 @@ export function formatPrice(
   const n = typeof value === "string" ? Number(value) : (value ?? 0);
   if (!Number.isFinite(n)) return "—";
   const s = `${(segment ?? "").toUpperCase()} ${(exchange ?? "").toUpperCase()}`;
-  const decimals = /FOREX|FX|CDS/.test(s) ? 4 : 2;
+  // Two decimals is right for a ₹1,200 stock and useless for a coin that
+  // trades at 0.0000124 — the whole list rendered "0.00". Scale the
+  // precision to the price so a small number keeps its significant digits.
+  const abs = Math.abs(n);
+  const decimals = /FOREX|FX|CDS/.test(s)
+    ? 4
+    : abs >= 1 || abs === 0
+      ? 2
+      : abs >= 0.1
+        ? 4
+        : abs >= 0.001
+          ? 6
+          : 8;
   return new Intl.NumberFormat("en-IN", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,

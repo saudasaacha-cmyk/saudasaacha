@@ -15,9 +15,21 @@ stocks and crypto. What makes it practical where MetaAPI wasn't:
   runs ~0.27% off spot — that's what an earlier survey of the spot market
   found, and why it looked like only gold was available.)
 
-Two feeds, because one stream can't carry both cheaply:
-  WS `!bookTicker`  → bid / ask, sub-second, all symbols
-  REST `/ticker/24hr` → open / high / low / change, every 10 s, all symbols
+THREE streams, because the all-market one is sampled:
+
+  WS `!bookTicker`        → every contract, but MEASURED at 0.20 updates/s
+                            per symbol. Coverage, not speed: it means a
+                            price exists the instant an instrument is
+                            listed, with nobody having asked for it.
+  WS `<symbol>@bookTicker`→ the same book for ONE contract at 64.8
+                            updates/s — 324× the all-market rate. Held for
+                            the symbols people are actually watching.
+  REST `/ticker/24hr`     → open / high / low / change, every 10 s, all
+                            symbols.
+
+The fast lane is why prices move tick-by-tick instead of drifting once
+every few seconds, and why it is bounded: Binance allows 1024 streams on
+a connection, and a viewer only ever has a screenful in front of them.
 
 `!ticker@arr` would have given the stats over the socket too, but it never
 delivers a frame on this endpoint — subscribing is acknowledged and then
@@ -48,6 +60,14 @@ _STALE_RX_TIMEOUT_SEC = 30       # silent socket → force reconnect (half-open 
 _RECONNECT_CAP_SEC = 60
 _STABLE_CONNECTION_SEC = 30
 _STATS_INTERVAL_SEC = 10.0
+# Fast lane. Binance caps a connection at 1024 streams and 200 params per
+# SUBSCRIBE; this leaves room for the all-market stream and for growth.
+_HOT_CAP = 300
+# Not asked for in this long → back to the all-market rate. A watchlist the
+# user still has open is re-requested well inside the window.
+_HOT_TTL_SEC = 900.0
+_FAST_LANE_INTERVAL_SEC = 5.0
+_SUB_CHUNK = 150
 # One lone print this far from the last one is garbage, not a move. Same
 # guard the Zerodha / Infoway / spot-Binance feeds carry.
 _MAX_TICK_SPIKE_PCT = 0.5
@@ -111,7 +131,13 @@ class BinanceFuturesFeed:
         self._stop = False
         self._task: asyncio.Task[Any] | None = None
         self._stats_task: asyncio.Task[Any] | None = None
+        self._fast_task: asyncio.Task[Any] | None = None
         self._symbol_count = 0
+        self._ws: Any = None
+        # contract → when it was last asked for (monotonic)
+        self._hot: dict[str, float] = {}
+        # contracts currently carrying a per-symbol stream
+        self._fast: set[str] = set()
 
     # ── public accessors ──────────────────────────────────────────────
     def is_enabled(self) -> bool:
@@ -140,9 +166,75 @@ class BinanceFuturesFeed:
             "enabled": self.is_enabled(),
             "connected": self._connected,
             "symbols": self._symbol_count,
+            "fast_lane": len(self._fast),
             "tick_count": len(self._ticks),
             "last_rx_age_sec": round(now - self._last_rx, 1) if self._last_rx else None,
         }
+
+    def mark_hot(self, symbols: Any) -> int:
+        """Somebody is looking at these — put them on the fast lane.
+
+        Called from the leader's feed-subscribe path, so a watchlist row, an
+        open position and the instrument panel's visible rows all land here.
+        Cheap and idempotent: it only stamps a time; the reconcile below
+        does the talking to Binance.
+        """
+        now = time.monotonic()
+        n = 0
+        for sym in symbols or ():
+            contract = contract_for(str(sym), self._ticks)
+            if contract:
+                self._hot[contract] = now
+                n += 1
+        return n
+
+    def _wanted_fast(self) -> set[str]:
+        """The contracts that should hold a per-symbol stream: most recently
+        asked for first, anything stale dropped, capped."""
+        now = time.monotonic()
+        live = [(t, c) for c, t in self._hot.items() if now - t <= _HOT_TTL_SEC]
+        live.sort(reverse=True)
+        return {c for _t, c in live[:_HOT_CAP]}
+
+    async def _fast_lane_loop(self) -> None:
+        """Keep the per-symbol subscriptions matching what's being watched."""
+        while not self._stop:
+            await asyncio.sleep(_FAST_LANE_INTERVAL_SEC)
+            ws = self._ws
+            if ws is None or not self._connected:
+                self._fast.clear()
+                continue
+            try:
+                want = self._wanted_fast()
+                add = sorted(want - self._fast)
+                drop = sorted(self._fast - want)
+                for method, syms in (("SUBSCRIBE", add), ("UNSUBSCRIBE", drop)):
+                    for i in range(0, len(syms), _SUB_CHUNK):
+                        chunk = syms[i : i + _SUB_CHUNK]
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "method": method,
+                                    "params": [f"{c.lower()}@bookTicker" for c in chunk],
+                                    "id": int(time.time() * 1000) % 1_000_000,
+                                }
+                            )
+                        )
+                        # Binance drops a connection that sends more than ~10
+                        # messages a second.
+                        await asyncio.sleep(0.3)
+                if add or drop:
+                    self._fast = want
+                    logger.info(
+                        "binance_fast_lane added=%d dropped=%d total=%d",
+                        len(add),
+                        len(drop),
+                        len(self._fast),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — the all-market stream still feeds
+                logger.warning("binance_fast_lane_failed", exc_info=True)
 
     # ── lifecycle ─────────────────────────────────────────────────────
     async def start(self) -> None:
@@ -154,19 +246,22 @@ class BinanceFuturesFeed:
         self._stats_task = asyncio.create_task(
             self._stats_loop(), name="binance_futures_stats"
         )
+        self._fast_task = asyncio.create_task(
+            self._fast_lane_loop(), name="binance_futures_fast_lane"
+        )
         logger.info("binance_futures_feed_started")
 
     async def stop(self) -> None:
         self._stop = True
         self._connected = False
-        for t in (self._task, self._stats_task):
+        for t in (self._task, self._stats_task, self._fast_task):
             if t is not None:
                 t.cancel()
                 try:
                     await t
                 except (asyncio.CancelledError, Exception):
                     pass
-        self._task = self._stats_task = None
+        self._task = self._stats_task = self._fast_task = None
 
     async def _run_loop(self) -> None:
         backoff = 1
@@ -203,6 +298,11 @@ class BinanceFuturesFeed:
             await ws.send(
                 json.dumps({"method": "SUBSCRIBE", "params": ["!bookTicker"], "id": 1})
             )
+            self._ws = ws
+            # A reconnect starts with no per-symbol streams; the fast-lane
+            # reconcile puts back whatever is still being watched within a
+            # few seconds.
+            self._fast.clear()
             self._connected = True
             self._last_rx = time.monotonic()
             logger.info("binance_futures_ws_connected")
@@ -218,6 +318,7 @@ class BinanceFuturesFeed:
                         continue
                     self._handle_book(msg)
             finally:
+                self._ws = None
                 wd.cancel()
                 try:
                     await wd

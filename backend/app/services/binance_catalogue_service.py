@@ -38,6 +38,7 @@ from app.services.binance_futures_service import contract_for
 logger = logging.getLogger(__name__)
 
 _EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+_TICKER_24H_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
 
 # Segments this sync owns. An instrument outside these is none of its
 # business — Zerodha's NSE / MCX rows must never be touched.
@@ -52,9 +53,63 @@ _INDEX_ETFS = {
     "SMH", "XBI", "XLE", "GDX", "URNM", "KODEX200", "BITO",
 }
 
-# Friendlier names than the bare ticker, for the ones whose ticker tells a
-# user nothing. Everything else keeps its ticker as the name.
+# Binance's listing carries no company or asset names, only tickers — so a
+# browse reads "CAT, CBRS, CIEN, COHR" with nothing to tell them apart. These
+# are the ones a user is likely to meet; anything not here keeps its ticker,
+# which is still what they'd search for.
 _NICE_NAMES = {
+    # Commodities
+    "XAU": "Gold", "XAG": "Silver", "XPT": "Platinum", "XPD": "Palladium",
+    "CL": "WTI Crude Oil", "BZ": "Brent Crude Oil", "NATGAS": "Natural Gas",
+    # Crypto majors
+    "BTC": "Bitcoin", "ETH": "Ethereum", "BNB": "BNB", "SOL": "Solana",
+    "XRP": "XRP", "ADA": "Cardano", "DOGE": "Dogecoin", "TRX": "TRON",
+    "LINK": "Chainlink", "AVAX": "Avalanche", "LTC": "Litecoin",
+    "DOT": "Polkadot", "POL": "Polygon", "SHIB": "Shiba Inu",
+    "UNI": "Uniswap", "ATOM": "Cosmos", "APT": "Aptos", "ARB": "Arbitrum",
+    "OP": "Optimism", "NEAR": "NEAR Protocol", "FIL": "Filecoin",
+    "SUI": "Sui", "TON": "Toncoin", "HBAR": "Hedera", "ICP": "Internet Computer",
+    "BCH": "Bitcoin Cash", "ETC": "Ethereum Classic", "XLM": "Stellar",
+    "AAVE": "Aave", "PEPE": "Pepe", "WIF": "dogwifhat", "BTCDOM": "Bitcoin Dominance Index",
+    # US stocks
+    "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "Nvidia", "TSLA": "Tesla",
+    "AMZN": "Amazon", "GOOGL": "Alphabet (Google)", "META": "Meta Platforms",
+    "NFLX": "Netflix", "AMD": "AMD", "INTC": "Intel", "ORCL": "Oracle",
+    "CRM": "Salesforce", "IBM": "IBM", "QCOM": "Qualcomm", "AVGO": "Broadcom",
+    "MU": "Micron", "TSM": "TSMC", "ASML": "ASML", "AMAT": "Applied Materials",
+    "LRCX": "Lam Research", "KLAC": "KLA", "TXN": "Texas Instruments",
+    "ADBE": "Adobe", "PLTR": "Palantir", "COIN": "Coinbase",
+    "MSTR": "MicroStrategy", "HOOD": "Robinhood", "UBER": "Uber",
+    "DIS": "Disney", "KO": "Coca-Cola", "WMT": "Walmart", "COST": "Costco",
+    "JPM": "JPMorgan Chase", "GS": "Goldman Sachs", "BRKB": "Berkshire Hathaway",
+    "V": "Visa", "PYPL": "PayPal", "SHOP": "Shopify", "SNOW": "Snowflake",
+    "CRWD": "CrowdStrike", "PANW": "Palo Alto Networks", "NET": "Cloudflare",
+    "DDOG": "Datadog", "ZS": "Zscaler", "TEAM": "Atlassian", "MDB": "MongoDB",
+    "CAT": "Caterpillar", "XOM": "ExxonMobil", "NKE": "Nike", "MRK": "Merck",
+    "LLY": "Eli Lilly", "UNH": "UnitedHealth", "MRNA": "Moderna",
+    "NVO": "Novo Nordisk", "ACN": "Accenture", "CSCO": "Cisco", "DELL": "Dell",
+    "HPE": "HP Enterprise", "WDC": "Western Digital", "STX": "Seagate",
+    "SMCI": "Super Micro", "ARM": "Arm Holdings", "RIVN": "Rivian",
+    "CVNA": "Carvana", "GME": "GameStop", "AMC": "AMC Entertainment",
+    "RDDT": "Reddit", "EBAY": "eBay", "ZM": "Zoom", "TTWO": "Take-Two",
+    "DKNG": "DraftKings", "SOFI": "SoFi", "MARA": "Marathon Digital",
+    "HD": "Home Depot", "PDD": "PDD Holdings", "BABA": "Alibaba",
+    "TENCENT": "Tencent", "MEITUAN": "Meituan", "BYD": "BYD",
+    "KUAISHOU": "Kuaishou", "SONY": "Sony", "SAMSUNG": "Samsung Electronics",
+    "SKHYNIX": "SK Hynix", "HYUNDAI": "Hyundai Motor", "NAVER": "Naver",
+    "LGELECTRONICS": "LG Electronics", "POPMART": "Pop Mart",
+    # Private / pre-IPO
+    "OPENAI": "OpenAI (pre-IPO)", "ANTHROPIC": "Anthropic (pre-IPO)",
+    "SPCX": "SpaceX (pre-IPO)", "MOONSHOT": "Moonshot AI (pre-IPO)",
+    "MINIMAX": "MiniMax (pre-IPO)", "ZHIPU": "Zhipu AI (pre-IPO)",
+    "UNITREE": "Unitree Robotics (pre-IPO)", "OURA": "Oura (pre-IPO)",
+    # Leveraged / inverse — the name has to say so
+    "SOXL": "Semiconductors 3x Long (SOXL)", "SOXS": "Semiconductors 3x Short (SOXS)",
+    "TQQQ": "Nasdaq 100 3x Long (TQQQ)", "SQQQ": "Nasdaq 100 3x Short (SQQQ)",
+    "TSLL": "Tesla 2x Long (TSLL)", "NVDL": "Nvidia 2x Long (NVDL)",
+    "UVXY": "Volatility 1.5x Long (UVXY)", "TZA": "Small Cap 3x Short (TZA)",
+    "TBT": "20Y Treasury 2x Short (TBT)", "TMF": "20Y Treasury 3x Long (TMF)",
+    "KORU": "Korea 3x Long (KORU)",
     "QQQ": "Nasdaq 100 ETF (QQQ)",
     "SPY": "S&P 500 ETF (SPY)",
     "IWM": "Russell 2000 ETF (IWM)",
@@ -69,15 +124,7 @@ _NICE_NAMES = {
     "URNM": "Uranium Miners ETF (URNM)",
     "BITO": "Bitcoin Strategy ETF (BITO)",
     "KODEX200": "KOSPI 200 ETF (KODEX 200)",
-    "CL": "WTI Crude Oil",
-    "BZ": "Brent Crude Oil",
-    "NATGAS": "Natural Gas",
     "COPPER": "Copper",
-    "XAU": "Gold (XAU)",
-    "XAG": "Silver (XAG)",
-    "XPT": "Platinum (XPT)",
-    "XPD": "Palladium (XPD)",
-    "BTCDOM": "Bitcoin Dominance Index",
 }
 
 
@@ -119,26 +166,70 @@ async def fetch_contracts() -> list[dict[str, Any]]:
     ]
 
 
-async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
-    """Add every Binance contract the catalogue doesn't already carry.
+async def fetch_turnover() -> dict[str, float]:
+    """24 h quote-volume per contract, for the browse order."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(_TICKER_24H_URL)
+            r.raise_for_status()
+            rows = r.json()
+        return {
+            str(x.get("symbol")): float(x.get("quoteVolume") or 0)
+            for x in rows
+            if x.get("symbol")
+        }
+    except Exception:  # noqa: BLE001 — ranking is a nicety, listing is not
+        logger.warning("binance_turnover_fetch_failed", exc_info=True)
+        return {}
 
-    Never updates or deletes an existing instrument: its token is what
-    positions, orders and watchlists point at.
+
+async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
+    """Add every Binance contract the catalogue doesn't already carry, and
+    refresh the display name + browse rank on the ones it does.
+
+    A row's token is never touched: that is what positions, orders and
+    watchlists point at. Name and rank are display-only, so they're kept
+    current on every run — a contract's turnover changes, and a name map
+    that only applied to rows created after it shipped would leave the
+    earliest instruments as bare tickers forever.
     """
     contracts = await fetch_contracts()
     by_symbol = {c["symbol"]: c for c in contracts}
     known = set(by_symbol)
+    turnover = await fetch_turnover()
+    # Rank by turnover: 0 is the most traded contract on the venue.
+    ranked = sorted(turnover, key=lambda k: -turnover[k])
+    rank_of = {sym: i for i, sym in enumerate(ranked)}
 
     existing = await Instrument.find(
         {"segment": {"$in": list(MANAGED_SEGMENTS)}}
     ).to_list()
     # Which contracts are already represented, resolved exactly the way the
     # feed resolves them.
-    covered = {
-        c
-        for c in (contract_for(i.symbol, known) for i in existing)
-        if c is not None
-    }
+    covered: set[str] = set()
+    refreshed = 0
+    for inst in existing:
+        contract = contract_for(inst.symbol, known)
+        if contract is None:
+            continue
+        covered.add(contract)
+        base = str(by_symbol[contract]["baseAsset"]).upper()
+        want_name = _NICE_NAMES.get(base, base)
+        want_rank = rank_of.get(contract, 9999)
+        # `trading_symbol` carries the contract the price comes from, so a
+        # search for CLUSDT lands on USOIL and the row can show which
+        # contract it is quoting.
+        if (
+            inst.name != want_name
+            or getattr(inst, "feed_rank", 9999) != want_rank
+            or inst.trading_symbol != contract
+        ):
+            refreshed += 1
+            if not dry_run:
+                inst.name = want_name
+                inst.feed_rank = want_rank
+                inst.trading_symbol = contract
+                await inst.save()
     existing_tokens = {i.token for i in existing}
 
     created: list[str] = []
@@ -167,6 +258,7 @@ async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
             symbol=base,
             trading_symbol=sym,
             name=_NICE_NAMES.get(base, base),
+            feed_rank=rank_of.get(sym, 9999),
             exchange=Exchange.CRYPTO,
             segment=seg,
             instrument_type=InstrumentType.SPOT,
@@ -180,6 +272,7 @@ async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
         "contracts": len(contracts),
         "already_covered": len(covered),
         "created": len(created),
+        "refreshed": refreshed,
         "by_segment": per_segment,
         "skipped_forex": skipped_fx,
         "dry_run": dry_run,

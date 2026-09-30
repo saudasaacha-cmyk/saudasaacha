@@ -24,6 +24,7 @@ async def main() -> None:
     print(f"{'would create' if dry else 'created'}         : {out['created']}")
     for seg, n in sorted(out["by_segment"].items(), key=lambda kv: -kv[1]):
         print(f"    {seg:14} {n}")
+    print(f"names/ranks updated  : {out['refreshed']}")
     print(f"skipped (forex)      : {out['skipped_forex']}")
 
 

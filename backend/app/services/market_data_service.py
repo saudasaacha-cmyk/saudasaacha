@@ -1009,7 +1009,7 @@ async def get_ltp_quote_batch_mdlive(
     return ltp_out, quote_out
 
 
-async def _forward_feed_subscription(tokens: list[str]) -> None:
+async def _forward_feed_subscription(tokens: list[str], *, hot: bool = True) -> None:
     """Leader-side: subscribe cross-worker-requested tokens on the real feeds.
     Numeric tokens → Zerodha ticker; symbol-style tokens → Infoway. Adds them
     to `_subscribed` so the tick_loop mirrors them into `mdlive` + pub/sub."""
@@ -1040,9 +1040,21 @@ async def _forward_feed_subscription(tokens: list[str]) -> None:
             await infoway.subscribe(infoway_codes)
         except Exception:  # pragma: no cover
             logger.debug("feed_forward_infoway_failed", exc_info=True)
-        # Nothing to forward for Binance: `!bookTicker` already streams every
-        # contract the exchange lists, so a symbol is live before anyone asks
-        # for it. This is where MetaAPI needed a per-symbol subscribe.
+        # Binance's all-market stream already carries every contract, so
+        # nothing has to be subscribed for a price to EXIST. But that stream
+        # is sampled — 0.2 updates/s per symbol against 64.8 on a per-symbol
+        # one — so tell the feed which symbols somebody is actually looking
+        # at and it puts those on the fast lane.
+        if hot:
+            try:
+                from app.services.binance_futures_service import binance_futures
+
+                if binance_futures.is_enabled():
+                    binance_futures.mark_hot(
+                        [await _resolve_symbol(t) or t for t in infoway_codes]
+                    )
+            except Exception:  # pragma: no cover
+                logger.debug("feed_forward_binance_hot_failed", exc_info=True)
     if numeric:
         try:
             from app.services.zerodha_service import zerodha
@@ -1337,8 +1349,17 @@ def subscribe(tokens: list[str]) -> None:
         except Exception:
             logger.debug("infoway_on_demand_subscribe_failed", exc_info=True)
 
-        # Binance needs no on-demand subscribe — the single `!bookTicker`
-        # stream already carries every contract.
+        # Binance needs no subscribe for a price to exist — `!bookTicker`
+        # carries every contract — but that stream is sampled, so tell the
+        # feed these are being watched and it opens per-symbol streams for
+        # them (0.2 updates/s → 64.8).
+        try:
+            from app.services.binance_futures_service import binance_futures
+
+            if binance_futures.is_enabled():
+                binance_futures.mark_hot(infoway_codes)
+        except Exception:
+            logger.debug("binance_hot_mark_failed", exc_info=True)
 
 
 def unsubscribe(tokens: list[str]) -> None:
@@ -1469,7 +1490,10 @@ async def ensure_international_subscriptions() -> int:
         and str(i.token) not in _subscribed
     ]
     if tokens:
-        await _forward_feed_subscription(tokens)
+        # hot=False: this loop exists so every instrument HAS a price, not
+        # because anyone is watching. Marking all ~740 as hot would blow the
+        # fast lane's budget on rows nobody has open.
+        await _forward_feed_subscription(tokens, hot=False)
         logger.info("international_subscriptions_added count=%d", len(tokens))
     return len(tokens)
 

@@ -350,7 +350,12 @@ export function InstrumentsPanel({ onClose }: Props) {
   // fold. After the backend pump was parallelised the cap matters less
   // for latency, but it still keeps the steady-state load proportional
   // to what the user actually looks at.
-  const LIVE_TOKEN_CAP = 30;
+  // The browse asks for 100 rows, so anything below this line renders "—"
+  // forever. It used to be 30, which was invisible when a segment held a
+  // dozen instruments and glaring now that Stocks holds 189: every row past
+  // the thirtieth showed a dash. Binance streams the whole venue on one
+  // socket, so a token costs nothing upstream — only client-side updates.
+  const LIVE_TOKEN_CAP = 100;
   const visibleTokens = useMemo<string[]>(() => {
     const all = (() => {
       if (debouncedSearch.trim().length > 0) return (searchHits ?? []).map((s: any) => s.token);
