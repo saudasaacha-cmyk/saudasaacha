@@ -26,7 +26,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from app.models.chart_level import ChartLevel, ChartLevelEntry
+from app.models.chart_level import ChartLevel, ChartLevelEntry, ChartLevelVisibility
 from app.models.instrument import Instrument
 from app.models.user import User, UserRole
 from app.utils.decimal_utils import to_decimal
@@ -789,10 +789,18 @@ async def clear_for_admin(admin: User, token: str) -> bool:
     return True
 
 
-async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
-    """What the USER's chart should draw for `token`: the lines and the
-    trend. Closest owner in the cascade wins — identical ordering to
-    ``crypto_config_service.resolve_for_user``."""
+def _owner_cascade(
+    user: User, *, include_platform: bool
+) -> list[dict[str, PydanticObjectId | None]]:
+    """Owners to consult for `user`, closest first: immediate broker → parent
+    brokers (tip→root) → assigned admin → platform default.
+
+    ``include_platform`` is the one place the two cascades differ. LINES stop
+    at the assigned admin — a sub-admin's users must never be shown the
+    platform's levels, same rule as company banks. VISIBILITY does fall
+    through to the platform, because "the sub-admin didn't choose" has to
+    mean "whatever the super admin said".
+    """
     tried: list[dict[str, PydanticObjectId | None]] = []
     if user.assigned_broker_id is not None:
         tried.append({"owner_admin_id": None, "owner_broker_id": user.assigned_broker_id})
@@ -802,10 +810,82 @@ async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
         tried.append({"owner_admin_id": None, "owner_broker_id": parent})
     if user.assigned_admin_id is not None:
         tried.append({"owner_admin_id": user.assigned_admin_id, "owner_broker_id": None})
+        if include_platform:
+            tried.append({"owner_admin_id": None, "owner_broker_id": None})
     else:
-        # Direct super-admin user only — never leak the platform default to a
-        # sub-admin's users (same rule as company banks).
         tried.append({"owner_admin_id": None, "owner_broker_id": None})
+    return tried
+
+
+async def _visibility_row(
+    f: dict[str, PydanticObjectId | None],
+) -> ChartLevelVisibility | None:
+    return await ChartLevelVisibility.find_one(
+        ChartLevelVisibility.owner_admin_id == f["owner_admin_id"],
+        ChartLevelVisibility.owner_broker_id == f["owner_broker_id"],
+    )
+
+
+async def visibility_for_user(user: User) -> bool:
+    """Should this user see chart lines at all?
+
+    The nearest tier that has actually made a decision wins. A sub-admin who
+    turns lines off hides them from their own users only — the super admin's
+    own users keep seeing theirs. Nobody has decided anything = shown, which
+    is how the feature behaved before the switch existed.
+    """
+    for f in _owner_cascade(user, include_platform=True):
+        row = await _visibility_row(f)
+        if row is not None:
+            return row.enabled
+    return True
+
+
+async def get_visibility(admin: User) -> dict[str, Any]:
+    """What the Chart Lines page shows above the table: this actor's own
+    choice (None = following the tier above), what that tier says, and the
+    value their users actually get."""
+    own = owner_filter_for_admin(admin)
+    row = await _visibility_row(own)
+    inherited = True
+    for f in _owner_cascade(admin, include_platform=True):
+        if f == own:
+            continue
+        parent = await _visibility_row(f)
+        if parent is not None:
+            inherited = parent.enabled
+            break
+    return {
+        "enabled": row.enabled if row is not None else None,
+        "inherited": inherited,
+        "effective": row.enabled if row is not None else inherited,
+        "canInherit": admin.role != UserRole.SUPER_ADMIN,
+    }
+
+
+async def set_visibility(admin: User, enabled: bool | None) -> dict[str, Any]:
+    """`None` deletes this actor's row, which puts them back on the tier
+    above — that is the "I haven't chosen" state, not a third stored value."""
+    own = owner_filter_for_admin(admin)
+    row = await _visibility_row(own)
+    if enabled is None:
+        if row is not None:
+            await row.delete()
+    elif row is None:
+        await ChartLevelVisibility(**own, enabled=enabled).insert()
+    elif row.enabled != enabled:
+        row.enabled = enabled
+        await row.save()
+    return await get_visibility(admin)
+
+
+async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
+    """What the USER's chart should draw for `token`: the lines and the
+    trend. Closest owner in the cascade wins — identical ordering to
+    ``crypto_config_service.resolve_for_user``."""
+    if not await visibility_for_user(user):
+        return {"levels": [], "trend": None}
+    tried = _owner_cascade(user, include_platform=False)
 
     # The chart addresses some instruments by SYMBOL where the catalog keys
     # them by token — crypto is "BTCUSD" on screen and "CRYPTO_BTCUSD" in the

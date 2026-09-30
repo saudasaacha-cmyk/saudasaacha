@@ -72,6 +72,27 @@ export default function ChartLevelsPage() {
     if (!segment && segments?.length) setSegment(segments[0].value);
   }, [segments, segment]);
 
+  const { data: visibility } = useQuery({
+    queryKey: ["admin", "chart-levels", "visibility"],
+    queryFn: () => ChartLevelsAPI.visibility(),
+  });
+
+  async function setVisibility(enabled: boolean | null) {
+    try {
+      await ChartLevelsAPI.setVisibility(enabled);
+      qc.invalidateQueries({ queryKey: ["admin", "chart-levels", "visibility"] });
+      toast.success(
+        enabled === null
+          ? "Following the tier above"
+          : enabled
+            ? "Your users will see chart lines"
+            : "Chart lines hidden from your users",
+      );
+    } catch (e: any) {
+      toast.error(e?.message || "Could not save");
+    }
+  }
+
   const { data: rows, isFetching } = useQuery({
     queryKey: ["admin", "chart-levels", segment],
     queryFn: () => ChartLevelsAPI.list(segment),
@@ -302,6 +323,44 @@ export default function ChartLevelsPage() {
         </span>
       </div>
 
+      {visibility ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
+          <span className="text-sm font-medium">Show chart lines to my users</span>
+          <div className="flex gap-1">
+            {(
+              [
+                ...(visibility.canInherit
+                  ? ([[null, `Default (${visibility.inherited ? "shown" : "hidden"})`]] as const)
+                  : []),
+                [true, "Show"],
+                [false, "Hide"],
+              ] as [boolean | null, string][]
+            ).map(([val, text]) => (
+              <button
+                key={String(val)}
+                type="button"
+                onClick={() => void setVisibility(val)}
+                className={`rounded px-2.5 py-1 text-xs ${
+                  visibility.enabled === val
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/70"
+                }`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            {visibility.effective
+              ? "Your users see the lines set here."
+              : "Your users see no chart lines, whatever is set below."}
+            {visibility.canInherit && visibility.enabled === null
+              ? " Following the tier above — change it here to override."
+              : ""}
+          </span>
+        </div>
+      ) : null}
+
       <DataTable
         columns={columns}
         rows={rows}
@@ -311,7 +370,6 @@ export default function ChartLevelsPage() {
       />
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        The sheet carries {MAX_LINES} sets of <b>Line · Colour · Price</b> per instrument.
         Row 2 of the sheet sets each line&apos;s colour and row 3 its label — once, for every
         instrument — and row 4 onwards holds just the prices. Add as many <code>Line</code>
         columns as you need. Re-uploading replaces the lines for every instrument listed; a row

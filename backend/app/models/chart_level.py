@@ -63,3 +63,27 @@ class ChartLevel(TimestampMixin):
             # The user-side read is always "this owner, this segment".
             IndexModel([("owner_admin_id", ASCENDING), ("segment", ASCENDING)]),
         ]
+
+
+class ChartLevelVisibility(TimestampMixin):
+    """Whether THIS owner's users see admin chart lines at all.
+
+    A row exists only once the owner has made a decision — no row means
+    "inherit from the tier above", which is why `enabled` is a plain bool
+    and absence carries the third state. Super admin's row (both ids null)
+    is the platform default every other tier falls back to.
+    """
+
+    owner_admin_id: PydanticObjectId | None = None
+    owner_broker_id: PydanticObjectId | None = None
+
+    enabled: bool = True
+
+    class Settings:
+        name = "chart_level_visibility"
+        indexes = [
+            IndexModel(
+                [("owner_admin_id", ASCENDING), ("owner_broker_id", ASCENDING)],
+                unique=True,
+            ),
+        ]

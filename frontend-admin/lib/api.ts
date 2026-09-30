@@ -671,6 +671,25 @@ export const ChartLevelsAPI = {
     ),
   clear: (token: string) =>
     unwrap<{ cleared: boolean }>(api.delete(`/admin/chart-levels/${token}`)),
+  /** Whether MY users see chart lines. `enabled: null` = following the tier
+   *  above, whose value is `inherited`. */
+  visibility: () =>
+    unwrap<ChartLevelVisibility>(api.get("/admin/chart-levels/visibility")),
+  setVisibility: (enabled: boolean | null) =>
+    unwrap<ChartLevelVisibility>(
+      api.put("/admin/chart-levels/visibility", { enabled }),
+    ),
+};
+
+export type ChartLevelVisibility = {
+  /** My own choice, or null when I have not made one. */
+  enabled: boolean | null;
+  /** What the tier above me says — what "Default" means for me. */
+  inherited: boolean;
+  /** What my users actually get. */
+  effective: boolean;
+  /** Super admin has no tier above, so it has no "Default" option. */
+  canInherit: boolean;
 };
 
 export const CryptoConfigAPI = {

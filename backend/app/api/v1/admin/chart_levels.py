@@ -96,6 +96,25 @@ async def import_levels(admin: CurrentAdmin, file: UploadFile = File(...)):
     return APIResponse(data=result)
 
 
+class VisibilityIn(BaseModel):
+    # None = clear my own choice and follow the tier above. The three states
+    # are on / off / not-chosen, and not-chosen is the ABSENCE of a row.
+    enabled: bool | None = None
+
+
+@router.get("/visibility", response_model=APIResponse[dict])
+async def get_visibility(admin: CurrentAdmin):
+    """Whether this actor's users see chart lines, and where that came from."""
+    return APIResponse(data=await chart_level_service.get_visibility(admin))
+
+
+@router.put("/visibility", response_model=APIResponse[dict])
+async def set_visibility(body: VisibilityIn, admin: CurrentAdmin):
+    return APIResponse(
+        data=await chart_level_service.set_visibility(admin, body.enabled)
+    )
+
+
 @router.get("", response_model=APIResponse[list])
 async def list_levels(admin: CurrentAdmin, segment: str | None = Query(default=None)):
     if segment:
