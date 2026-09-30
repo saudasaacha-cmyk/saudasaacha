@@ -904,38 +904,3 @@ async def mirror_subscribed_to_instruments() -> int:
         logger.info("infoway_mirror_done", extra={"count": mirrored})
     return mirrored
 
-
-async def seed_default_instruments() -> int:
-    """Catalogue rows for the configured default forex / metals / energy /
-    stocks / indices symbols, whether or not Infoway is connected.
-
-    The terminal's Stocks and Indices tabs read the catalogue, and on a
-    MetaAPI-fed deployment Infoway never subscribes (so never mirrors) those
-    symbols — which left both tabs empty. Crypto is deliberately excluded: the
-    Indian seed already ships CRYPTO_SPOT rows (BTCUSD…), and adding Infoway's
-    USDT pairs on top would show the same coin twice.
-    """
-    sources = [
-        settings.INFOWAY_DEFAULT_FOREX or "",
-        getattr(settings, "INFOWAY_DEFAULT_METALS", "") or "",
-        getattr(settings, "INFOWAY_DEFAULT_ENERGY", "") or "",
-        getattr(settings, "INFOWAY_DEFAULT_STOCKS", "") or "",
-        getattr(settings, "INFOWAY_DEFAULT_INDICES", "") or "",
-    ]
-    created = 0
-    seen: set[str] = set()
-    for src in sources:
-        for raw in src.split(","):
-            code = raw.strip().upper()
-            if not code or code in seen:
-                continue
-            seen.add(code)
-            if await upsert_instrument_for_code(code):
-                created += 1
-    # NB: not `extra={"created": ...}` — `created` is a reserved LogRecord
-    # attribute and logging raises KeyError on the overwrite, which aborted
-    # the whole boot seed in production.
-    logger.info(
-        "default_instruments_seeded", extra={"inserted": created, "symbols": len(seen)}
-    )
-    return created

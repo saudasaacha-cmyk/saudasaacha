@@ -200,13 +200,28 @@ async def seed_holidays() -> None:
 
 
 async def seed_global_instruments() -> None:
-    """Forex / metals / energy / stocks / indices catalogue rows. Without
-    these the terminal's Stocks and Indices tabs are empty on a deployment
-    that gets its prices from MetaAPI rather than Infoway."""
-    from app.services.infoway_service import seed_default_instruments
+    """Mirror Binance's futures listing into the catalogue.
 
-    created = await seed_default_instruments()
-    logger.info("seeded_global_instruments", extra={"inserted": created})
+    Runs on every boot so a contract Binance lists tomorrow is tradable
+    without a deploy. Existing rows are never touched, so this is a no-op
+    once the catalogue is current.
+
+    Replaces a fixed list of forex / index CFD symbols that was seeded from
+    env. That list outlived its feed: re-creating those rows on each boot
+    put instruments back that have no price source, which is exactly the
+    frozen-price failure the migration was meant to end.
+
+    Best-effort: Binance being unreachable must not stop the platform
+    booting — the catalogue simply stays as it is until the next restart.
+    """
+    from app.services.binance_catalogue_service import sync_catalogue
+
+    try:
+        out = await sync_catalogue()
+    except Exception:  # noqa: BLE001
+        logger.warning("seed_global_instruments_failed", exc_info=True)
+        return
+    logger.info("seeded_global_instruments", extra={"inserted": out["created"]})
 
 
 async def run_seed() -> None:
