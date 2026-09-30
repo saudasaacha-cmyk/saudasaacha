@@ -24,6 +24,14 @@ THREE streams, because the all-market one is sampled:
   WS `<symbol>@bookTicker`→ the same book for ONE contract at 64.8
                             updates/s — 324× the all-market rate. Held for
                             the symbols people are actually watching.
+  WS `<symbol>@aggTrade`  → the LAST TRADED price for those same symbols.
+                            Measured: XAUUSDT's book sends 84 messages a
+                            second but its bid/ask only MOVES twice a
+                            second — most messages are size changes at the
+                            same price. Binance's own screen looks alive
+                            because it prints trades, so we take the trade
+                            price as the last price and leave the book to
+                            bid/ask.
   REST `/ticker/24hr`     → open / high / low / change, every 10 s, all
                             symbols.
 
@@ -62,6 +70,7 @@ _STABLE_CONNECTION_SEC = 30
 _STATS_INTERVAL_SEC = 10.0
 # Fast lane. Binance caps a connection at 1024 streams and 200 params per
 # SUBSCRIBE; this leaves room for the all-market stream and for growth.
+# Two streams per symbol (book + trades), so 300 contracts is 600 streams.
 _HOT_CAP = 300
 # Not asked for in this long → back to the all-market rate. A watchlist the
 # user still has open is re-requested well inside the window.
@@ -215,7 +224,14 @@ class BinanceFuturesFeed:
                             json.dumps(
                                 {
                                     "method": method,
-                                    "params": [f"{c.lower()}@bookTicker" for c in chunk],
+                                    "params": [
+                                        p
+                                        for c in chunk
+                                        for p in (
+                                            f"{c.lower()}@bookTicker",
+                                            f"{c.lower()}@aggTrade",
+                                        )
+                                    ],
                                     "id": int(time.time() * 1000) % 1_000_000,
                                 }
                             )
@@ -337,7 +353,13 @@ class BinanceFuturesFeed:
                 return
 
     def _handle_book(self, msg: dict[str, Any]) -> None:
-        if not isinstance(msg, dict) or msg.get("e") != "bookTicker":
+        if not isinstance(msg, dict):
+            return
+        kind = msg.get("e")
+        if kind == "aggTrade":
+            self._handle_trade(msg)
+            return
+        if kind != "bookTicker":
             return  # the SUBSCRIBE ack has no "e"
         sym = str(msg.get("s") or "").upper()
         if not sym:
@@ -353,13 +375,40 @@ class BinanceFuturesFeed:
                 "binance_futures_bad_tick_skipped sym=%s prev=%s new=%s", sym, prev, mid
             )
             return
-        t["bid"], t["ask"], t["ltp"] = bid, ask, mid
+        t["bid"], t["ask"] = bid, ask
+        # Mid stands in for the last price until a trade arrives. Symbols on
+        # the fast lane get @aggTrade and overwrite it with the real one;
+        # everything else only ever has the book to go on.
+        if not t.get("from_trade"):
+            t["ltp"] = mid
         if t.get("open"):
             t["change"] = mid - _f(t["open"])
             t["change_pct"] = t["change"] / _f(t["open"]) * 100.0
         # Binance's OWN event time, so the stale-price guard measures the
         # exchange's clock rather than ours — our tick loop re-stamps its
         # `ts` every pass whether or not the price moved.
+        ev = _f(msg.get("E"))
+        t["feed_ts"] = ev / 1000.0 if ev > 0 else time.time()
+        t["ts"] = time.time()
+
+    def _handle_trade(self, msg: dict[str, Any]) -> None:
+        """Last traded price — what makes a quiet book still look alive."""
+        sym = str(msg.get("s") or "").upper()
+        price = _f(msg.get("p"))
+        if not sym or price <= 0:
+            return
+        t = self._ticks.setdefault(sym, {})
+        prev = _f(t.get("ltp"))
+        if prev > 0 and abs(price - prev) / prev > _MAX_TICK_SPIKE_PCT:
+            logger.warning(
+                "binance_futures_bad_trade_skipped sym=%s prev=%s new=%s", sym, prev, price
+            )
+            return
+        t["ltp"] = price
+        t["from_trade"] = True
+        if t.get("open"):
+            t["change"] = price - _f(t["open"])
+            t["change_pct"] = t["change"] / _f(t["open"]) * 100.0
         ev = _f(msg.get("E"))
         t["feed_ts"] = ev / 1000.0 if ev > 0 else time.time()
         t["ts"] = time.time()

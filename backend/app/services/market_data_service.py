@@ -100,6 +100,16 @@ def _group_filter(tokens: list) -> list:
     return [t for t in tokens if _in_feed_group(t)]
 
 
+# Tokens the catalogue reconcile subscribed so that every instrument HAS a
+# price, as opposed to ones somebody is looking at. There are ~740 of them,
+# and overlaying all of them ten times a second dropped the pump from 10
+# passes/sec to 3.3 — measured — which slowed the prices people DO watch.
+# They ride a slower rotation instead, and a viewer's request promotes one
+# out of here immediately.
+_cold_tokens: set[str] = set()
+_COLD_EVERY = 10
+
+
 def prune_subscribed_numeric(keep_tokens: set) -> int:
     """Drop numeric (Zerodha) tokens from ``_subscribed`` / ``_state`` that are
     NOT in ``keep_tokens``. Called by the Zerodha LRU trim.
@@ -1019,6 +1029,11 @@ async def _forward_feed_subscription(tokens: list[str], *, hot: bool = True) -> 
     if not tokens:
         return
     _subscribed.update(tokens)
+    if hot:
+        # Somebody is watching: out of the slow rotation, into every pass.
+        _cold_tokens.difference_update(tokens)
+    else:
+        _cold_tokens.update(tokens)
     # Seed `_state` on the leader (see `subscribe`): symbol-style MetaAPI /
     # Infoway tokens have no upstream WS to populate `_state`, so without this
     # they never enter the leader's `tick_loop` publish set (`_state ∩
@@ -1288,6 +1303,8 @@ def subscribe(tokens: list[str]) -> None:
     # never seeds/forwards a Zerodha token (and vice-versa). No-op when "all".
     tokens = _group_filter(tokens)
     _subscribed.update(tokens)
+    # A direct subscribe is always somebody looking at the instrument.
+    _cold_tokens.difference_update(tokens)
 
     # Seed an empty `_state` slot for every subscribed token so the leader's
     # `tick_loop` starts overlaying it immediately. Zerodha (numeric) tokens are
@@ -1538,6 +1555,7 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
     _running = True
     logger.info("market_tick_loop_started")
     await _warm_token_symbol_cache()
+    _pass = 0
     try:
         import time
 
@@ -1551,10 +1569,13 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
                 # Zerodha REST overlay (~200-2000 ms), one iteration
                 # could stretch into multiple seconds and starve the
                 # 250 ms tick-loop cadence.
+                _pass += 1
+                cold_turn = _pass % _COLD_EVERY == 0
                 pending = [
                     (token, q)
                     for token, q in list(_state.items())
                     if token in _subscribed
+                    and (cold_turn or token not in _cold_tokens)
                 ]
                 if pending:
                     # WS-only overlays in the pump: allow_rest=False so a cold
