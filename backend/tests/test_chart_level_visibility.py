@@ -40,12 +40,18 @@ def rows(monkeypatch):
         key = (f["owner_admin_id"], f["owner_broker_id"])
         if key not in store:
             return None
-        return types.SimpleNamespace(enabled=store[key])
+        enabled, locked = store[key]
+        return types.SimpleNamespace(enabled=enabled, locked=locked)
 
     monkeypatch.setattr(cl, "_visibility_row", fake)
 
-    def put(owner, enabled):
-        store[(owner["owner_admin_id"], owner["owner_broker_id"])] = enabled
+    def put(owner, enabled, locked=False):
+        """`enabled=None` removes the row — that is what 'Default' does."""
+        key = (owner["owner_admin_id"], owner["owner_broker_id"])
+        if enabled is None:
+            store.pop(key, None)
+        else:
+            store[key] = (enabled, locked)
 
     return put
 
@@ -122,3 +128,40 @@ async def test_hidden_users_get_no_lines_and_no_trend(rows, monkeypatch):
 
     monkeypatch.setattr(cl.Instrument, "find_one", boom)
     assert await cl.resolve_for_user(_user(), "XAUUSD") == {"levels": [], "trend": None}
+
+
+# ── the super admin's pin ────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_a_pinned_sub_admin_cannot_be_undone_from_below(rows):
+    """Super admin hides lines for one sub-admin's pool. A broker under that
+    sub-admin turning their own switch on must NOT bring them back — the
+    nearer row would otherwise win and the block would leak."""
+    rows(SUPER, True)
+    rows(ADMIN, False, locked=True)
+    rows(BROKER, True)
+    assert await cl.visibility_for_user(_user(admin=ADMIN_ID, broker=BROKER_ID)) is False
+    # …and a different sub-admin's users are untouched.
+    other = PydanticObjectId()
+    assert await cl.visibility_for_user(_user(admin=other)) is True
+
+
+@pytest.mark.asyncio
+async def test_a_pin_on_the_broker_itself_is_nearer_and_wins(rows):
+    """Both pins are the super admin's, so the more specific one applies."""
+    rows(ADMIN, False, locked=True)
+    rows(BROKER, True, locked=True)
+    assert await cl.visibility_for_user(_user(admin=ADMIN_ID, broker=BROKER_ID)) is True
+
+
+@pytest.mark.asyncio
+async def test_releasing_the_pin_hands_control_back(rows):
+    """'Default' deletes the row rather than storing a third value, so the
+    tier goes back to following whoever is above it — and keeps following it
+    when the super admin later changes their mind."""
+    rows(SUPER, True)
+    rows(ADMIN, False, locked=True)
+    assert await cl.visibility_for_user(_user(admin=ADMIN_ID)) is False
+    rows(ADMIN, None)  # released
+    assert await cl.visibility_for_user(_user(admin=ADMIN_ID)) is True
+    rows(SUPER, False)
+    assert await cl.visibility_for_user(_user(admin=ADMIN_ID)) is False

@@ -679,6 +679,25 @@ export const ChartLevelsAPI = {
     unwrap<ChartLevelVisibility>(
       api.put("/admin/chart-levels/visibility", { enabled }),
     ),
+  /** Super admin only: every sub-admin and broker with their switch. */
+  managedVisibility: () =>
+    unwrap<ManagedVisibility[]>(api.get("/admin/chart-levels/visibility/managed")),
+  setManagedVisibility: (targetId: string, enabled: boolean | null) =>
+    unwrap<ManagedVisibility[]>(
+      api.put(`/admin/chart-levels/visibility/managed/${targetId}`, { enabled }),
+    ),
+};
+
+export type ManagedVisibility = {
+  id: string;
+  name: string;
+  userCode: string;
+  role: string;
+  /** What the Super Admin has pinned, or null when this tier decides. */
+  enabled: boolean | null;
+  locked: boolean;
+  /** What that tier's users actually get right now. */
+  effective: boolean;
 };
 
 export type ChartLevelVisibility = {
@@ -690,6 +709,9 @@ export type ChartLevelVisibility = {
   effective: boolean;
   /** Super admin has no tier above, so it has no "Default" option. */
   canInherit: boolean;
+  /** The Super Admin pinned this — read-only for everyone else. */
+  locked: boolean;
+  isSuperAdmin: boolean;
 };
 
 export const CryptoConfigAPI = {

@@ -28,7 +28,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.models.chart_level import ChartLevel, ChartLevelEntry, ChartLevelVisibility
 from app.models.instrument import Instrument
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStatus
 from app.utils.decimal_utils import to_decimal
 
 # How many line columns a FRESH template ships with, and how many slots the
@@ -826,40 +826,66 @@ async def _visibility_row(
     )
 
 
-async def visibility_for_user(user: User) -> bool:
-    """Should this user see chart lines at all?
+async def _resolve_visibility(
+    cascade: list[dict[str, PydanticObjectId | None]],
+) -> tuple[bool, bool]:
+    """Walk owners closest-first and answer (shown, locked).
 
-    The nearest tier that has actually made a decision wins. A sub-admin who
-    turns lines off hides them from their own users only — the super admin's
-    own users keep seeing theirs. Nobody has decided anything = shown, which
-    is how the feature behaved before the switch existed.
+    The nearest LOCKED row wins outright — a locked row is the super admin's
+    decision about that tier, so a broker underneath a blocked sub-admin
+    cannot switch their own lines back on. Failing that, the nearest row of
+    any kind wins. Nobody has decided anything = shown, which is how the
+    feature behaved before the switch existed.
     """
-    for f in _owner_cascade(user, include_platform=True):
+    nearest: ChartLevelVisibility | None = None
+    for f in cascade:
         row = await _visibility_row(f)
-        if row is not None:
-            return row.enabled
-    return True
+        if row is None:
+            continue
+        if row.locked:
+            return row.enabled, True
+        if nearest is None:
+            nearest = row
+    return (nearest.enabled if nearest is not None else True), False
+
+
+def _admin_cascade(admin: User) -> list[dict[str, PydanticObjectId | None]]:
+    """The owners that decide what THIS actor's users see, own row first.
+
+    A broker already appears at the head of their own user cascade; a
+    sub-admin does not (their users reach them via `assigned_admin_id`), so
+    the row is prepended rather than assumed.
+    """
+    own = owner_filter_for_admin(admin)
+    return [own] + [
+        f for f in _owner_cascade(admin, include_platform=True) if f != own
+    ]
+
+
+async def visibility_for_user(user: User) -> bool:
+    """Should this user see chart lines at all?"""
+    shown, _ = await _resolve_visibility(_owner_cascade(user, include_platform=True))
+    return shown
 
 
 async def get_visibility(admin: User) -> dict[str, Any]:
     """What the Chart Lines page shows above the table: this actor's own
-    choice (None = following the tier above), what that tier says, and the
-    value their users actually get."""
+    choice (None = following the tier above), what that tier says, the value
+    their users actually get, and whether the super admin has pinned it."""
     own = owner_filter_for_admin(admin)
     row = await _visibility_row(own)
-    inherited = True
-    for f in _owner_cascade(admin, include_platform=True):
-        if f == own:
-            continue
-        parent = await _visibility_row(f)
-        if parent is not None:
-            inherited = parent.enabled
-            break
+    chain = _admin_cascade(admin)
+    effective, _ = await _resolve_visibility(chain)
+    inherited, locked_above = await _resolve_visibility(chain[1:])
     return {
         "enabled": row.enabled if row is not None else None,
         "inherited": inherited,
-        "effective": row.enabled if row is not None else inherited,
+        "effective": effective,
         "canInherit": admin.role != UserRole.SUPER_ADMIN,
+        # Either my own row is pinned, or a tier above me is — both mean the
+        # buttons are read-only for everyone except the super admin.
+        "locked": (row.locked if row is not None else False) or locked_above,
+        "isSuperAdmin": admin.role == UserRole.SUPER_ADMIN,
     }
 
 
@@ -868,15 +894,97 @@ async def set_visibility(admin: User, enabled: bool | None) -> dict[str, Any]:
     above — that is the "I haven't chosen" state, not a third stored value."""
     own = owner_filter_for_admin(admin)
     row = await _visibility_row(own)
+    if admin.role != UserRole.SUPER_ADMIN:
+        current = await get_visibility(admin)
+        if current["locked"]:
+            raise ValueError(
+                "The Super Admin has set this for you — it can't be changed here."
+            )
     if enabled is None:
         if row is not None:
             await row.delete()
     elif row is None:
         await ChartLevelVisibility(**own, enabled=enabled).insert()
-    elif row.enabled != enabled:
+    else:
         row.enabled = enabled
+        # The owner editing their OWN switch releases the pin; only the super
+        # admin can hold one, and only the super admin reaches this branch
+        # with a locked row in front of them.
+        row.locked = row.locked and admin.role == UserRole.SUPER_ADMIN
         await row.save()
     return await get_visibility(admin)
+
+
+# ── super admin: the switch for one sub-admin or broker ──────────────
+def _owner_for(target: User) -> dict[str, PydanticObjectId | None]:
+    if target.role == UserRole.BROKER:
+        return {"owner_admin_id": None, "owner_broker_id": target.id}
+    return {"owner_admin_id": target.id, "owner_broker_id": None}
+
+
+async def _managed_targets() -> list[User]:
+    return await User.find(
+        {
+            "role": {"$in": [UserRole.ADMIN.value, UserRole.BROKER.value]},
+            "status": {"$ne": UserStatus.CLOSED.value},
+        }
+    ).to_list()
+
+
+async def list_managed_visibility(admin: User) -> list[dict[str, Any]]:
+    """Every sub-admin and broker with the state of their switch.
+
+    This is how the super admin turns chart lines off for one sub-admin's
+    whole client pool without touching anybody else's.
+    """
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise ValueError("Only the Super Admin can set this for other tiers.")
+    out: list[dict[str, Any]] = []
+    for t in sorted(await _managed_targets(), key=lambda u: (u.role, u.full_name or "")):
+        own = _owner_for(t)
+        row = await _visibility_row(own)
+        effective, _ = await _resolve_visibility(_admin_cascade(t))
+        out.append(
+            {
+                "id": str(t.id),
+                "name": t.full_name or t.user_code,
+                "userCode": t.user_code,
+                "role": str(t.role),
+                "enabled": row.enabled if row is not None else None,
+                # True when the super admin pinned it, so the UI can say who
+                # set it — the row alone can't tell you.
+                "locked": bool(row is not None and row.locked),
+                "effective": effective,
+            }
+        )
+    return out
+
+
+async def set_visibility_for(
+    admin: User, target_id: str, enabled: bool | None
+) -> list[dict[str, Any]]:
+    """Pin (or release) one sub-admin's / broker's switch. `None` releases it
+    and hands control back to that tier."""
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise ValueError("Only the Super Admin can set this for other tiers.")
+    try:
+        target = await User.get(PydanticObjectId(target_id))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("No such admin or broker.") from exc
+    if target is None or target.role not in (UserRole.ADMIN, UserRole.BROKER):
+        raise ValueError("No such admin or broker.")
+
+    own = _owner_for(target)
+    row = await _visibility_row(own)
+    if enabled is None:
+        if row is not None:
+            await row.delete()
+    elif row is None:
+        await ChartLevelVisibility(**own, enabled=enabled, locked=True).insert()
+    else:
+        row.enabled, row.locked = enabled, True
+        await row.save()
+    return await list_managed_visibility(admin)
 
 
 async def resolve_for_user(user: User, token: str) -> dict[str, Any]:

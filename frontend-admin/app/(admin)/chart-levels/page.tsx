@@ -93,6 +93,28 @@ export default function ChartLevelsPage() {
     }
   }
 
+  const { data: managed } = useQuery({
+    queryKey: ["admin", "chart-levels", "visibility", "managed"],
+    queryFn: () => ChartLevelsAPI.managedVisibility(),
+    enabled: !!visibility?.isSuperAdmin,
+  });
+
+  async function setManaged(id: string, enabled: boolean | null) {
+    try {
+      await ChartLevelsAPI.setManagedVisibility(id, enabled);
+      qc.invalidateQueries({ queryKey: ["admin", "chart-levels", "visibility"] });
+      toast.success(
+        enabled === null
+          ? "Released — that tier decides now"
+          : enabled
+            ? "Chart lines on for their users"
+            : "Chart lines off for their users",
+      );
+    } catch (e: any) {
+      toast.error(e?.message || "Could not save");
+    }
+  }
+
   const { data: rows, isFetching } = useQuery({
     queryKey: ["admin", "chart-levels", segment],
     queryFn: () => ChartLevelsAPI.list(segment),
@@ -339,8 +361,9 @@ export default function ChartLevelsPage() {
               <button
                 key={String(val)}
                 type="button"
+                disabled={visibility.locked && !visibility.isSuperAdmin}
                 onClick={() => void setVisibility(val)}
-                className={`rounded px-2.5 py-1 text-xs ${
+                className={`rounded px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
                   visibility.enabled === val
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted text-muted-foreground hover:bg-muted/70"
@@ -354,11 +377,61 @@ export default function ChartLevelsPage() {
             {visibility.effective
               ? "Your users see the lines set here."
               : "Your users see no chart lines, whatever is set below."}
-            {visibility.canInherit && visibility.enabled === null
-              ? " Following the tier above — change it here to override."
-              : ""}
+            {visibility.locked && !visibility.isSuperAdmin
+              ? " Set by the Super Admin — it can't be changed here."
+              : visibility.canInherit && visibility.enabled === null
+                ? " Following the tier above — change it here to override."
+                : ""}
           </span>
         </div>
+      ) : null}
+
+      {visibility?.isSuperAdmin && managed?.length ? (
+        <details className="rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+            Per admin / broker
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              turn chart lines off for one tier&apos;s whole client pool
+            </span>
+          </summary>
+          <div className="divide-y divide-border border-t border-border">
+            {managed.map((m) => (
+              <div key={m.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                <span className="min-w-40 text-sm">{m.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {m.role} · {m.userCode}
+                </span>
+                <div className="ml-auto flex gap-1">
+                  {(
+                    [
+                      [null, "Default"],
+                      [true, "Show"],
+                      [false, "Hide"],
+                    ] as [boolean | null, string][]
+                  ).map(([val, text]) => (
+                    <button
+                      key={String(val)}
+                      type="button"
+                      onClick={() => void setManaged(m.id, val)}
+                      className={`rounded px-2.5 py-1 text-xs ${
+                        m.enabled === val
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-muted/70"
+                      }`}
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
+                <span className="w-44 text-right text-xs text-muted-foreground">
+                  {m.locked
+                    ? `Pinned by you — ${m.effective ? "shown" : "hidden"}`
+                    : `Their choice — ${m.effective ? "shown" : "hidden"}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       <DataTable

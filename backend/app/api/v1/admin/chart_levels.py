@@ -110,9 +110,46 @@ async def get_visibility(admin: CurrentAdmin):
 
 @router.put("/visibility", response_model=APIResponse[dict])
 async def set_visibility(body: VisibilityIn, admin: CurrentAdmin):
-    return APIResponse(
-        data=await chart_level_service.set_visibility(admin, body.enabled)
-    )
+    try:
+        return APIResponse(
+            data=await chart_level_service.set_visibility(admin, body.enabled)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+
+
+@router.get("/visibility/managed", response_model=APIResponse[list])
+async def managed_visibility(admin: CurrentAdmin):
+    """Super admin only: every sub-admin and broker with their switch state,
+    so one tier's whole client pool can be turned off from here."""
+    try:
+        return APIResponse(
+            data=await chart_level_service.list_managed_visibility(admin)
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
+
+
+@router.put("/visibility/managed/{target_id}", response_model=APIResponse[list])
+async def set_managed_visibility(
+    target_id: str, body: VisibilityIn, admin: CurrentAdmin
+):
+    """Pin one sub-admin's / broker's switch. `enabled: null` releases it and
+    hands control back to that tier."""
+    try:
+        return APIResponse(
+            data=await chart_level_service.set_visibility_for(
+                admin, target_id, body.enabled
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
 @router.get("", response_model=APIResponse[list])

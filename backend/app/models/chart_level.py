@@ -79,6 +79,12 @@ class ChartLevelVisibility(TimestampMixin):
 
     enabled: bool = True
 
+    # Set by the SUPER ADMIN on someone else's behalf. The owner then sees the
+    # switch but can't move it, and a locked row beats any nearer unlocked one
+    # — otherwise a broker under a blocked sub-admin could simply switch their
+    # own lines back on and the block would leak.
+    locked: bool = False
+
     class Settings:
         name = "chart_level_visibility"
         indexes = [
