@@ -333,6 +333,20 @@ export function pushLiveQuote(token: string, ltp: number, bid: number, ask: numb
 }
 
 /* ── Datafeed class ──────────────────────────────────────────────── */
+/**
+ * Decimal places an exchange tick implies. `tick_size` arrives as the string
+ * the exchange published ("0.0000100", "0.05", "1"), so counting its fraction
+ * digits is exact where float division is not. Capped at 8 — TradingView's
+ * own ceiling — and 2 when the value is missing or zero.
+ */
+function tickDecimals(tick: unknown): number {
+  const s = String(tick ?? "").trim();
+  if (!s || !(parseFloat(s) > 0)) return 2;
+  const dot = s.indexOf(".");
+  if (dot < 0) return 0;
+  return Math.min(8, s.slice(dot + 1).replace(/0+$/, "").length);
+}
+
 export class CustomDatafeed {
   private subscribers: Map<string, Subscriber> = new Map();
   private symbolCache: Map<string, SymbolMeta> = new Map();
@@ -392,19 +406,14 @@ export class CustomDatafeed {
         _symbolDetailCache.set(token, inst);
       }
       this.symbolCache.set(token, inst);
-      const tickSize = parseFloat(inst.tick_size) || 0.05;
       // TradingView's pricescale is "price units per whole" and must be a
-      // POWER OF TEN — it decides how many decimals the chart renders. The
-      // old `Math.round(1 / tickSize)` gave 20 for a 0.05 tick, which quantises
-      // every price to 0.05 steps: DOGE at 0.0812 and POL at 0.0906 collapsed
-      // onto the same two levels and the candles rendered as flat blocks.
-      // Round UP to the next power of ten so a 0.05 tick renders 2 decimals
-      // and a 0.0001 tick renders 4.
-      const rawScale = tickSize > 0 ? 1 / tickSize : 20;
-      const pricescale = Math.pow(
-        10,
-        Math.min(8, Math.max(0, Math.ceil(Math.log10(rawScale)))),
-      );
+      // POWER OF TEN — it decides how many decimals the chart renders.
+      // Count the decimals the tick string itself carries ("0.0000100" → 5,
+      // "0.05" → 2, "1" → 0) rather than rounding 1/tick: 1/0.00001 comes out
+      // of the float unit as 99999.999…, and ceil(log10()) then hands back a
+      // decimal that isn't the exchange's. Anything unparseable falls back to
+      // 2, which is what the old default tick gave.
+      const pricescale = Math.pow(10, tickDecimals(inst.tick_size));
       const crypto = isCryptoSymbol(token, inst);
       const extended = isExtendedHoursSymbol(token, inst);
       const is24h = crypto || extended;
@@ -427,7 +436,7 @@ export class CustomDatafeed {
         exchange: inst.exchange,
         listed_exchange: inst.exchange,
         minmov: 1,
-        pricescale: pricescale > 0 ? pricescale : 20,
+        pricescale,
         has_intraday: true,
         has_daily: true,
         has_weekly_and_monthly: true,

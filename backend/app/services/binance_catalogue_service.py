@@ -26,6 +26,7 @@ front of the user.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -222,6 +223,12 @@ async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
         base = str(by_symbol[contract]["baseAsset"]).upper()
         want_name = _NICE_NAMES.get(base, base)
         want_rank = rank_of.get(contract, 9999)
+        # The tick has to be refreshed too, not just set on insert. Rows that
+        # pre-date this sync (the old MetaAPI mirror, the seed) carry the
+        # 0.05 default, and `tick_size` is what the chart turns into its
+        # decimal count — so DOGE at 0.08123 drew on a 2-decimal axis and
+        # looked flat. Binance's PRICE_FILTER is the real increment.
+        want_tick = _tick_size(by_symbol[contract])
         # `trading_symbol` carries the contract the price comes from, so a
         # search for CLUSDT lands on USOIL and the row can show which
         # contract it is quoting.
@@ -229,12 +236,14 @@ async def sync_catalogue(*, dry_run: bool = False) -> dict[str, Any]:
             inst.name != want_name
             or getattr(inst, "feed_rank", 9999) != want_rank
             or inst.trading_symbol != contract
+            or Decimal(str(inst.tick_size)) != Decimal(want_tick)
         ):
             refreshed += 1
             if not dry_run:
                 inst.name = want_name
                 inst.feed_rank = want_rank
                 inst.trading_symbol = contract
+                inst.tick_size = Decimal128(want_tick)
                 await inst.save()
     existing_tokens = {i.token for i in existing}
 
