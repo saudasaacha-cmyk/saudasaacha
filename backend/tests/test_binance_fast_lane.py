@@ -71,9 +71,20 @@ def test_a_trade_beats_the_mid():
     assert f.get_tick("XAUUSD")["ltp"] == 4200.05  # mid, until a trade lands
     f._handle_book({"e": "aggTrade", "s": "XAUUSDT", "p": "4200.07", "E": 2})
     assert f.get_tick("XAUUSD")["ltp"] == 4200.07
-    # A later book update must not drag the price back to the mid.
+    # A book update right after the trade must not drag the price back to
+    # the mid…
     f._handle_book({"e": "bookTicker", "s": "XAUUSDT", "b": "4200.00", "a": "4200.10", "E": 3})
     assert f.get_tick("XAUUSD")["ltp"] == 4200.07
+
+
+def test_the_mid_takes_over_when_the_tape_goes_quiet():
+    """…but a contract can go ten seconds without a print, and holding a
+    stale trade price froze gold harder than the mid ever did."""
+    f = BinanceFuturesFeed()
+    f._handle_book({"e": "aggTrade", "s": "XAUUSDT", "p": "4200.07", "E": 1})
+    f._ticks["XAUUSDT"]["last_trade_ts"] = time.time() - bf._TRADE_LEAD_SEC - 1
+    f._handle_book({"e": "bookTicker", "s": "XAUUSDT", "b": "4201.00", "a": "4201.10", "E": 2})
+    assert f.get_tick("XAUUSD")["ltp"] == 4201.05
 
 
 def test_an_unwatched_symbol_still_has_a_price():

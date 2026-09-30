@@ -76,6 +76,9 @@ _HOT_CAP = 300
 # user still has open is re-requested well inside the window.
 _HOT_TTL_SEC = 900.0
 _FAST_LANE_INTERVAL_SEC = 5.0
+# How long a trade keeps ownership of the last price before the mid of the
+# book takes over again.
+_TRADE_LEAD_SEC = 3.0
 _SUB_CHUNK = 150
 # One lone print this far from the last one is garbage, not a move. Same
 # guard the Zerodha / Infoway / spot-Binance feeds carry.
@@ -376,10 +379,12 @@ class BinanceFuturesFeed:
             )
             return
         t["bid"], t["ask"] = bid, ask
-        # Mid stands in for the last price until a trade arrives. Symbols on
-        # the fast lane get @aggTrade and overwrite it with the real one;
-        # everything else only ever has the book to go on.
-        if not t.get("from_trade"):
+        # Whichever is more recent wins. A busy contract prints constantly
+        # and the trade price leads; a quiet one (gold at 09:00 UTC) can go
+        # ten seconds without a print, and pinning the last price to a stale
+        # trade froze it — worse than the mid it replaced. So the mid takes
+        # over once the trade tape goes quiet.
+        if time.time() - _f(t.get("last_trade_ts")) > _TRADE_LEAD_SEC:
             t["ltp"] = mid
         if t.get("open"):
             t["change"] = mid - _f(t["open"])
@@ -405,7 +410,7 @@ class BinanceFuturesFeed:
             )
             return
         t["ltp"] = price
-        t["from_trade"] = True
+        t["last_trade_ts"] = time.time()
         if t.get("open"):
             t["change"] = price - _f(t["open"])
             t["change_pct"] = t["change"] / _f(t["open"]) * 100.0

@@ -1556,6 +1556,7 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
     logger.info("market_tick_loop_started")
     await _warm_token_symbol_cache()
     _pass = 0
+    _pass_t0 = time.time()
     try:
         import time
 
@@ -1571,6 +1572,20 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
                 # 250 ms tick-loop cadence.
                 _pass += 1
                 cold_turn = _pass % _COLD_EVERY == 0
+                # Once a minute, say how the pump is actually doing. Pass
+                # rate is the number that decides how live a price looks,
+                # and it is invisible otherwise — it took a measurement to
+                # find it had fallen from 10/sec to 3.3 when the catalogue
+                # grew by 742 instruments.
+                if _pass % 600 == 0:
+                    _elapsed = time.time() - _pass_t0
+                    logger.info(
+                        "market_tick_pump passes_per_sec=%.1f subscribed=%d cold=%d",
+                        600 / _elapsed if _elapsed > 0 else 0,
+                        len(_subscribed),
+                        len(_cold_tokens),
+                    )
+                    _pass_t0 = time.time()
                 pending = [
                     (token, q)
                     for token, q in list(_state.items())
