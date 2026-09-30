@@ -37,7 +37,12 @@ def catalogue(monkeypatch):
 
         monkeypatch.setattr(Instrument, "find", classmethod(lambda cls, *a, **k: _Q(rows)))
 
-        async def _fwd(tokens):
+        async def _fwd(tokens, *, hot: bool = True):
+            # `hot` says whether a viewer asked for these. This loop is
+            # housekeeping, so it must pass False — marking ~740 symbols as
+            # watched would spend the whole fast-lane budget on rows nobody
+            # has open.
+            assert hot is False, "the catalogue reconcile is not a viewer"
             forwarded.append(list(tokens))
 
         monkeypatch.setattr(mds, "_forward_feed_subscription", _fwd)
