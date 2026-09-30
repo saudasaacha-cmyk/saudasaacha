@@ -7,14 +7,14 @@ import { WS_URL } from "@/lib/constants";
 
 /**
  * Per-WS-connection cap on live token subscriptions. Mirrors the backend
- * `WS_MAX_SUBSCRIPTIONS_PER_CONN` (app/core/config.py). When the caller
- * passes more than this many tokens we trim to the first N, toast the
- * user, and never put the over-flow on the wire — the server would
- * reject the whole batch anyway and the user wouldn't see any quote
- * stream until they manually trimmed. The pre-trim keeps the first 70
- * streaming so the panel is usable while the user prunes the watchlist.
+ * `WS_MAX_SUBSCRIPTIONS_PER_CONN` (app/core/config.py) — the two MUST
+ * agree, or the user is told to prune a watchlist that the server would
+ * have accepted. When the caller passes more we trim to the first N,
+ * toast, and never put the overflow on the wire: the server rejects the
+ * whole batch, so the panel would show no quotes at all until the user
+ * trimmed by hand.
  */
-const MAX_SUBSCRIPTIONS = 70;
+const MAX_SUBSCRIPTIONS = 150;
 
 export type MarketQuote = {
   token: string;

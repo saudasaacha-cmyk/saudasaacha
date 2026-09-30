@@ -142,16 +142,20 @@ class Settings(BaseSettings):
     # set to 0 to disable the limiter entirely.
     WS_MAX_CONNECTIONS_PER_IP: int = 100
     # Per-connection cap on instrument-token subscriptions on the
-    # `/ws/marketdata` socket. Each subscribed token costs one slot in
-    # the in-process ``MarketTickHub`` fanout map and one entry in the
-    # upstream Zerodha / Infoway ticker — a power-user holding 200+
-    # symbols in one watchlist would otherwise multiply tick-publish
-    # work across the whole worker pool. 70 fits a typical user's full
-    # watchlist + the option-chain expansion they have open at once,
-    # with headroom; bigger requests get rejected with an explicit
-    # `subscription_limit` error frame so the frontend can prompt the
-    # user to unsubscribe something first.
-    WS_MAX_SUBSCRIPTIONS_PER_CONN: int = 70
+    # `/ws/marketdata` socket. Each subscribed token costs a slot in the
+    # in-process ``MarketTickHub`` fanout map; bigger requests are
+    # rejected with a `subscription_limit` frame so the frontend can ask
+    # the user to unsubscribe something.
+    #
+    # Was 70, which also counted an entry in the upstream Zerodha /
+    # Infoway ticker. That second cost is gone for everything Binance
+    # quotes: one `!bookTicker` stream carries the whole venue, and the
+    # per-symbol fast lane has its own budget server-side. 70 was below
+    # what one screen now asks for — the instruments panel alone browses
+    # 100 rows — so a user got "30 symbols will not stream" just for
+    # opening the Stocks tab. 150 covers that browse plus their watchlist
+    # and an open option chain on the same socket.
+    WS_MAX_SUBSCRIPTIONS_PER_CONN: int = 150
 
     # ── JWT ──────────────────────────────────────────────────────────
     # Refresh-token TTL widened from 7 → 30 days so the mobile app keeps
