@@ -242,6 +242,12 @@ class Settings(BaseSettings):
     # falls back to the INFOWAY_DEFAULT_CRYPTO list (same USDT-pair names).
     BINANCE_CRYPTO_FEED: bool = False
     BINANCE_CRYPTO_SYMBOLS: str = ""
+    # ── Binance USDT-M futures feed (free public WS, no API key) ─────────
+    # The source for metals, energy, indices, single stocks and crypto. One
+    # `!bookTicker` subscription carries every contract Binance lists, so
+    # there is no symbol list to configure and no per-symbol cost. On by
+    # default — turning it off leaves those segments with no feed at all.
+    BINANCE_FUTURES_FEED: bool = True
     # ── MetaAPI (MetaTrader) feed for forex / metals / indices / commodities ──
     # When True, those segments get their live price from a connected MT4/MT5
     # account via metaapi.cloud instead of Infoway (crypto stays on Binance).
@@ -381,6 +387,7 @@ class Settings(BaseSettings):
         "RUN_FEED_LOOP",
         "INFOWAY_AUTO_CONNECT",
         "BINANCE_CRYPTO_FEED",
+        "BINANCE_FUTURES_FEED",
         "METAAPI_FEED",
         "SMTP_TLS",
         "LOG_JSON",

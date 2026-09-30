@@ -487,26 +487,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             except Exception:
                 logger.exception("binance_feed_auto_start_failed")
 
-            # MetaAPI (forex / metals / indices / commodities) feed — leader-only.
-            # When METAAPI_FEED=true it supplies those segments in place of
-            # Infoway (Infoway stays the automatic fallback). No-op when off.
+            # Binance USDT-M futures — metals, energy, indices, single stocks
+            # and crypto, all on one `!bookTicker` subscription. Leader-only,
+            # like every other feed. No symbol list and no per-symbol
+            # subscribe: the stream carries the whole exchange, which is what
+            # made replacing MetaAPI (100-symbol cap, per-symbol asks) worth
+            # doing.
             try:
-                from app.services.metaapi_service import metaapi as _metaapi
+                from app.services.binance_futures_service import binance_futures
 
                 if _run_global:
-                    # start() self-skips when the admin panel / .env has it off.
-                    await _metaapi.start()
-                    # Connect + disconnect come from the admin API on another
-                    # worker; the pool lives here, so listen for those commands.
-                    subtasks.append(
-                        _asyncio.create_task(
-                            _supervise("metaapi_cmd_listener", _metaapi.cmd_listener),
-                            name="metaapi_cmd_listener",
-                        )
-                    )
-                    logger.info("metaapi_feed_auto_started")
+                    await binance_futures.start()
+                    logger.info("binance_futures_feed_auto_started")
             except Exception:
-                logger.exception("metaapi_feed_auto_start_failed")
+                logger.exception("binance_futures_feed_auto_start_failed")
 
             # Zerodha live WS pool — leader-only. The instrument CATALOG warm
             # already ran on EVERY worker in `_zerodha_boot` (search needs it
@@ -1214,11 +1208,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     except Exception:
         pass
 
-    # Stop MetaAPI feed cleanly
+    # Stop the Binance futures feed cleanly
     try:
-        from app.services.metaapi_service import metaapi
+        from app.services.binance_futures_service import binance_futures
 
-        await metaapi.stop()
+        await binance_futures.stop()
     except Exception:
         pass
 

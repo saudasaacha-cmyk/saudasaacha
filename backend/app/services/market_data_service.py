@@ -442,18 +442,19 @@ async def _infoway_overlay(token: str, base_quote: dict[str, Any]) -> dict[str, 
                     source = "binance"
         except Exception:
             live = None
-        # FOREX / METALS / INDICES / COMMODITIES → MetaAPI when enabled. Only the
-        # symbols the MT account actually streams resolve here; crypto / NSE
-        # return None and fall through. Infoway stays the automatic fallback.
+        # METALS / ENERGY / INDICES / STOCKS / CRYPTO → Binance USDT-M
+        # futures. One socket carries every contract the exchange lists, so
+        # this resolves for anything Binance quotes and returns None for the
+        # rest (NSE / MCX), which fall through untouched.
         if live is None:
             try:
-                from app.services.metaapi_service import metaapi
+                from app.services.binance_futures_service import binance_futures
 
-                if metaapi.is_enabled():
-                    m = metaapi.get_tick(sym)
+                if binance_futures.is_enabled():
+                    m = binance_futures.get_tick(sym)
                     if m and float(m.get("ltp") or 0) > 0:
                         live = m
-                        source = "metaapi"
+                        source = "binance_futures"
             except Exception:
                 live = None
         if live is None:
@@ -574,7 +575,7 @@ async def _overlay_all(
     except Exception:
         logger.exception("infoway_overlay_failed", extra={"token": token})
         after_infoway = base
-    if after_infoway.get("source") in ("infoway", "binance", "metaapi"):
+    if after_infoway.get("source") in ("infoway", "binance", "binance_futures"):
         return await _apply_admin_spread(token, after_infoway)
     # Per-token negative cache: a token with no live WS tick whose Kite REST
     # `/quote` snapshot just timed out is almost certainly illiquid / beyond
@@ -1039,16 +1040,9 @@ async def _forward_feed_subscription(tokens: list[str]) -> None:
             await infoway.subscribe(infoway_codes)
         except Exception:  # pragma: no cover
             logger.debug("feed_forward_infoway_failed", exc_info=True)
-        # MetaAPI is the primary feed for forex/metals/indices/commodities.
-        # Subscribe the same symbol-style tokens upstream so a watchlist symbol
-        # outside the startup list gets a live terminal_state price instead of 0.
-        try:
-            from app.services.metaapi_service import metaapi
-
-            if metaapi.is_enabled():
-                await metaapi.subscribe(infoway_codes)
-        except Exception:  # pragma: no cover
-            logger.debug("feed_forward_metaapi_failed", exc_info=True)
+        # Nothing to forward for Binance: `!bookTicker` already streams every
+        # contract the exchange lists, so a symbol is live before anyone asks
+        # for it. This is where MetaAPI needed a per-symbol subscribe.
     if numeric:
         try:
             from app.services.zerodha_service import zerodha
@@ -1343,23 +1337,8 @@ def subscribe(tokens: list[str]) -> None:
         except Exception:
             logger.debug("infoway_on_demand_subscribe_failed", exc_info=True)
 
-        # MetaAPI is the PRIMARY feed for forex/metals/indices/commodities. On
-        # the feed leader, ensure the symbol is streamed by the MT terminal so
-        # `get_tick` returns a live price (no-ops on non-leaders where MetaAPI
-        # isn't connected — those forward via `feed:subscribe` above).
-        try:
-            from app.services.metaapi_service import metaapi
-
-            if metaapi.is_enabled():
-                loop = asyncio.get_running_loop()
-                loop.create_task(
-                    metaapi.subscribe(infoway_codes),
-                    name="metaapi_on_demand_subscribe",
-                )
-        except RuntimeError:
-            pass
-        except Exception:
-            logger.debug("metaapi_on_demand_subscribe_failed", exc_info=True)
+        # Binance needs no on-demand subscribe — the single `!bookTicker`
+        # stream already carries every contract.
 
 
 def unsubscribe(tokens: list[str]) -> None:
