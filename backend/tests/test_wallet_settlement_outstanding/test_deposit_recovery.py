@@ -1,3 +1,24 @@
+"""Credits never clear `settlement_outstanding` — it is informational only.
+
+This file used to assert the opposite: a deposit, a bonus, an admin
+adjustment or a margin release would all pay the outstanding down before
+touching `available_balance`. That rule was removed deliberately — per the
+operator, "balance kabhi negative na ho, user nahi bharega": the field
+records what the platform could not recover from a stop-out, and the user is
+not liable to top it up out of a later deposit.
+
+Recovery on margin release went the same way, and for a sharper reason: a
+race could credit `used_margin` back while `available_balance` lagged, so
+the recovery branch booked a phantom outstanding against a wallet that was
+not actually short — the CL30479363 incident, where a user ended up with a
+healthy balance AND a stranded outstanding at the same time.
+
+The tests below pin the current rule from both sides, so re-introducing the
+recovery branch fails here rather than in production.
+
+    pytest -q backend/tests/test_wallet_settlement_outstanding/test_deposit_recovery.py
+"""
+
 from decimal import Decimal
 
 import pytest
@@ -7,10 +28,18 @@ from app.models.transaction import TransactionType, WalletTransaction
 from app.models.wallet import Wallet
 from app.services import wallet_service
 
+# Every credit type that reaches `adjust`. None of them may touch the
+# outstanding — listed out so a new one is a deliberate decision.
+CREDIT_TYPES = [
+    TransactionType.DEPOSIT,
+    TransactionType.BONUS,
+    TransactionType.ADJUSTMENT,
+    TransactionType.REVERSAL,
+]
+
 
 @pytest.mark.asyncio
-async def test_deposit_no_outstanding_credits_normally(db, user, wallet):
-    """Deposit with zero outstanding: full amount credits available_balance."""
+async def test_deposit_with_no_outstanding_credits_normally(db, user, wallet):
     await wallet_service.adjust(
         user_id=user.id,
         amount=Decimal("2000"),
@@ -23,62 +52,30 @@ async def test_deposit_no_outstanding_credits_normally(db, user, wallet):
 
 
 @pytest.mark.asyncio
-async def test_deposit_smaller_than_outstanding_full_recovery(db, user, wallet):
-    """Outstanding 1000, deposit 600 → outstanding becomes 400, balance unchanged."""
+@pytest.mark.parametrize("txn_type", CREDIT_TYPES)
+async def test_a_credit_leaves_the_outstanding_alone(db, user, wallet, txn_type):
+    """The whole credit lands in available_balance; the outstanding is
+    exactly as it was."""
     wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("1000")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("600"),
-        transaction_type=TransactionType.DEPOSIT,
-        narration="partial recovery deposit",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("0")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("400")
-
-
-@pytest.mark.asyncio
-async def test_deposit_exactly_equals_outstanding(db, user, wallet):
-    """Outstanding 500, deposit 500 → outstanding cleared, balance unchanged."""
-    wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("500")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("500"),
-        transaction_type=TransactionType.DEPOSIT,
-        narration="exact recovery",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("0")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("0")
-
-
-@pytest.mark.asyncio
-async def test_deposit_larger_than_outstanding_splits(db, user, wallet):
-    """Outstanding 300, deposit 1000 → outstanding cleared, balance += 700."""
-    wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("300")
+    wallet.settlement_outstanding = Decimal128("400")
     await wallet.save()
 
     await wallet_service.adjust(
         user_id=user.id,
         amount=Decimal("1000"),
-        transaction_type=TransactionType.DEPOSIT,
-        narration="recovery + credit",
+        transaction_type=txn_type,
+        narration=f"{txn_type.value} credit",
     )
     w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("700")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("0")
+    assert Decimal(str(w.available_balance)) == Decimal("1000")
+    assert Decimal(str(w.settlement_outstanding)) == Decimal("400")
 
 
 @pytest.mark.asyncio
-async def test_deposit_writes_recovery_transaction(db, user, wallet):
-    """When recovery happens, a SETTLEMENT_OUTSTANDING_RECOVERY transaction is logged."""
+async def test_a_credit_writes_no_recovery_ledger_entry(db, user, wallet):
+    """SETTLEMENT_OUTSTANDING_RECOVERY is written when a deposit actually
+    pays an outstanding down. Nothing does that any more, so a deposit must
+    leave one ledger row and only one."""
     wallet.available_balance = Decimal128("0")
     wallet.settlement_outstanding = Decimal128("400")
     await wallet.save()
@@ -89,99 +86,16 @@ async def test_deposit_writes_recovery_transaction(db, user, wallet):
         transaction_type=TransactionType.DEPOSIT,
         narration="user deposit",
     )
-    txns = await WalletTransaction.find(WalletTransaction.user_id == user.id).to_list()
-    types = [t.transaction_type for t in txns]
-    assert TransactionType.SETTLEMENT_OUTSTANDING_RECOVERY in types
-    assert TransactionType.DEPOSIT in types
+    types = [
+        t.transaction_type
+        for t in await WalletTransaction.find(WalletTransaction.user_id == user.id).to_list()
+    ]
+    assert types == [TransactionType.DEPOSIT]
 
 
 @pytest.mark.asyncio
-async def test_excluded_types_do_not_trigger_recovery(db, user, wallet):
-    """REVERSAL and the SETTLEMENT_OUTSTANDING_* accounting types are
-    explicitly excluded from recovery (would create accounting loops).
-    All OTHER credit types — DEPOSIT, BONUS, ADJUSTMENT, PROMO, etc. —
-    DO trigger recovery."""
-    wallet.available_balance = Decimal128("100")
-    wallet.settlement_outstanding = Decimal128("400")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("500"),
-        transaction_type=TransactionType.REVERSAL,
-        narration="reversal of prior debit",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("600")  # 100 + 500
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("400")  # untouched
-
-
-# ── Recovery now fires for ANY credit type (Option C broadening) ────
-
-
-@pytest.mark.asyncio
-async def test_bonus_credit_recovers_outstanding(db, user, wallet):
-    """BONUS credits clear outstanding before crediting balance — same rule
-    as DEPOSIT. Previously BONUS bypassed recovery entirely."""
-    wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("400")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("1000"),
-        transaction_type=TransactionType.BONUS,
-        narration="referral bonus",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("600")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("0")
-
-
-@pytest.mark.asyncio
-async def test_adjustment_credit_recovers_outstanding(db, user, wallet):
-    """Admin manual ADJUSTMENT credit clears outstanding too."""
-    wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("500")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("200"),
-        transaction_type=TransactionType.ADJUSTMENT,
-        narration="manual credit",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("0")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("300")
-
-
-@pytest.mark.asyncio
-async def test_reversal_credit_does_not_recover_outstanding(db, user, wallet):
-    """REVERSAL is excluded — it would create accounting loops with the
-    transaction it's reversing. Reversal credits bypass recovery."""
-    wallet.available_balance = Decimal128("0")
-    wallet.settlement_outstanding = Decimal128("500")
-    await wallet.save()
-
-    await wallet_service.adjust(
-        user_id=user.id,
-        amount=Decimal("300"),
-        transaction_type=TransactionType.REVERSAL,
-        narration="reversing a prior debit",
-    )
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.available_balance)) == Decimal("300")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("500")
-
-
-# ── Margin release also recovers outstanding ─────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_release_margin_recovers_outstanding_first(db, user, wallet):
-    """When margin is released after a force-debit booked dues, the freed
-    margin clears the outstanding before any remainder credits balance."""
+async def test_released_margin_goes_straight_back_to_balance(db, user, wallet):
+    """Not into the outstanding first. This is the CL30479363 guard."""
     wallet.available_balance = Decimal128("0")
     wallet.used_margin = Decimal128("3000")
     wallet.settlement_outstanding = Decimal128("1000")
@@ -190,33 +104,13 @@ async def test_release_margin_recovers_outstanding_first(db, user, wallet):
     await wallet_service.release_margin(user.id, Decimal("3000"))
 
     w = await Wallet.find_one(Wallet.user_id == user.id)
-    # Outstanding cleared, balance gets the remaining 2000
     assert Decimal(str(w.used_margin)) == Decimal("0")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("0")
-    assert Decimal(str(w.available_balance)) == Decimal("2000")
+    assert Decimal(str(w.available_balance)) == Decimal("3000")
+    assert Decimal(str(w.settlement_outstanding)) == Decimal("1000")
 
 
 @pytest.mark.asyncio
-async def test_release_margin_partial_recovery_when_margin_under_outstanding(db, user, wallet):
-    """If released margin is less than outstanding, all of it goes to recovery
-    and the balance is unchanged."""
-    wallet.available_balance = Decimal128("0")
-    wallet.used_margin = Decimal128("500")
-    wallet.settlement_outstanding = Decimal128("2000")
-    await wallet.save()
-
-    await wallet_service.release_margin(user.id, Decimal("500"))
-
-    w = await Wallet.find_one(Wallet.user_id == user.id)
-    assert Decimal(str(w.used_margin)) == Decimal("0")
-    assert Decimal(str(w.available_balance)) == Decimal("0")
-    assert Decimal(str(w.settlement_outstanding)) == Decimal("1500")
-
-
-@pytest.mark.asyncio
-async def test_release_margin_no_outstanding_credits_full_amount(db, user, wallet):
-    """Backward-compat: when outstanding is 0, release_margin behaves exactly
-    as before — credits the full released amount to available_balance."""
+async def test_release_margin_with_no_outstanding_is_unchanged(db, user, wallet):
     wallet.available_balance = Decimal128("1000")
     wallet.used_margin = Decimal128("500")
     wallet.settlement_outstanding = Decimal128("0")
