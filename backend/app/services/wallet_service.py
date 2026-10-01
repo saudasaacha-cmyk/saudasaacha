@@ -238,11 +238,25 @@ async def adjust(
         before = to_decimal(w.available_balance)
         after = add(before, amt)
 
-        # Withdrawals AND admin manual adjustments must NEVER book
-        # settlement_outstanding — if the balance is insufficient the
-        # caller should have rejected the request upfront.
+        # Withdrawals, admin manual adjustments and P&L-sharing payouts must
+        # NEVER book settlement_outstanding — if the balance is insufficient
+        # the caller should have rejected the request upfront.
+        #
+        # The floor-at-0 rule below exists for a TRADER whose loss outran
+        # their balance ("user nahi bharega"). A sharing payout is not a
+        # loss, it is a transfer: the payer was floored at 0 while the payee
+        # was credited in full, so the settlement completed and the platform
+        # gained spendable balance that nobody paid in. `settle_period`
+        # already has an `except InsufficientFundsError -> FAILED` branch and
+        # retries FAILED rows on every tick; it was simply unreachable
+        # because this list didn't name the type.
         if (
-            transaction_type in (TransactionType.WITHDRAWAL, TransactionType.ADJUSTMENT)
+            transaction_type
+            in (
+                TransactionType.WITHDRAWAL,
+                TransactionType.ADJUSTMENT,
+                TransactionType.PNL_SHARING_PAYOUT,
+            )
             and after < ZERO
         ):
             raise InsufficientFundsError(
