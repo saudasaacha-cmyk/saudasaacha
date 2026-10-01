@@ -57,8 +57,8 @@ def _fake_seg(name: str, **overrides):
         ("NFO_FUTURE", "NSE_FUT"),
         ("BFO_OPTION", "BSE_OPT"),
         ("BFO_FUTURE", "BSE_FUT"),
-        # Infoway segments — instrument segment IS the admin row name
-        ("FOREX", "FOREX"),
+        # International segments — instrument segment IS the admin row name.
+        # FOREX is gone: see test_forex_retired.py.
         ("STOCKS", "STOCKS"),
         ("INDICES", "INDICES"),
         ("COMMODITIES", "COMMODITIES"),

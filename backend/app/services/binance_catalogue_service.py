@@ -43,7 +43,7 @@ _TICKER_24H_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
 
 # Segments this sync owns. An instrument outside these is none of its
 # business — Zerodha's NSE / MCX rows must never be touched.
-MANAGED_SEGMENTS = ("COMMODITIES", "STOCKS", "INDICES", "CRYPTO_SPOT", "FOREX")
+MANAGED_SEGMENTS = ("COMMODITIES", "STOCKS", "INDICES", "CRYPTO_SPOT")
 
 _EQUITY_TYPES = {"EQUITY", "HK_EQUITY", "KR_EQUITY", "CN_EQUITY", "PREMARKET"}
 

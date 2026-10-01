@@ -330,7 +330,7 @@ async def repair_index_lots(admin: CurrentAdmin):
         get_infoway_lot_size,
     )
 
-    infoway_segments = ("FOREX", "STOCKS", "INDICES", "COMMODITIES")
+    infoway_segments = ("STOCKS", "INDICES", "COMMODITIES")
     crypto_like = await Instrument.find({"segment": {"$regex": "CRYPTO"}}).to_list()
     infoway_rows = await Instrument.find(
         {"segment": {"$in": list(infoway_segments)}}

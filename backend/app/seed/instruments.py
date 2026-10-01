@@ -15,6 +15,7 @@ import logging
 
 from app.models._base import Exchange, InstrumentType
 from app.models.instrument import Instrument
+from app.models.watchlist import WatchlistItem
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +77,6 @@ _CRYPTO = [
     ("BNBUSD", "Binance Coin / USD"),
     ("ADAUSD", "Cardano / USD"),
     ("MATICUSD", "Polygon / USD"),
-]
-
-_FOREX = [
-    ("EURUSD", "Euro / US Dollar"),
-    ("GBPUSD", "Pound / US Dollar"),
-    ("USDJPY", "US Dollar / Yen"),
-    ("AUDUSD", "Aussie / US Dollar"),
-    ("USDCAD", "US Dollar / Canadian Dollar"),
-    ("USDCHF", "US Dollar / Swiss Franc"),
-    ("NZDUSD", "Kiwi / US Dollar"),
-    ("USDINR", "US Dollar / Indian Rupee"),
 ]
 
 # Spot metals + energy — segment "COMMODITIES" to match the live Infoway
@@ -199,20 +189,6 @@ async def seed_instruments() -> None:
                 name=name,
                 exchange=Exchange.CRYPTO,
                 segment="CRYPTO_SPOT",
-                instrument_type=InstrumentType.SPOT,
-                lot_size=1,
-            )
-        )
-
-    for symbol, name in _FOREX:
-        docs.append(
-            Instrument(
-                token=f"FX_{symbol}",
-                symbol=symbol,
-                trading_symbol=symbol,
-                name=name,
-                exchange=Exchange.CDS,
-                segment="FOREX",
                 instrument_type=InstrumentType.SPOT,
                 lot_size=1,
             )
@@ -445,25 +421,6 @@ async def _seed_infoway_pairs_if_missing() -> None:
             )
         )
 
-    # Forex
-    for symbol, name in _FOREX:
-        token = f"FX_{symbol}"
-        existing = await Instrument.find_one(Instrument.token == token)
-        if existing is not None:
-            continue
-        docs.append(
-            Instrument(
-                token=token,
-                symbol=symbol,
-                trading_symbol=symbol,
-                name=name,
-                exchange=Exchange.CDS,
-                segment="FOREX",
-                instrument_type=InstrumentType.SPOT,
-                lot_size=1,
-            )
-        )
-
     # Spot metals + energy (commodities). Raw-code token so the live Infoway
     # mirror merges in place.
     for symbol, name in _COMMODITIES:
@@ -487,32 +444,36 @@ async def _seed_infoway_pairs_if_missing() -> None:
         await Instrument.insert_many(docs)
         logger.info("seeded_infoway_pairs", extra={"count": len(docs)})
 
-    # ── Dedupe + heal legacy seeded forex rows ───────────────────────────
-    # The live Infoway mirror inserts each pair under its RAW code (token
-    # "EURUSD"); the legacy seed inserted a shim ("FX_EURUSD"). When BOTH
-    # exist the shim has no live feed, so the Forex tab showed a duplicate
-    # 0.0000 row next to the real one. So:
-    #   1) DELETE every FX_<CODE> shim that has a live <CODE> row (dedupe).
-    #   2) HEAL the remaining shims (no live equivalent — Infoway off) from
-    #      the old "CDS_FUTURE" segment to "FOREX" so they still show.
-    # Idempotent + cheap; scoped to FX_* tokens so genuine NSE currency
-    # derivatives (if any) are untouched.
+    # ── Retire the forex segment ─────────────────────────────────────────
+    # Forex only ever had a feed through MetaAPI, which is gone, and Binance
+    # lists a single FX pair. What was left was a segment the admin could
+    # configure, the user could see, and nobody could get a price for.
+    #
+    # Deleting the instruments is safe BECAUSE nothing traded them — checked
+    # before writing this: 8 rows, 0 orders, 0 trades, 0 positions, 0
+    # watchlist items — with the field names checked against real rows
+    # first, because a typo'd field name counts zero for everything. The
+    # watchlist sweep still runs so a favourite added later, or on another
+    # deployment, doesn't leave a row pointing at nothing. Idempotent.
     try:
         coll = Instrument.get_motor_collection()
-        deleted = 0
-        async for fx in coll.find({"token": {"$regex": "^FX_"}}):
-            raw = str(fx.get("token", ""))[3:]
-            if raw and await coll.find_one({"token": raw}):
-                await coll.delete_one({"_id": fx["_id"]})
-                deleted += 1
-        heal = await coll.update_many(
-            {"token": {"$regex": "^FX_"}, "segment": "CDS_FUTURE"},
-            {"$set": {"segment": "FOREX"}},
-        )
-        if deleted or heal.modified_count:
+        gone = [
+            d["token"]
+            async for d in coll.find({"segment": "FOREX"}, {"token": 1})
+        ]
+        if gone:
+            # Watchlist rows live in their OWN collection keyed by
+            # `instrument_token` — they are not an array on the watchlist.
+            pulled = await WatchlistItem.get_motor_collection().delete_many(
+                {"instrument_token": {"$in": gone}}
+            )
+            res = await coll.delete_many({"segment": "FOREX"})
             logger.info(
-                "deduped_forex_rows",
-                extra={"deleted_shims": deleted, "healed": heal.modified_count},
+                "retired_forex_segment",
+                extra={
+                    "deleted": res.deleted_count,
+                    "watchlist_items": pulled.deleted_count,
+                },
             )
     except Exception:
-        logger.exception("forex_dedupe_failed")
+        logger.exception("forex_retire_failed")

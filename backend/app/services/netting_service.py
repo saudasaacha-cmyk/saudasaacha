@@ -80,7 +80,7 @@ async def _resolve_super_admin_id() -> PydanticObjectId | None:
 # Admin matrix rows whose instruments don't settle daily — no separate
 # overnight margin exists. The resolver always reads the *Intraday* column
 # for these rows and the admin UI greys out the overnight cells.
-INTRADAY_ONLY_ADMIN_ROWS = frozenset({"FOREX", "STOCKS", "INDICES", "COMMODITIES", "CRYPTO"})
+INTRADAY_ONLY_ADMIN_ROWS = frozenset({"STOCKS", "INDICES", "COMMODITIES", "CRYPTO"})
 
 # Module-local debounce for "netting_eff:*" wipes. The admin Segment Matrix
 # fires N parallel PUTs (one per dirty segment); without this each call
@@ -149,7 +149,6 @@ SEGMENT_DEFAULTS: list[dict[str, Any]] = [
     {"name": "BSE_OPT", "displayName": "BSE OPT", "lotApplies": True, "qtyApplies": False, "optionApplies": True, "expiryHoldApplies": True, "futureApplies": False},
     {"name": "MCX_FUT", "displayName": "MCX FUT", "lotApplies": True, "qtyApplies": False, "optionApplies": False, "expiryHoldApplies": True, "futureApplies": True},
     {"name": "MCX_OPT", "displayName": "MCX OPT", "lotApplies": True, "qtyApplies": False, "optionApplies": True, "expiryHoldApplies": True, "futureApplies": False},
-    {"name": "FOREX", "displayName": "Forex", "lotApplies": True, "qtyApplies": False, "optionApplies": False, "expiryHoldApplies": False, "futureApplies": False},
     {"name": "STOCKS", "displayName": "Stocks", "lotApplies": True, "qtyApplies": False, "optionApplies": False, "expiryHoldApplies": False, "futureApplies": False},
     {"name": "INDICES", "displayName": "Indices", "lotApplies": True, "qtyApplies": False, "optionApplies": False, "expiryHoldApplies": False, "futureApplies": False},
     {"name": "COMMODITIES", "displayName": "Commodities", "lotApplies": True, "qtyApplies": False, "optionApplies": False, "expiryHoldApplies": False, "futureApplies": False},
@@ -164,7 +163,14 @@ SEGMENT_DEFAULTS: list[dict[str, Any]] = [
 # collapsed into a single CRYPTO row, so the old names are retired here
 # to drop them along with any dangling script / per-user overrides on
 # the next boot.
-RETIRED_SEGMENT_NAMES: tuple[str, ...] = ("CRYPTO_PERPETUAL", "CRYPTO_OPTIONS")
+# FOREX joins them: the only feed that ever carried it was MetaAPI, which is
+# gone, and Binance lists exactly one FX pair. A segment with no instruments
+# is a row the admin can configure and nobody can trade.
+RETIRED_SEGMENT_NAMES: tuple[str, ...] = (
+    "CRYPTO_PERPETUAL",
+    "CRYPTO_OPTIONS",
+    "FOREX",
+)
 
 
 # ── Seeding ─────────────────────────────────────────────────────────
@@ -179,10 +185,6 @@ async def seed_default_segments() -> int:
         if spec["name"].endswith("_EQ"):
             defaults["commissionType"] = "per_crore"
             defaults["commission"] = 300.0
-        if spec["name"] == "FOREX":
-            defaults["spreadType"] = "floating"
-            defaults["minLots"] = 0.01
-            defaults["orderLots"] = 0.01
         if spec["name"].startswith("CRYPTO"):
             defaults["minLots"] = 0.001
             defaults["orderLots"] = 0.001
@@ -307,6 +309,16 @@ async def cleanup_retired_segments() -> int:
         ).to_list()
         for u in user_ovs:
             await u.delete()
+            removed += 1
+        # …and the super-admin pool override, which this loop used to walk
+        # straight past. It is the same dangling row by another name, and
+        # left behind it would keep answering the resolver for a segment
+        # that no longer exists.
+        sa_ovs = await SuperAdminSegmentOverride.find(
+            SuperAdminSegmentOverride.segment_name == name
+        ).to_list()
+        for sa in sa_ovs:
+            await sa.delete()
             removed += 1
     if removed:
         logger.info("netting_retired_segments_cleaned", extra={"count": removed})
@@ -1859,9 +1871,6 @@ _SEGMENT_NAME_MAP: dict[str, str] = {
     "MCX_FUTURE": "MCX_FUT",
     "MCX_OPTION_BUY": "MCX_OPT",
     "MCX_OPTION_SELL": "MCX_OPT",
-    "CDS_FUTURE": "FOREX",
-    "CDS_OPTION_BUY": "FOREX",
-    "CDS_OPTION_SELL": "FOREX",
     # Every crypto instrument resolves to the single CRYPTO admin row.
     "CRYPTO_SPOT": "CRYPTO",
     "CRYPTO_FUTURE": "CRYPTO",
@@ -1870,7 +1879,6 @@ _SEGMENT_NAME_MAP: dict[str, str] = {
     # The instrument segment value already matches the admin row name —
     # we map them through explicitly so the resolver doesn't fall back
     # to the synthetic permissive defaults.
-    "FOREX": "FOREX",
     "STOCKS": "STOCKS",
     "INDICES": "INDICES",
     "COMMODITIES": "COMMODITIES",

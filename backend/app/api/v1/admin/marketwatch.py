@@ -70,7 +70,6 @@ _SEG_MAP: dict[str, list[str]] = {
     "MCX_OPTIONS":    ["MCX_OPTION_BUY", "MCX_OPTION_SELL"],
     "CRYPTO_OPTIONS": ["CRYPTO_OPTION_BUY", "CRYPTO_OPTION_SELL"],
     "CRYPTO":         ["CRYPTO_SPOT", "CRYPTO_FUTURE", "CRYPTO_PERPETUAL"],
-    "FOREX":          ["FOREX"],
     "STOCKS":         ["STOCKS"],
     "INDICES":        ["INDICES"],
     "COMMODITIES":    ["COMMODITIES"],

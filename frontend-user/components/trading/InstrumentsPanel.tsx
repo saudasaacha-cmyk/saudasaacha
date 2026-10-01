@@ -57,7 +57,6 @@ const BUCKETS: Bucket[] = [
   // chips below, so these top-level filters never mix the two. Each
   // segment string here matches the value `_classify_infoway_code` writes
   // to `Instrument.segment` when mirroring Infoway subscriptions.
-  { key: "forex", label: "Forex", group: "asset", mode: "filter", segments: ["FOREX"], adminRows: ["FOREX"] },
   { key: "stocks", label: "Stocks", group: "asset", mode: "filter", segments: ["STOCKS"], adminRows: ["STOCKS"] },
   { key: "indices", label: "Indices", group: "asset", mode: "filter", segments: ["INDICES"], adminRows: ["INDICES"] },
   { key: "commodities", label: "Commodities", group: "asset", mode: "filter", segments: ["COMMODITIES"], adminRows: ["COMMODITIES"] },

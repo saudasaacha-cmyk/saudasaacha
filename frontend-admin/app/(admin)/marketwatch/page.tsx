@@ -52,7 +52,6 @@ const BUCKETS: Bucket[] = [
   { key: "MCX_OPTIONS",    label: "MCX Options" },
   { key: "CRYPTO_OPTIONS", label: "Crypto Options" },
   { key: "CRYPTO",         label: "Crypto" },
-  { key: "FOREX",          label: "Forex" },
   { key: "STOCKS",         label: "Stocks" },
   { key: "INDICES",        label: "Indices" },
   { key: "COMMODITIES",    label: "Commodities" },
