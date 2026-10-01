@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { getAccessToken } from "@/lib/api";
+import { ensureFreshAccessToken, getAccessToken } from "@/lib/api";
 import { WS_URL } from "@/lib/constants";
 
 /**
@@ -40,6 +40,10 @@ export type MarketQuote = {
  */
 const DISPLAY_THROTTLE_MS = 100;
 
+// Server's close code for "the token you sent didn't decode" — mirrors
+// WS_AUTH_FAILED in app/api/ws/market_ws.py.
+const WS_AUTH_FAILED = 4401;
+
 // Heartbeat: send a ping this often. The server replies {type:"pong"},
 // which also resets the staleness watchdog below.
 const HEARTBEAT_MS = 15_000;
@@ -66,8 +70,39 @@ const STALE_TIMEOUT_MS = 35_000;
  * unmounts, so a remount paints the previous price on the FIRST frame and the
  * WS simply refreshes it. Bounded by the number of tokens the user actually
  * looks at in a session, and never persisted — a reload starts clean.
+ *
+ * It IS dropped when the socket's identity changes. Prices are per-user —
+ * the server applies that user's spread cascade to bid/ask — so a quote
+ * cached under one session is simply the wrong number under the next one,
+ * and `mergeSticky` below would keep it alive indefinitely because a sticky
+ * field is only replaced by a POSITIVE new value.
  */
 const lastKnownQuotes = new Map<string, MarketQuote>();
+
+/** JWT subject the cached quotes were priced for. */
+let quoteCacheOwner: string | null = null;
+
+/** `sub` out of a JWT, without verifying it — this only decides whose
+ *  prices are in the cache, never whether to trust the token. */
+function tokenSubject(jwt: string | null): string | null {
+  if (!jwt) return null;
+  try {
+    const body = jwt.split(".")[1];
+    if (!body) return null;
+    const json = atob(body.replace(/-/g, "+").replace(/_/g, "/"));
+    return String(JSON.parse(json)?.sub ?? "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Drop every cached price when the session behind them changes. */
+function syncQuoteCacheOwner(jwt: string | null): void {
+  const sub = tokenSubject(jwt);
+  if (sub === quoteCacheOwner) return;
+  lastKnownQuotes.clear();
+  quoteCacheOwner = sub;
+}
 
 export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
   // Seed from the cross-mount cache so a navigation never shows a blank /
@@ -89,6 +124,13 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     let lastMsgAt = Date.now();
     let attempt = 0;
+    // Consecutive 4401s. The server only refuses a token it was GIVEN, so
+    // one rejection means "refresh and retry". A second one means the
+    // refresh isn't producing a usable token (signed out, clock skew) —
+    // connect anonymously from then on rather than hammering the handshake
+    // once a second. The axios interceptor is what redirects to /login;
+    // the feed just degrades to the public prices until it does.
+    let authFailures = 0;
 
     function stopHeartbeat() {
       if (heartbeatTimer) {
@@ -192,13 +234,25 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
       }
     }
 
-    function connect() {
+    async function connect() {
       if (stopped) return;
       // iOS Safari PWA: close any existing socket before opening a new one
       // to avoid leaking a frozen connection after the app was backgrounded.
       wsRef.current?.close();
       const base = `${WS_URL.replace(/\/$/, "")}/ws/marketdata`;
-      const jwt = getAccessToken();
+      // Rotate the access token BEFORE connecting. The socket is
+      // authenticated once, at the handshake, and the server reads the
+      // per-user spread from that one decode — so connecting with a token
+      // that expired while the tab sat in the background used to hand back
+      // a socket priced for nobody. A tab left open for days reconnects
+      // often (zombie watchdog, wake from suspend, network blips), which is
+      // why this surfaced as a price that kept changing its mind.
+      const jwt =
+        authFailures >= 2
+          ? null
+          : ((await ensureFreshAccessToken()) ?? getAccessToken());
+      if (stopped) return;
+      syncQuoteCacheOwner(jwt);
       const url = jwt ? `${base}?token=${encodeURIComponent(jwt)}` : base;
       // Production-debugging breadcrumb: log the resolved WS origin once per
       // connect attempt. If the panel shows "—" everywhere in prod, this is
@@ -212,6 +266,7 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
 
       ws.onopen = () => {
         attempt = 0;
+        authFailures = 0;
         startHeartbeat();
         // eslint-disable-next-line no-console
         console.info("[market-ws] open", url);
@@ -252,11 +307,24 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
       ws.onclose = (ev) => {
         stopHeartbeat();
         if (stopped) return;
+        if (ev.code === WS_AUTH_FAILED) {
+          // The server refused our token. Whatever this socket delivered
+          // was never priced for this user, so the cache goes with it —
+          // keeping it would let a wrong bid/ask stick through the sticky
+          // merge. Retry promptly: `connect` refreshes the token first.
+          authFailures += 1;
+          lastKnownQuotes.clear();
+          quoteCacheOwner = null;
+          // eslint-disable-next-line no-console
+          console.warn("[market-ws] auth rejected", { authFailures });
+          reconnectTimer = setTimeout(() => void connect(), 1_000);
+          return;
+        }
         attempt += 1;
         const delay = Math.min(15_000, 1_000 * 2 ** Math.min(attempt, 4));
         // eslint-disable-next-line no-console
         console.warn("[market-ws] closed", { code: ev.code, reason: ev.reason, retryInMs: delay });
-        reconnectTimer = setTimeout(connect, delay);
+        reconnectTimer = setTimeout(() => void connect(), delay);
       };
 
       ws.onerror = (ev) => {
@@ -265,7 +333,7 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
         ws.close();
       };
     }
-    connect();
+    void connect();
 
     // iOS Safari PWA: system suspends WebSockets when the app is backgrounded
     // or the phone is locked. Reconnect / re-subscribe when coming back.
@@ -274,7 +342,7 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         attempt = 0;
-        connect();
+        void connect();
         return;
       }
       const list = [...subscribedRef.current];
@@ -283,13 +351,13 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
           ws.send(JSON.stringify({ type: "unsubscribe", tokens: list }));
           ws.send(JSON.stringify({ type: "subscribe", tokens: list }));
         } catch {
-          connect();
+          void connect();
         }
       }
     }
     function onOnline() {
       attempt = 0;
-      connect();
+      void connect();
     }
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("online", onOnline);

@@ -39,18 +39,35 @@ router = APIRouter()
 
 # ── Per-user spread helpers ─────────────────────────────────────────────
 
+# Close code for "you sent a token and it didn't decode". Distinct from a
+# normal close so the client knows to refresh and reconnect rather than
+# treating it as a network blip.
+WS_AUTH_FAILED = 4401
+
+
 async def _resolve_user_id(token: str | None) -> str | None:
     """Decode an optional JWT and return the ``sub`` (user_id).
-    Returns ``None`` on any failure so the caller degrades gracefully."""
+
+    Raises ``PermissionError`` when a token WAS supplied but is expired or
+    malformed. It used to return None there, which quietly turned an
+    expired session into an ANONYMOUS socket: the per-user spread cascade
+    stopped being applied and the client started receiving the global admin
+    bid/ask instead. The REST quote poll kept using the authenticated
+    prices, so the two disagreed and the price alternated between them —
+    the "price flicker after a few days" report. A session that has a token
+    must either be authenticated or be told to refresh.
+    """
     if not token:
         return None
     try:
         from app.core.security import decode_token
         payload = decode_token(token, expected_type="access")
-        uid = payload.get("sub")
-        return str(uid) if uid else None
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        raise PermissionError("token rejected") from exc
+    uid = payload.get("sub")
+    if not uid:
+        raise PermissionError("token carries no subject")
+    return str(uid)
 
 
 async def _load_spread_meta(user_id: str | None) -> dict[str, Any] | None:
@@ -187,7 +204,15 @@ async def market_ws(
 
     # Resolve user identity and load per-user spread overrides.
     # meta is None for anonymous connections (no extra work done per tick).
-    user_id = await _resolve_user_id(token)
+    try:
+        user_id = await _resolve_user_id(token)
+    except PermissionError:
+        # Accepted first so the client reads the code instead of a bare
+        # handshake failure, which browsers surface as an opaque error.
+        await safe_send_text(ws, json.dumps({"type": "error", "code": "auth_failed"}))
+        await ws.close(code=WS_AUTH_FAILED)
+        await ws_limit_release(ip)
+        return
     meta = await _load_spread_meta(user_id)
     if meta:
         market_tick_hub.attach_meta(ws, meta)
