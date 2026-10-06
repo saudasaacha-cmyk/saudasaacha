@@ -249,3 +249,11 @@ def test_nearest_contract_is_the_front_month():
     assert _nearest_contract([past]).symbol == "GOLD26SEPFUT"
     # No expiry dates at all (MCX placeholders) → still returns something.
     assert _nearest_contract([_inst("GOLD26OCTFUT")]).symbol == "GOLD26OCTFUT"
+    # Some rows carry a plain `date`, others an aware datetime — both sort.
+    from datetime import date, timezone
+
+    mixed = [
+        _inst("GOLD26OCTFUT", expiry=date(now.year + 1, 1, 5)),
+        _inst("GOLD26DECFUT", expiry=(now + timedelta(days=2)).replace(tzinfo=timezone.utc)),
+    ]
+    assert _nearest_contract(mixed).symbol == "GOLD26DECFUT"

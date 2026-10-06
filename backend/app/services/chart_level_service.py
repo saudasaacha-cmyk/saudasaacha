@@ -254,9 +254,13 @@ def _nearest_contract(contracts: list[Instrument]) -> Instrument:
     now = datetime.now(UTC).replace(tzinfo=None)
 
     def exp(c: Instrument):
+        # `expiry` is a plain `date` on some rows and an aware datetime on
+        # others; both have to sort against one naive datetime.
         e = getattr(c, "expiry", None)
         if e is None:
             return None
+        if not isinstance(e, datetime):
+            return datetime(e.year, e.month, e.day)
         return e.replace(tzinfo=None) if e.tzinfo else e
 
     ahead = sorted(
