@@ -14,6 +14,7 @@ second, subtly different one would be a bug waiting to happen.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from io import BytesIO
 from typing import Any
@@ -202,6 +203,92 @@ def normalize_trend(raw: Any) -> str | None:
     return _TREND_ALIASES.get(s)
 
 
+# ── one row for every expiry of the same underlying ──────────────────
+# GOLD26OCTFUT, GOLD26DECFUT and GOLD27FEBFUT are the same metal. An admin
+# who draws support and resistance on gold means all of them, and setting the
+# same four prices on every contract — then again when a contract expires —
+# is the whole complaint. Those lines are stored against a ROOT pseudo-token
+# ("ROOT:MCX:GOLD"); a contract with no row of its own falls back to it, so
+# the levels are set ONCE and a single contract can still override them by
+# carrying its own row.
+#
+# Futures only. An option's strike is part of its identity — NIFTY 22600 CE
+# and NIFTY 23000 PE share an underlying but not a price range — so grouping
+# those under one set of lines would be meaningless.
+ROOT_PREFIX = "ROOT:"
+_ROOT_RE = re.compile(r"^([A-Z][A-Z&\-]*?)\d[\dA-Z]*FUT$")
+
+
+def symbol_root(symbol: str) -> str | None:
+    """"GOLD26OCTFUT" -> "GOLD". Not a futures symbol -> None.
+
+    ponytail: this is the alphabetic prefix, so NIFTYNXT50 reads back as
+    "NIFTYNXT". Every expiry of that underlying still maps to the SAME root,
+    which is all the grouping needs — only the label is clipped. Give
+    Instrument a real `underlying` field if the spelling ever matters.
+    """
+    m = _ROOT_RE.match((symbol or "").strip().upper())
+    return m.group(1) if m else None
+
+
+def root_token_for(inst: Instrument) -> str | None:
+    root = symbol_root(inst.symbol or "")
+    if not root:
+        return None
+    return f"{ROOT_PREFIX}{str(inst.exchange or '').upper()}:{root}"
+
+
+def is_root_token(token: str) -> bool:
+    return str(token or "").startswith(ROOT_PREFIX)
+
+
+def root_display(token: str) -> str:
+    """"ROOT:MCX:GOLD" -> "GOLD — all expiries"."""
+    return f"{str(token).split(':')[-1]} — all expiries"
+
+
+def _nearest_contract(contracts: list[Instrument]) -> Instrument:
+    """The contract an admin is actually looking at: nearest expiry still
+    ahead, else the last one. Its tick size and live price stand in for the
+    root row, which has neither of its own."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    def exp(c: Instrument):
+        e = getattr(c, "expiry", None)
+        if e is None:
+            return None
+        return e.replace(tzinfo=None) if e.tzinfo else e
+
+    ahead = sorted(
+        (c for c in contracts if exp(c) is not None and exp(c) >= now), key=exp
+    )
+    if ahead:
+        return ahead[0]
+    dated = sorted((c for c in contracts if exp(c) is not None), key=exp)
+    return dated[-1] if dated else contracts[0]
+
+
+def group_by_root(instruments: list[Instrument]) -> dict[str, list[Instrument]]:
+    out: dict[str, list[Instrument]] = {}
+    for i in instruments:
+        rt = root_token_for(i)
+        if rt:
+            out.setdefault(rt, []).append(i)
+    return out
+
+
+async def contracts_for_root(rt: str) -> list[Instrument]:
+    """Every contract the root row covers."""
+    try:
+        exch, root = rt[len(ROOT_PREFIX):].split(":", 1)
+    except ValueError:
+        return []
+    rows = await Instrument.find(
+        {"exchange": exch, "symbol": {"$regex": rf"^{re.escape(root)}\d"}}
+    ).to_list()
+    return [i for i in rows if root_token_for(i) == rt]
+
+
 # ── template ─────────────────────────────────────────────────────────
 # Sheet shape (the operator's own design):
 #
@@ -288,11 +375,19 @@ async def build_template(admin: User, segment: str) -> bytes:
             cell.alignment = Alignment(horizontal="center")
 
     trend_col = FIXED_HEADERS.index("Trend") + 1
-    for r, inst in enumerate(instruments, start=DATA_ROW_START):
-        ws.cell(row=r, column=1, value=inst.token)
-        ws.cell(row=r, column=2, value=inst.symbol)
+    # Root rows first: fill GOLD once and every GOLD contract draws those
+    # lines. A contract row below still wins for that one contract.
+    roots = group_by_root(instruments)
+    sheet_rows: list[tuple[str, str, Instrument]] = [
+        (rt, root_display(rt), _nearest_contract(cs)) for rt, cs in sorted(roots.items())
+    ]
+    sheet_rows += [(i.token, i.symbol, i) for i in instruments]
+
+    for r, (row_token, row_symbol, inst) in enumerate(sheet_rows, start=DATA_ROW_START):
+        ws.cell(row=r, column=1, value=row_token)
+        ws.cell(row=r, column=2, value=row_symbol)
         ws.cell(row=r, column=3, value=segment_label(str(inst.segment)))
-        saved_row = existing.get(inst.token)
+        saved_row = existing.get(row_token)
         ws.cell(row=r, column=trend_col, value=saved_row.trend if saved_row else None)
         for i in range(n_lines):
             entry = (
@@ -318,7 +413,7 @@ async def build_template(admin: User, segment: str) -> bytes:
     )
     ws.add_data_validation(dv)
     col = get_column_letter(trend_col)
-    last = max(DATA_ROW_START, DATA_ROW_START + len(instruments) - 1)
+    last = max(DATA_ROW_START, DATA_ROW_START + len(sheet_rows) - 1)
     dv.add(f"{col}{DATA_ROW_START}:{col}{last}")
 
     # A second sheet documenting the columns — whoever fills this in is not
@@ -327,6 +422,10 @@ async def build_template(admin: User, segment: str) -> bytes:
     rows = [
         ("Column / Row", "What to put"),
         ("Token", "Leave as-is. This is what identifies the instrument."),
+        ("GOLD — all expiries", "The first rows of the sheet. Fill ONE of these and every expiry of that "
+         "underlying draws those lines — GOLD26OCTFUT, GOLD26DECFUT, and next year's too."),
+        ("", "A contract's OWN row still wins over its 'all expiries' row, if you need one to differ."),
+        ("", "To hand a contract back to the family, blank ITS prices — then it follows the underlying again."),
         ("Symbol / Segment", "Leave as-is. For reading only."),
         ("Trend", "Uptrend, Downtrend or Sideways. Shown on the user's chart. Blank = no trend."),
         ("Line 1 ... Line N", "The price to draw that line at. Blank = no line on that instrument."),
@@ -553,7 +652,13 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
     body_start = 1 if legacy else layout["body_start"]
 
     f = owner_filter_for_admin(admin)
-    known = {i.token: i for i in await Instrument.find().to_list()}
+    all_instruments = await Instrument.find().to_list()
+    known = {i.token: i for i in all_instruments}
+    # "ROOT:MCX:GOLD" is not an instrument — it stands for every GOLD
+    # contract, and borrows the nearest one's tick size and segment.
+    roots = {
+        rt: _nearest_contract(cs) for rt, cs in group_by_root(all_instruments).items()
+    }
 
     updated = cleared = 0
     errors: list[str] = []
@@ -565,10 +670,18 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
         token = str(row[0]).strip()
         if token.lower() in _SETTING_MARKERS:
             continue
-        inst = known.get(token)
-        if inst is None:
-            errors.append(f"{token}: not an instrument on this platform - skipped")
-            continue
+        row_symbol: str | None = None
+        if is_root_token(token):
+            inst = roots.get(token)
+            row_symbol = root_display(token)
+            if inst is None:
+                errors.append(f"{root_display(token)}: no contracts on this platform - skipped")
+                continue
+        else:
+            inst = known.get(token)
+            if inst is None:
+                errors.append(f"{token}: not an instrument on this platform - skipped")
+                continue
 
         trend: str | None = None
         if legacy:
@@ -579,7 +692,10 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
                 trend = normalize_trend(row[t_idx])
             entries = _line_entries(row, layout, inst, errors)
 
-        n_saved = await _upsert(admin, inst, entries, f, trend=trend)
+        n_saved = await _upsert(
+            admin, inst, entries, f, trend=trend,
+            token=token if row_symbol else None, symbol=row_symbol,
+        )
         if n_saved is None:
             continue
         if n_saved:
@@ -602,14 +718,23 @@ async def _upsert(
     entries: list[ChartLevelEntry],
     f: dict[str, PydanticObjectId | None],
     trend: str | None = None,
+    *,
+    token: str | None = None,
+    symbol: str | None = None,
 ) -> bool | None:
-    """Write one instrument's lines. True = saved, False = cleared, None =
-    nothing to do. Shared by the Excel import and the inline editor so the
-    two can never drift apart."""
+    """Write one row's lines. True = saved, False = cleared, None = nothing
+    to do. Shared by the Excel import and the inline editor so the two can
+    never drift apart.
+
+    `token`/`symbol` name a root row ("ROOT:MCX:GOLD"), which has no
+    instrument of its own — `inst` is then the contract it borrows a tick
+    size and a segment from.
+    """
+    key = token or inst.token
     doc = await ChartLevel.find_one(
         ChartLevel.owner_admin_id == f["owner_admin_id"],
         ChartLevel.owner_broker_id == f["owner_broker_id"],
-        ChartLevel.token == inst.token,
+        ChartLevel.token == key,
     )
     if not entries and not trend:
         # Every price blank and no trend = clear this instrument entirely.
@@ -621,11 +746,11 @@ async def _upsert(
         doc = ChartLevel(
             owner_admin_id=f["owner_admin_id"],
             owner_broker_id=f["owner_broker_id"],
-            token=inst.token,
-            symbol=inst.symbol,
+            token=key,
+            symbol=symbol or inst.symbol,
             segment=str(inst.segment),
         )
-    doc.symbol = inst.symbol
+    doc.symbol = symbol or inst.symbol
     doc.segment = str(inst.segment)
     doc.levels = entries
     doc.trend = trend
@@ -668,7 +793,10 @@ async def _offscreen_warnings(
             continue
         if ltp <= 0:
             continue
-        sym = known[token].symbol if token in known else token
+        if token in known:
+            sym = known[token].symbol
+        else:
+            sym = root_display(token) if is_root_token(token) else token
         for price in touched[token]:
             if price > ltp * _OFFSCREEN_RATIO or price * _OFFSCREEN_RATIO < ltp:
                 out.append(
@@ -714,6 +842,18 @@ async def list_for_admin(admin: User, segment: str | None = None) -> list[dict[s
         i.token: i.tick_size
         for i in await Instrument.find({"token": {"$in": tokens}}).to_list()
     }
+    # A root row has no instrument of its own: show the nearest contract's
+    # tick size and live price, so an off-screen price is still obvious.
+    quote_token = {t: t for t in tokens}
+    for t in tokens:
+        if not is_root_token(t):
+            continue
+        contracts = await contracts_for_root(t)
+        if not contracts:
+            continue
+        near = _nearest_contract(contracts)
+        ticks[t] = near.tick_size
+        quote_token[t] = near.token
     # The live price next to the lines is what makes a fat-fingered row
     # obvious — a level ten times off the LTP draws off-screen and reads as
     # "the feature is broken".
@@ -721,7 +861,7 @@ async def list_for_admin(admin: User, segment: str | None = None) -> list[dict[s
     try:
         from app.services import market_data_service
 
-        quotes = await market_data_service.get_quotes(tokens)
+        quotes = await market_data_service.get_quotes([quote_token[t] for t in tokens])
         for token, q2 in zip(tokens, quotes, strict=False):
             ltps[token] = float(
                 _round_like_tick(to_decimal(q2.get("ltp") or 0), ticks.get(token))
@@ -747,9 +887,17 @@ async def save_levels(
     Same validation and the same writer as the import, so a price typed here
     is rounded and colour-checked exactly like one typed in the sheet.
     """
-    inst = await Instrument.find_one(Instrument.token == token)
-    if inst is None:
-        raise ValueError("Not an instrument on this platform.")
+    row_symbol: str | None = None
+    if is_root_token(token):
+        contracts = await contracts_for_root(token)
+        if not contracts:
+            raise ValueError("No contracts on this platform for that underlying.")
+        inst = _nearest_contract(contracts)
+        row_symbol = root_display(token)
+    else:
+        inst = await Instrument.find_one(Instrument.token == token)
+        if inst is None:
+            raise ValueError("Not an instrument on this platform.")
     entries: list[ChartLevelEntry] = []
     for i, lv in enumerate(levels):
         raw = lv.get("price")
@@ -771,7 +919,8 @@ async def save_levels(
             )
         )
     saved = await _upsert(
-        admin, inst, entries, owner_filter_for_admin(admin), trend=normalize_trend(trend)
+        admin, inst, entries, owner_filter_for_admin(admin), trend=normalize_trend(trend),
+        token=token if row_symbol else None, symbol=row_symbol,
     )
     return {"saved": bool(saved), "levels": len(entries)}
 
@@ -1005,13 +1154,22 @@ async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
     if inst is not None:
         tokens.add(inst.token)
 
+    # Lines set on the underlying ("ROOT:MCX:GOLD") cover every expiry of it,
+    # so the admin fills GOLD once instead of once per contract. Checked
+    # AFTER the exact token within the same owner: a contract that carries
+    # its own row still overrides the family's.
+    root = root_token_for(inst) if inst is not None else None
+
     for f in tried:
-        doc = await ChartLevel.find_one(
-            ChartLevel.owner_admin_id == f["owner_admin_id"],
-            ChartLevel.owner_broker_id == f["owner_broker_id"],
-            In(ChartLevel.token, list(tokens)),
-        )
-        if doc is not None and (doc.levels or doc.trend):
-            full = to_dict(doc, inst.tick_size if inst else None)
-            return {"levels": full["levels"], "trend": full["trend"]}
+        for match in (In(ChartLevel.token, list(tokens)),) + (
+            (ChartLevel.token == root,) if root else ()
+        ):
+            doc = await ChartLevel.find_one(
+                ChartLevel.owner_admin_id == f["owner_admin_id"],
+                ChartLevel.owner_broker_id == f["owner_broker_id"],
+                match,
+            )
+            if doc is not None and (doc.levels or doc.trend):
+                full = to_dict(doc, inst.tick_size if inst else None)
+                return {"levels": full["levels"], "trend": full["trend"]}
     return {"levels": [], "trend": None}

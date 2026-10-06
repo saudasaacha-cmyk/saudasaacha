@@ -217,7 +217,20 @@ export default function ChartLevelsPage() {
 
   const columns: Column<ChartLevelRow>[] = [
     { key: "symbol", header: "Symbol", render: (r) => <span className="font-medium">{r.symbol}</span> },
-    { key: "token", header: "Token", render: (r) => <span className="text-xs text-muted-foreground">{r.token}</span> },
+    {
+      key: "token",
+      header: "Token",
+      // A root row ("ROOT:MCX:GOLD") covers every expiry of that underlying
+      // and has no token of its own — say so instead of showing the key.
+      render: (r) =>
+        r.token.startsWith("ROOT:") ? (
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-600">
+            all expiries
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">{r.token}</span>
+        ),
+    },
     {
       key: "ltp",
       header: "Live",
@@ -443,12 +456,14 @@ export default function ChartLevelsPage() {
       />
 
       <p className="text-xs leading-relaxed text-muted-foreground">
-        Row 2 of the sheet sets each line&apos;s colour and row 3 its label — once, for every
-        instrument — and row 4 onwards holds just the prices. Add as many <code>Line</code>
-        columns as you need. Re-uploading replaces the lines for every instrument listed; a row
-        with all prices blank clears that instrument. Colours accept hex (<code>#E31E24</code>) or
-        names (red, green, blue…). A price far from the live price is drawn off-screen — flagged
-        in red.
+        The sheet starts with one <b>“GOLD — all expiries”</b> row per futures underlying: fill
+        that and every contract of it draws those lines — this month&apos;s, next month&apos;s and
+        the ones not listed yet. A single contract&apos;s own row still wins over it. Row 2 sets
+        each line&apos;s colour and row 3 its label — once, for every instrument — and row 4
+        onwards holds just the prices. Add as many <code>Line</code> columns as you need.
+        Re-uploading replaces the lines for every instrument listed; a row with all prices blank
+        clears that instrument. Colours accept hex (<code>#E31E24</code>) or names (red, green,
+        blue…). A price far from the live price is drawn off-screen — flagged in red.
       </p>
 
       <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>

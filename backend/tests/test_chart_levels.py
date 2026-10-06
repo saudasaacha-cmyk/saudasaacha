@@ -180,3 +180,72 @@ def test_price_is_trimmed_to_the_tick_precision_not_snapped_to_a_tick():
     assert str(_round_like_tick(Decimal("100.00"), Decimal("0.05"))) == "100"
     # No tick on the instrument: fall back to paise.
     assert _round_like_tick(Decimal("1253.4567"), None) == Decimal("1253.46")
+
+
+# ── one row for every expiry of the same underlying ──────────────────
+from datetime import UTC, datetime, timedelta  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from app.services.chart_level_service import (  # noqa: E402
+    _nearest_contract,
+    group_by_root,
+    is_root_token,
+    root_display,
+    root_token_for,
+    symbol_root,
+)
+
+
+def _inst(symbol: str, exchange: str = "MCX", expiry=None):
+    return SimpleNamespace(token=symbol, symbol=symbol, exchange=exchange, expiry=expiry)
+
+
+def test_every_expiry_of_a_future_shares_one_root():
+    assert symbol_root("GOLD26OCTFUT") == "GOLD"
+    assert symbol_root("GOLD26DECFUT") == "GOLD"
+    assert symbol_root("GOLD27FEBFUT") == "GOLD"
+    # A different contract family is a different root.
+    assert symbol_root("GOLDM26OCTFUT") == "GOLDM"
+    assert symbol_root("SILVER26DECFUT") == "SILVER"
+    # Punctuated underlyings survive.
+    assert symbol_root("M&MFIN26OCTFUT") == "M&MFIN"
+
+
+def test_options_and_cash_have_no_root():
+    """A strike is part of an option's identity — 22600 CE and 23000 PE share
+    an underlying but not a price range, so one set of lines across them
+    would be meaningless."""
+    assert symbol_root("NIFTY2691522600CE") is None
+    assert symbol_root("SENSEX2691773400PE") is None
+    assert symbol_root("RELIANCE") is None
+    assert symbol_root("BTCUSD") is None
+    assert symbol_root("MCXGOLD") is None  # placeholder, no expiry in the name
+
+
+def test_root_token_is_scoped_by_exchange():
+    assert root_token_for(_inst("GOLD26OCTFUT")) == "ROOT:MCX:GOLD"
+    assert root_token_for(_inst("NIFTY26OCTFUT", "NFO")) == "ROOT:NFO:NIFTY"
+    assert root_token_for(_inst("RELIANCE", "NSE")) is None
+    assert is_root_token("ROOT:MCX:GOLD")
+    assert not is_root_token("123668231")
+    assert root_display("ROOT:MCX:GOLD").startswith("GOLD")
+
+
+def test_group_by_root_collects_the_whole_family():
+    rows = [_inst("GOLD26OCTFUT"), _inst("GOLD26DECFUT"), _inst("SILVER26DECFUT")]
+    groups = group_by_root(rows)
+    assert sorted(groups) == ["ROOT:MCX:GOLD", "ROOT:MCX:SILVER"]
+    assert len(groups["ROOT:MCX:GOLD"]) == 2
+
+
+def test_nearest_contract_is_the_front_month():
+    """The root row borrows this contract's tick size and live price."""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    past = _inst("GOLD26SEPFUT", expiry=now - timedelta(days=5))
+    near = _inst("GOLD26OCTFUT", expiry=now + timedelta(days=20))
+    far = _inst("GOLD27FEBFUT", expiry=now + timedelta(days=140))
+    assert _nearest_contract([far, past, near]).symbol == "GOLD26OCTFUT"
+    # All expired → the last one, never a crash.
+    assert _nearest_contract([past]).symbol == "GOLD26SEPFUT"
+    # No expiry dates at all (MCX placeholders) → still returns something.
+    assert _nearest_contract([_inst("GOLD26OCTFUT")]).symbol == "GOLD26OCTFUT"
