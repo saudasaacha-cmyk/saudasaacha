@@ -107,30 +107,28 @@ export default function UserDetailPage() {
     onError: (e: any) => toast.error(e.message || "Failed"),
   });
 
-  // Contact details. An admin-created account can start with no email and
-  // no phone (the backend stores a placeholder in those uniquely-indexed
-  // columns), so the form shows a placeholder as blank — the admin fills in
-  // the real one whenever they get it.
-  // A placeholder contact is an absence, not a value — the header and the
-  // form below both render it as one.
-  const isPlaceholder = (v: string | undefined | null) =>
-    !!v && (v.endsWith("@noemail.sachchasauda.com") || v.startsWith("NOMOB"));
+  // Contact details. The server never sends a client's real email or phone
+  // to an admin — only "••••••••" when one is set, or nothing when the
+  // account still carries the generated placeholder. So the two inputs start
+  // EMPTY and mean "type a new one to replace it"; left blank, they are not
+  // sent at all and whatever is stored stays untouched.
   const [contact, setContact] = useState({ full_name: "", email: "", mobile: "" });
   const [contactDirty, setContactDirty] = useState(false);
   useEffect(() => {
     if (!data) return;
     // Don't stomp on what the admin is typing when the query refetches.
     if (contactDirty) return;
-    setContact({
-      full_name: data.full_name ?? "",
-      email: isPlaceholder(data.email) ? "" : (data.email ?? ""),
-      mobile: isPlaceholder(data.mobile) ? "" : (data.mobile ?? ""),
-    });
+    setContact({ full_name: data.full_name ?? "", email: "", mobile: "" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.id, data?.email, data?.mobile, data?.full_name, contactDirty]);
+  }, [data?.id, data?.full_name, contactDirty]);
 
   const contactMut = useMutation({
-    mutationFn: () => UsersAPI.update(id, contact),
+    mutationFn: () =>
+      UsersAPI.update(id, {
+        full_name: contact.full_name,
+        ...(contact.email.trim() ? { email: contact.email.trim() } : {}),
+        ...(contact.mobile.trim() ? { mobile: contact.mobile.trim() } : {}),
+      }),
     onSuccess: () => {
       setContactDirty(false);
       qc.invalidateQueries({ queryKey: ["admin", "user", id] });
@@ -216,9 +214,7 @@ export default function UserDetailPage() {
     <div className="space-y-6">
       <PageHeader
         title={u.full_name}
-        description={[u.user_code, isPlaceholder(u.email) ? null : u.email, isPlaceholder(u.mobile) ? null : u.mobile]
-          .filter(Boolean)
-          .join(" · ")}
+        description={u.user_code}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline">
@@ -362,8 +358,9 @@ export default function UserDetailPage() {
               <Mail className="size-4" /> Contact details
             </CardTitle>
             <CardDescription>
-              Name, email and phone. Leave email or phone blank if you don't
-              have it — the user logs in with their user ID either way.
+              A client's email and phone are hidden from every admin, including
+              the super admin. Type a new one to replace what is stored; leave
+              it blank and it stays as it is.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
@@ -384,7 +381,7 @@ export default function UserDetailPage() {
                 Email
               </Label>
               <Input
-                placeholder="Not set"
+                placeholder={data.email_set ? "•••••••• — type a new one to replace" : "Not set"}
                 value={contact.email}
                 onChange={(e) => {
                   setContactDirty(true);
@@ -397,7 +394,7 @@ export default function UserDetailPage() {
                 Mobile
               </Label>
               <Input
-                placeholder="Not set"
+                placeholder={data.mobile_set ? "•••••••• — type a new one to replace" : "Not set"}
                 maxLength={10}
                 value={contact.mobile}
                 onChange={(e) => {

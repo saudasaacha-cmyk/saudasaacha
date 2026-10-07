@@ -42,6 +42,7 @@ from app.schemas.admin.brokers import (
 )
 from app.schemas.admin.management import ResetPasswordRequest
 from app.schemas.common import APIResponse
+from app.services import user_service
 from app.services import broker_management_service as svc
 from app.services import broker_settlement_service as stl
 from app.utils.time_utils import IST
@@ -329,8 +330,8 @@ async def list_broker_subtree_users(
         {
             "id": str(u.id),
             "user_code": u.user_code,
-            "email": u.email,
-            "mobile": u.mobile,
+            "email": user_service.masked_contact(u.email),
+            "mobile": user_service.masked_contact(u.mobile),
             "full_name": u.full_name,
             "role": u.role.value,
             "status": u.status.value,

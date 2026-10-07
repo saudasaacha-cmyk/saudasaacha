@@ -46,8 +46,12 @@ def _ser(u: User) -> dict:
     return {
         "id": str(u.id),
         "user_code": u.user_code,
-        "email": u.email,
-        "mobile": u.mobile,
+        # Masked, always — see user_service.masked_contact. `*_set` tells
+        # the UI "hidden" from "never filled in" without leaking either.
+        "email": user_service.masked_contact(u.email),
+        "mobile": user_service.masked_contact(u.mobile),
+        "email_set": not user_service.is_placeholder_contact(u.email),
+        "mobile_set": not user_service.is_placeholder_contact(u.mobile),
         "full_name": u.full_name,
         "role": u.role.value,
         "status": u.status.value,
@@ -1302,8 +1306,10 @@ async def impersonate(user_id: str, admin: CurrentAdmin):
             "user": {
                 "id": str(target.id),
                 "user_code": target.user_code,
-                "email": target.email,
-                "mobile": target.mobile,
+                # Masked here too: logging in AS a user is not a licence to
+                # read their contact details off the response.
+                "email": user_service.masked_contact(target.email),
+                "mobile": user_service.masked_contact(target.mobile),
                 "full_name": target.full_name,
                 "role": target.role.value,
                 "status": target.status.value,

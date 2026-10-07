@@ -126,12 +126,24 @@ export default function AdminUsersPage() {
       render: (r) => <span className="font-mono text-xs">{r.user_code}</span>,
     },
     { key: "full_name", header: "Name" },
+    // A client's contact details are nobody's to read here — the server
+    // sends "••••••••" for a real value and nothing for an account that has
+    // none yet. Searching still matches the real column server-side.
     {
       key: "email",
       header: "Email",
       className: "max-w-[240px] truncate",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">{r.email || "—"}</span>
+      ),
     },
-    { key: "mobile", header: "Mobile" },
+    {
+      key: "mobile",
+      header: "Mobile",
+      render: (r) => (
+        <span className="text-xs text-muted-foreground">{r.mobile || "—"}</span>
+      ),
+    },
     {
       key: "owner",
       header: "Owner",
@@ -562,15 +574,9 @@ function UserMobileCard({
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
         {r.email && <span className="truncate">{r.email}</span>}
-        {r.mobile && (
-          <a
-            href={`tel:${r.mobile}`}
-            className="font-tabular text-primary"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {r.mobile}
-          </a>
-        )}
+        {/* No tel: link — the href would be the one place the number
+            would still have to be real. */}
+        {r.mobile && <span className="font-tabular">{r.mobile}</span>}
       </div>
 
       {/* Row 3: owner / transferred chips — own row so long broker

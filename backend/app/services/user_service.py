@@ -36,6 +36,26 @@ def placeholder_mobile(user_code: str) -> str:
     return f"{NO_MOBILE_PREFIX}{user_code}"
 
 
+# What an admin is shown in place of a client's email or phone. A client's
+# contact details are not an admin's to read — not a broker's, not a
+# sub-admin's, not the super admin's — so the real value never leaves the
+# server in a display payload. Search still runs against the real column
+# server-side, so an admin who already knows a number can still find the
+# account by typing it.
+CONTACT_MASK = "••••••••"
+
+
+def masked_contact(value: str | None) -> str | None:
+    """The mask for a real value, None for a generated placeholder.
+
+    Keeping the two apart matters: "••••••••" means "set, not yours to read"
+    while None renders as "—", which means "this account has no email yet".
+    """
+    if not value or is_placeholder_contact(value):
+        return None
+    return CONTACT_MASK
+
+
 def is_placeholder_contact(value: str | None) -> bool:
     """True for a generated stand-in — the UI shows a dash instead."""
     v = (value or "").strip()

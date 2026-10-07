@@ -247,8 +247,8 @@ async def list_users_of_sub_admin(
         {
             "id": str(u.id),
             "user_code": u.user_code,
-            "email": u.email,
-            "mobile": u.mobile,
+            "email": user_service.masked_contact(u.email),
+            "mobile": user_service.masked_contact(u.mobile),
             "full_name": u.full_name,
             "role": u.role.value,
             "status": u.status.value,
