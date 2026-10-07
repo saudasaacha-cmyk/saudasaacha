@@ -7,15 +7,16 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, Mail, Lock, Send, ShieldCheck, Smartphone, Wrench, Zap } from "lucide-react";
+import { Eye, EyeOff, Loader2, Mail, Lock, Send, ShieldCheck, Smartphone, Wrench } from "lucide-react";
 import { useBranding } from "@/lib/branding-context";
 import { useAuthStore } from "@/stores/authStore";
-import { ApiError, AuthAPI, ProfileAPI, setTokens } from "@/lib/api";
+import { ApiError, ProfileAPI, setTokens } from "@/lib/api";
 import { STORAGE_KEYS } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { InstallPwaButton } from "@/components/common/InstallPwaButton";
+import { TryDemoButton } from "@/components/auth/TryDemoButton";
 
 const schema = z.object({
   identifier: z.string().min(3, "Enter your user ID or mobile no."),
@@ -53,10 +54,8 @@ function LoginPageInner() {
   const setUser = useAuthStore((s) => s.setUser);
   const hydrated = useAuthStore((s) => s.hydrated);
   const currentUser = useAuthStore((s) => s.user);
-  const setSession = useAuthStore((s) => s.setSession);
   const [showPwd, setShowPwd] = useState(false);
   const [needs2fa, setNeeds2fa] = useState(false);
-  const [demoLoading, setDemoLoading] = useState(false);
   // Maintenance popup — shown both when a live session gets kicked here
   // (?maintenance=1, set by the api interceptor) and when a fresh login is
   // rejected with MAINTENANCE_MODE below.
@@ -121,20 +120,6 @@ function LoginPageInner() {
     resolver: zodResolver(schema),
     defaultValues: { identifier: "", password: "", two_fa_code: "" },
   });
-
-  async function handleDemoLogin() {
-    setDemoLoading(true);
-    try {
-      const pair = await AuthAPI.demoLogin();
-      setSession(pair as any);
-      toast.success("Demo account ready — ₹50,00,000 virtual balance");
-      router.push("/dashboard");
-    } catch {
-      toast.error("Could not start demo. Please try again.");
-    } finally {
-      setDemoLoading(false);
-    }
-  }
 
   async function onSubmit(values: FormValues) {
     try {
@@ -292,47 +277,7 @@ function LoginPageInner() {
       </form>
 
       {/* Demo account CTA — minimalist green */}
-      <div className="space-y-2">
-        <div className="relative flex items-center">
-          <div className="flex-1 border-t border-border/50" />
-          <span className="mx-3 text-[10px] text-muted-foreground">or try for free</span>
-          <div className="flex-1 border-t border-border/50" />
-        </div>
-        <button
-          type="button"
-          onClick={handleDemoLogin}
-          disabled={demoLoading}
-          className="flex w-full items-center gap-2.5 rounded-xl border border-mp-primary/25 bg-mp-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-mp-primary/10 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-70"
-        >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-mp-primary text-white">
-            {demoLoading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Zap className="size-4 fill-white" />
-            )}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold leading-tight text-foreground">
-              {demoLoading ? (
-                "Setting up demo…"
-              ) : (
-                <>
-                  Try Demo — ₹50,00,000
-                  <span className="hidden lg:inline"> virtual</span>
-                </>
-              )}
-            </span>
-            <span className="hidden text-[11px] text-muted-foreground lg:block">
-              No signup · Instant · Risk-free
-            </span>
-          </span>
-          {!demoLoading && (
-            <span className="shrink-0 rounded-full bg-mp-primary/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-mp-primary">
-              Free
-            </span>
-          )}
-        </button>
-      </div>
+      <TryDemoButton />
 
       {/* Footer — "no account?" link + minimalist Install App CTA */}
       <div className="space-y-3">

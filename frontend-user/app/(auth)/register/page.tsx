@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { TryDemoButton } from "@/components/auth/TryDemoButton";
 
 const schema = z.object({
   full_name: z.string().min(2, "Enter your full name").max(128),
@@ -343,6 +344,9 @@ function RegisterPageInner() {
           Create account
         </Button>
       </form>
+
+      {/* Look before you sign up: the demo needs no email or phone. */}
+      <TryDemoButton label="or look around first" />
 
       {/* Footer */}
       <p className="text-center text-sm text-muted-foreground">
