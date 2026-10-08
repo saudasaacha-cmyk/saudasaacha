@@ -42,6 +42,21 @@ def test_the_instruments_with_no_spot_pair_now_resolve():
     assert feed.contract_name("AAPL") == "AAPLUSDT"
 
 
+def test_the_catalogue_row_answers_even_on_a_worker_with_a_cold_feed():
+    """`_ticks` is filled only in the worker holding the feed-leader lock.
+    Resolving from it alone returned None on every other worker — which is
+    most of them — sending the chart back to the Yahoo fallback this change
+    exists to remove. The contract is read from the row `sync_catalogue`
+    wrote, so it is in Mongo and every worker can see it."""
+    cold = _feed(known=set())
+    assert cold.contract_name("XAUUSD") is None  # the live map has nothing
+    # …and the row carries the answer regardless.
+    from app.services.binance_catalogue_service import MANAGED_SEGMENTS
+
+    assert "COMMODITIES" in MANAGED_SEGMENTS
+    assert "CRYPTO_SPOT" in MANAGED_SEGMENTS
+
+
 def test_an_unknown_symbol_resolves_to_nothing():
     """So the caller falls through to Yahoo / Zerodha rather than asking
     Binance for a contract it doesn't list."""

@@ -15,6 +15,7 @@ from app.models.instrument import Instrument
 from app.schemas.common import APIResponse
 from app.schemas.trading import InstrumentOut, QuoteOut
 from app.services import instrument_service, market_data_service
+from app.services.binance_catalogue_service import MANAGED_SEGMENTS
 from app.services.binance_futures_service import binance_futures
 
 logger = logging.getLogger(__name__)
@@ -778,29 +779,34 @@ _BINANCE_INTERVAL_MAP = {
 async def _binance_contract_for(token: str) -> str | None:
     """The Binance contract whose candles belong under this instrument.
 
-    Resolved through `binance_futures.contract_name`, which is the very
-    function the quote path uses — so the chart and the price cannot name
-    different contracts. Falls back to the catalogue row's
-    `trading_symbol`, which the sync writes with the resolved contract, for
-    the case where the feed hasn't warmed that symbol yet.
+    The CATALOGUE ROW answers first, not the live feed. `trading_symbol` is
+    written by `sync_catalogue` with the contract that row's price comes
+    from, so it is in Mongo and every worker can read it. The feed's own
+    `_ticks` map is populated ONLY in the worker holding the feed-leader
+    lock — resolving from it would have returned None on every other
+    worker, which is most of them, and sent the chart straight back to the
+    Yahoo fallback this change exists to get rid of.
 
-    This replaces a hand-kept list of 28 crypto bases. We list ~740
-    contracts; the other ~710 matched nothing and silently fell through to
-    Yahoo or to an empty chart.
+    The live map is still consulted, second, for a symbol the request names
+    in a form the row doesn't carry.
+
+    Either way the answer is the contract the quote is priced from, so the
+    chart and the price cannot name different contracts. This replaces a
+    hand-kept list of 28 crypto bases; we list ~740 contracts, and the
+    other ~710 matched nothing.
     """
     if not binance_futures.is_enabled():
         return None
-    contract = binance_futures.contract_name(token)
-    if contract:
-        return contract
+    # Scoped to the segments the Binance sync owns, so a Zerodha row's
+    # trading_symbol ("NIFTY25OCTFUT") is never offered to Binance.
     inst = await Instrument.find_one(Instrument.token == token)
-    if inst is None:
-        return None
-    for candidate in (inst.trading_symbol, inst.symbol):
-        contract = binance_futures.contract_name(candidate)
-        if contract:
-            return contract
-    return None
+    if (
+        inst is not None
+        and inst.trading_symbol
+        and str(inst.segment) in MANAGED_SEGMENTS
+    ):
+        return inst.trading_symbol
+    return binance_futures.contract_name(token)
 
 
 # Forex (and selected commodity) tokens come in as "FX_EURUSD" / "FX_USDJPY"
