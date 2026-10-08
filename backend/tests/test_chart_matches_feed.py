@@ -75,3 +75,21 @@ def test_candles_are_pulled_from_the_futures_venue():
     src = inspect.getsource(_fetch_binance_klines)
     assert "fapi.binance.com/fapi/v1/klines" in src
     assert "api.binance.com/api/v3" not in src
+
+
+def test_a_resolved_contract_is_the_last_stop():
+    """A blip at Binance must not silently hand the chart to Yahoo. Gold
+    would become GC=F and oil CL=F — a different market, shifted onto our
+    scale so it looks plausible. The history endpoint returns whatever
+    Binance gave, empty included, once a contract is resolved."""
+    import inspect
+
+    from app.api.v1.user.instruments import history
+
+    src = inspect.getsource(history)
+    binance_block = src[src.index("bn_symbol is not None") : src.index("Source 2")]
+    assert "return APIResponse(data=candles)" in binance_block
+    # Exactly one exit from the branch: no path out of it reaches Yahoo.
+    assert binance_block.count("return ") == 1
+    # And an empty answer is not cached, so the next request retries.
+    assert "if candles:\n            _history_cache" in binance_block

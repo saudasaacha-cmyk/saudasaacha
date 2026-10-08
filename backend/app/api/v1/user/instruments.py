@@ -1132,13 +1132,20 @@ async def history(
     # no penalty for Indian instruments.
     bn_symbol = await _binance_contract_for(token)
     if bn_symbol is not None:
+        # Once a contract has been resolved it IS this instrument's price
+        # source, so this is the last stop. Falling through on an empty
+        # answer — a rate limit, a blip — dropped gold to Yahoo's GC=F and
+        # oil to CL=F, shifted onto our scale by `_align_candles_to_live`
+        # so it looked plausible while being another market's shape. That
+        # silent swap, on whichever request happened to hit a blip, is the
+        # "chart kabhi kabhi alag dikhta hai" report. An empty chart for
+        # one refresh is honest; the wrong chart is not.
         candles = await _fetch_binance_klines(bn_symbol, interval, days)
+        # An empty answer is NOT cached, so the next request retries
+        # straight away instead of serving nothing for a minute.
         if candles:
             _history_cache[cache_key] = (now_ms, candles)
-            return APIResponse(data=candles)
-        # Binance silently failed — fall through to the Zerodha branch
-        # so an admin who's mapped a crypto token to Zerodha (rare) still
-        # gets data instead of an empty chart.
+        return APIResponse(data=candles)
 
     # ── Source 2: Yahoo Finance (forex / spot metals) ─────────────────
     # Bridges the gap for FX_EURUSD / FX_USDINR / XAUUSD / etc. — these
