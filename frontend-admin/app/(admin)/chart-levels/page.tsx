@@ -461,7 +461,10 @@ export default function ChartLevelsPage() {
         the ones not listed yet. A single contract&apos;s own row still wins over it. Row 2 sets
         each line&apos;s colour and row 3 its label — once, for every instrument — and row 4
         onwards holds just the prices. Add as many <code>Line</code> columns as you need.
-        Re-uploading replaces the lines for every instrument listed; a row with all prices blank
+        These are the lines <b>your own direct clients</b> see — a sub-admin&apos;s or broker&apos;s
+        clients see the lines that tier set for itself, not these. Edits show up on an open chart
+        within about 20 seconds; no reload needed. Re-uploading replaces the lines for every
+        instrument listed; a row with all prices blank
         clears that instrument. Colours accept hex (<code>#E31E24</code>) or names (red, green,
         blue…). A price far from the live price is drawn off-screen — flagged in red.
       </p>

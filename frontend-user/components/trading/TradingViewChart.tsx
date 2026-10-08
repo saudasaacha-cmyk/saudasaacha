@@ -307,6 +307,11 @@ function TradingViewChartInner({
   }, [token]);
 
   // ── Admin-defined price lines ─────────────────────────────────────
+  // Re-asked for this often: the admin edits a level on another screen and
+  // the trader's open chart has to follow. 20 s is invisible to a person and
+  // the payload is a handful of numbers.
+  const LEVEL_POLL_MS = 20_000;
+
   // The admin uploads price + colour per instrument from the admin panel;
   // each one is drawn here as a horizontal line in that colour. Redrawn on
   // every token change, and the previous instrument's lines are removed
@@ -320,6 +325,7 @@ function TradingViewChartInner({
   useEffect(() => {
     let cancelled = false;
     let dataSub: any = null;
+    let timer: number | null = null;
 
     const clear = () => {
       const w = widgetRef.current;
@@ -335,10 +341,92 @@ function TradingViewChartInner({
       }
     };
 
-    const draw = async () => {
+    // What the server last told us to draw. Kept in a ref so a repaint
+    // (bars reloaded, symbol switched back) doesn't need another round trip.
+    const levelsRef: { current: ChartLevel[] } = { current: [] };
+    let lastJson = "";
+
+    const paint = async () => {
+      if (cancelled) return;
       const w = widgetRef.current;
-      if (!w || !token) return;
+      if (!w) return;
+      const chart = w.activeChart();
+      clear();
+      // A horizontal line still needs a time coordinate. The visible range
+      // can be empty on the first ready tick, so fall back to "now" — the
+      // time is irrelevant once the line spans the pane.
+      let anchor = Math.floor(Date.now() / 1000);
+      try {
+        const vr = chart.getVisibleRange?.();
+        if (vr && Number.isFinite(vr.from) && vr.from > 0) anchor = vr.from;
+      } catch {}
+      for (const lv of levelsRef.current) {
+        if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
+        try {
+          // createShape resolves to the id — it does NOT return it. Reading
+          // the promise as an id meant every failure below surfaced as an
+          // unhandled rejection: nothing drawn, nothing logged, and the
+          // "ids" we kept for cleanup were promises.
+          const id = await chart.createShape(
+            { time: anchor, price: lv.price },
+            {
+              shape: "horizontal_line",
+              lock: true, // an admin level is not the user's to drag
+              disableSelection: true,
+              disableSave: true,
+              disableUndo: true,
+              zOrder: "top",
+              text: lv.label || "",
+              // Per-shape overrides are the TOOL's own property names —
+              // `linecolor`, not `linetoolhorzline.linecolor`. The prefixed
+              // form belongs to widget.applyOverrides() (global defaults).
+              //
+              // Getting this wrong is SILENT: the library walks the keys
+              // with `properties.hasChild(key)` and just skips anything it
+              // doesn't recognise. No throw, no warning — every line simply
+              // kept the tool's factory default #2962FF, which is why they
+              // all came out the same blue however many colours the admin
+              // set. Hence the read-back check below.
+              overrides: {
+                linecolor: lv.color,
+                linewidth: 2,
+                linestyle: 0,
+                showPrice: true,
+                textcolor: lv.color,
+                horzLabelsAlign: "right",
+                vertLabelsAlign: "bottom",
+              },
+            },
+          );
+          if (cancelled) break;
+          if (id) {
+            levelShapesRef.current.push(id);
+            // The override API can't report a key it ignored, so confirm the
+            // colour actually landed. One line in the console beats every
+            // line on the chart being the same colour and nobody knowing why.
+            try {
+              const applied = chart.getShapeById(id)?.getProperties?.()?.linecolor;
+              if (applied && String(applied).toLowerCase() !== lv.color.toLowerCase()) {
+                console.warn(
+                  "chart level colour was ignored by the library",
+                  { wanted: lv.color, applied, label: lv.label },
+                );
+              }
+            } catch {}
+          }
+        } catch (e) {
+          console.error("chart level draw failed", lv, e);
+        }
+      }
+    };
+
+    // Ask the server what to draw. Repaints only when the answer CHANGED,
+    // so the poll below costs one small request and nothing else.
+    const refresh = async () => {
+      const w = widgetRef.current;
+      if (!w || !token || cancelled) return;
       let levels: ChartLevel[] = [];
+      let t: string | null = null;
       try {
         // The endpoint returned a bare array before the trend was added; a
         // browser running yesterday's bundle against today's API (or the
@@ -348,101 +436,56 @@ function TradingViewChartInner({
           levels = res;
         } else {
           levels = res?.levels ?? [];
-          if (!cancelled) setTrend(res?.trend ?? null);
+          t = res?.trend ?? null;
         }
       } catch {
-        return; // no lines configured, or the call failed — draw nothing
+        return; // call failed — leave what is on the chart alone
       }
-      if (cancelled || !levels.length) return;
+      if (cancelled) return;
+      setTrend(t);
+      const json = JSON.stringify(levels);
+      if (json === lastJson) return;
+      lastJson = json;
+      levelsRef.current = levels;
+      // Also the path that CLEARS: an admin who deleted every line sends an
+      // empty list, and paint() removes the shapes without drawing new ones.
+      void paint();
+    };
 
-      const paint = async () => {
-        if (cancelled) return;
-        const chart = w.activeChart();
-        clear();
-        // A horizontal line still needs a time coordinate. The visible range
-        // can be empty on the first ready tick, so fall back to "now" — the
-        // time is irrelevant once the line spans the pane.
-        let anchor = Math.floor(Date.now() / 1000);
-        try {
-          const vr = chart.getVisibleRange?.();
-          if (vr && Number.isFinite(vr.from) && vr.from > 0) anchor = vr.from;
-        } catch {}
-        for (const lv of levels) {
-          if (!Number.isFinite(lv.price) || lv.price <= 0) continue;
-          try {
-            // createShape resolves to the id — it does NOT return it. Reading
-            // the promise as an id meant every failure below surfaced as an
-            // unhandled rejection: nothing drawn, nothing logged, and the
-            // "ids" we kept for cleanup were promises.
-            const id = await chart.createShape(
-              { time: anchor, price: lv.price },
-              {
-                shape: "horizontal_line",
-                lock: true, // an admin level is not the user's to drag
-                disableSelection: true,
-                disableSave: true,
-                disableUndo: true,
-                zOrder: "top",
-                text: lv.label || "",
-                // Per-shape overrides are the TOOL's own property names —
-                // `linecolor`, not `linetoolhorzline.linecolor`. The prefixed
-                // form belongs to widget.applyOverrides() (global defaults).
-                //
-                // Getting this wrong is SILENT: the library walks the keys
-                // with `properties.hasChild(key)` and just skips anything it
-                // doesn't recognise. No throw, no warning — every line simply
-                // kept the tool's factory default #2962FF, which is why they
-                // all came out the same blue however many colours the admin
-                // set. Hence the read-back check below.
-                overrides: {
-                  linecolor: lv.color,
-                  linewidth: 2,
-                  linestyle: 0,
-                  showPrice: true,
-                  textcolor: lv.color,
-                  horzLabelsAlign: "right",
-                  vertLabelsAlign: "bottom",
-                },
-              },
-            );
-            if (cancelled) break;
-            if (id) {
-              levelShapesRef.current.push(id);
-              // The override API can't report a key it ignored, so confirm the
-              // colour actually landed. One line in the console beats every
-              // line on the chart being the same colour and nobody knowing why.
-              try {
-                const applied = chart.getShapeById(id)?.getProperties?.()?.linecolor;
-                if (applied && String(applied).toLowerCase() !== lv.color.toLowerCase()) {
-                  console.warn(
-                    "chart level colour was ignored by the library",
-                    { wanted: lv.color, applied, label: lv.label },
-                  );
-                }
-              } catch {}
-            }
-          } catch (e) {
-            console.error("chart level draw failed", lv, e);
-          }
-        }
-      };
-
-      w.onChartReady(() => {
-        if (cancelled) return;
-        void paint();
-        try {
-          // Bars land AFTER onChartReady and reload on every symbol switch;
-          // repaint so the levels survive both.
-          dataSub = w.activeChart().onDataLoaded();
-          dataSub.subscribe(null, () => void paint());
-        } catch {}
-      });
+    // Coming back to the tab should show the current lines straight away,
+    // not up to one poll later.
+    const onVisible = () => {
+      if (!document.hidden) void refresh();
     };
 
     setTrend(null); // the last symbol's trend must not linger on this one
-    if (chartReady > 0) void draw();
+    if (chartReady > 0) {
+      const w = widgetRef.current;
+      try {
+        w?.onChartReady(() => {
+          if (cancelled) return;
+          try {
+            // Bars land AFTER onChartReady and reload on every symbol switch;
+            // repaint so the levels survive both. Subscribed ONCE — the poll
+            // below must not stack a new subscription every time it runs.
+            dataSub = w.activeChart().onDataLoaded();
+            dataSub.subscribe(null, () => void paint());
+          } catch {}
+          void refresh();
+        });
+      } catch {}
+      // These lines are edited on another screen, by someone else. Without a
+      // poll a trader keeps whatever was set the moment they opened the
+      // chart — the admin edits a level, saves, and nothing moves here.
+      timer = window.setInterval(() => {
+        if (!document.hidden) void refresh();
+      }, LEVEL_POLL_MS);
+      document.addEventListener("visibilitychange", onVisible);
+    }
     return () => {
       cancelled = true;
+      if (timer) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
       try {
         dataSub?.unsubscribeAll?.(null);
       } catch {}
