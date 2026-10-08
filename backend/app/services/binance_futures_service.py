@@ -161,6 +161,20 @@ class BinanceFuturesFeed:
     def is_connected(self) -> bool:
         return self._connected
 
+    def contract_name(self, symbol: str | None) -> str | None:
+        """The contract whose price this symbol is quoted from, or None.
+
+        The same resolution `get_tick` uses, exposed so the CHART can ask
+        for candles from the very contract the quote comes from. They used
+        to disagree: candles were pulled from Binance SPOT while the quote
+        came from here, so BTC's chart sat ~0.05% off its own price line,
+        and anything with no spot pair at all — XAUUSD, USOIL — fell
+        through to a Yahoo symbol for a different market entirely.
+        """
+        if not symbol:
+            return None
+        return contract_for(symbol, self._ticks)
+
     def get_tick(self, symbol: str | None) -> dict[str, Any] | None:
         if not symbol:
             return None

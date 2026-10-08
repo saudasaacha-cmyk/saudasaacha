@@ -15,6 +15,7 @@ from app.models.instrument import Instrument
 from app.schemas.common import APIResponse
 from app.schemas.trading import InstrumentOut, QuoteOut
 from app.services import instrument_service, market_data_service
+from app.services.binance_futures_service import binance_futures
 
 logger = logging.getLogger(__name__)
 
@@ -760,12 +761,6 @@ async def quotes_batch(user: CurrentUser, tokens: str = Query(description="comma
     return APIResponse(data=await market_data_service.get_quotes(tlist))
 
 
-_CRYPTO_BASES = {
-    "BTC", "ETH", "BNB", "XRP", "ADA", "SOL", "DOGE", "DOT", "AVAX", "MATIC",
-    "LINK", "LTC", "TRX", "SHIB", "PEPE", "APT", "ARB", "NEAR", "ATOM", "BCH",
-    "UNI", "XLM", "ETC", "FIL", "ICP", "VET", "ALGO", "AAVE",
-}
-
 # Zerodha-style interval strings → Binance kline intervals. Binance accepts
 # 1m / 5m / 15m / 30m / 1h / 4h / 1d / 1w. Defaults to 5m for unknowns.
 _BINANCE_INTERVAL_MAP = {
@@ -780,41 +775,32 @@ _BINANCE_INTERVAL_MAP = {
 }
 
 
-def _binance_symbol_for(token: str) -> str | None:
-    """Map our internal crypto token to a Binance trading pair.
+async def _binance_contract_for(token: str) -> str | None:
+    """The Binance contract whose candles belong under this instrument.
 
-    Examples:
-      "BTCUSD"  → "BTCUSDT"   (we suffix-swap USD → USDT; spot pair on Binance)
-      "BTCUSDT" → "BTCUSDT"   (pass through)
-      "ETHUSD"  → "ETHUSDT"
-      "CRYPTO_BTCUSD" → "BTCUSDT"  (strip legacy prefix)
-      "NIFTY"   → None        (not crypto — caller falls back to Zerodha)
+    Resolved through `binance_futures.contract_name`, which is the very
+    function the quote path uses — so the chart and the price cannot name
+    different contracts. Falls back to the catalogue row's
+    `trading_symbol`, which the sync writes with the resolved contract, for
+    the case where the feed hasn't warmed that symbol yet.
+
+    This replaces a hand-kept list of 28 crypto bases. We list ~740
+    contracts; the other ~710 matched nothing and silently fell through to
+    Yahoo or to an empty chart.
     """
-    if not token:
+    if not binance_futures.is_enabled():
         return None
-    t = token.upper().strip()
-    # Strip legacy/explicit prefixes.
-    for pref in ("CRYPTO_", "BINANCE_", "BINANCE:"):
-        if t.startswith(pref):
-            t = t[len(pref):]
-            break
-    # Reject anything that obviously isn't a crypto pair.
-    if not t.isalnum() or len(t) < 5 or len(t) > 12:
+    contract = binance_futures.contract_name(token)
+    if contract:
+        return contract
+    inst = await Instrument.find_one(Instrument.token == token)
+    if inst is None:
         return None
-    # Detect base → if it isn't a known crypto, bail.
-    base = None
-    for b in _CRYPTO_BASES:
-        if t.startswith(b):
-            base = b
-            break
-    if base is None:
-        return None
-    quote = t[len(base):]
-    if quote == "USD":
-        quote = "USDT"
-    elif quote not in ("USDT", "BUSD", "USDC", "FDUSD", "TUSD"):
-        return None
-    return base + quote
+    for candidate in (inst.trading_symbol, inst.symbol):
+        contract = binance_futures.contract_name(candidate)
+        if contract:
+            return contract
+    return None
 
 
 # Forex (and selected commodity) tokens come in as "FX_EURUSD" / "FX_USDJPY"
@@ -999,11 +985,18 @@ async def _fetch_yahoo_chart(
 async def _fetch_binance_klines(
     symbol: str, interval: str, days: int
 ) -> list[dict]:
-    """Pull OHLC from Binance's public klines endpoint. No API key needed
-    for spot klines — they're free and rate-limited per IP (we cache the
-    response 60 s in-process to stay well inside the limit). Returns
-    candles in the Zerodha-shaped dict ({date, open, high, low, close,
-    volume}) the chart frontend already understands."""
+    """Pull OHLC from Binance's USDT-M FUTURES klines. No API key needed —
+    free and rate-limited per IP (we cache the response 60 s in-process to
+    stay well inside the limit). Returns candles in the Zerodha-shaped dict
+    ({date, open, high, low, close, volume}) the chart frontend already
+    understands.
+
+    FUTURES, not spot: the live feed is `fstream.binance.com`, so spot
+    candles were a different market's prices under our own price line —
+    ~0.05% off on BTC and drifting with the basis. Worse, most of what we
+    list has no spot pair at all (XAUUSDT, CLUSDT, the equity perps), so
+    those charts fell through to a Yahoo symbol for a different instrument.
+    """
     import httpx
     from datetime import datetime, timezone
 
@@ -1013,7 +1006,7 @@ async def _fetch_binance_klines(
     per_day = {"1m": 1440, "3m": 480, "5m": 288, "15m": 96, "30m": 48,
                "1h": 24, "4h": 6, "1d": 1, "1w": 1}.get(bi, 288)
     limit = min(1000, max(50, per_day * days))
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://fapi.binance.com/fapi/v1/klines"
     params = {"symbol": symbol, "interval": bi, "limit": limit}
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -1131,7 +1124,7 @@ async def history(
     # Check this FIRST so a Zerodha-disabled environment still gets
     # crypto charts. Bails immediately for non-crypto tokens, so there's
     # no penalty for Indian instruments.
-    bn_symbol = _binance_symbol_for(token)
+    bn_symbol = await _binance_contract_for(token)
     if bn_symbol is not None:
         candles = await _fetch_binance_klines(bn_symbol, interval, days)
         if candles:

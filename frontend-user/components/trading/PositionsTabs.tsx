@@ -76,8 +76,34 @@ type TabKey = "positions" | "active" | "pending" | "history" | "cancelled";
 // with how every Indian broker (Zerodha / Upstox / Dhan) displays F&O
 // positions and stops the user wondering whether "3" means three lots
 // or three contracts.
-const COL_TEMPLATE =
-  "minmax(80px,80px) minmax(110px,1fr) 50px 60px 50px 70px minmax(80px,1fr) minmax(80px,1fr) minmax(80px,1fr) minmax(80px,1fr) 60px minmax(80px,1fr) minmax(96px,120px)";
+// Column widths are MINIMUMS, and every cell is `truncate` — so a track
+// narrower than its content doesn't wrap, it silently cuts the number off.
+// TIME at a flat 80px showed "08 Oct 16:1…" for a 15-character stamp, and
+// P/L at 80px turned a seven-figure amount into an ellipsis. Both are
+// values the trader is reading the row FOR, so they are sized against the
+// widest real content rather than against the table fitting on one screen:
+//   TIME  "08 Oct 16:12:34"   COMM  "₹ 1,23,456.78"   P/L  "-₹ 1,23,45,678.90"
+const COL_MIN_PX = [112, 110, 50, 60, 50, 70, 80, 80, 80, 80, 84, 124, 96];
+const COL_GAP_PX = 8; // gap-2
+
+// How far each track may grow when the blotter is wider than its minimum:
+// "1fr" absorbs slack, a number caps it, null pins it to the minimum.
+// ACTION is capped so the Close button doesn't stretch across the row.
+const COL_MAX: (string | number | null)[] = [
+  null, "1fr", null, null, null, null, "1fr", "1fr", "1fr", "1fr", "1fr", "1fr", 120,
+];
+
+const COL_TEMPLATE = COL_MIN_PX.map((px, i) => {
+  const max = COL_MAX[i];
+  if (max === null) return `${px}px`;
+  return `minmax(${px}px,${typeof max === "number" ? `${max}px` : max})`;
+}).join(" ");
+
+// Derived, never hand-counted: a min-width that lags the template makes the
+// grid report a narrower box than it draws, and the right-hand columns get
+// clipped under whatever sits beside it.
+const GRID_MIN_WIDTH =
+  COL_MIN_PX.reduce((a, b) => a + b, 0) + (COL_MIN_PX.length - 1) * COL_GAP_PX;
 
 // A close that errors with any of these is treated as "don't scare the user,
 // just reconcile from the server": the position is either already gone, or
@@ -566,7 +592,7 @@ export function PositionsTabs({ positions, pendingOrders, history, cancelled, to
       {/* Header */}
       <div
         className="sticky top-0 z-10 grid items-center gap-2 border-b border-border bg-card px-3 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground"
-        style={{ gridTemplateColumns: COL_TEMPLATE, minWidth: 900 }}
+        style={{ gridTemplateColumns: COL_TEMPLATE, minWidth: GRID_MIN_WIDTH }}
       >
         <span>TIME</span>
         <span>SYM</span>
@@ -789,7 +815,7 @@ function Row({ cells }: { cells: React.ReactNode[] }) {
   return (
     <div
       className="grid items-center gap-2 border-b border-border/40 px-3 py-2 text-xs hover:bg-muted/10"
-      style={{ gridTemplateColumns: COL_TEMPLATE, minWidth: 900 }}
+      style={{ gridTemplateColumns: COL_TEMPLATE, minWidth: GRID_MIN_WIDTH }}
     >
       {cells.map((c, i) => (
         <span key={i} className="truncate font-tabular">
