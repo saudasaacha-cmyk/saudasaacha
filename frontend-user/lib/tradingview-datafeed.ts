@@ -431,7 +431,13 @@ export class CustomDatafeed {
         description: inst.name || inst.symbol,
         type: crypto ? "crypto" : inst.instrument_type === "EQ" ? "stock" : "futures",
         session: is24h ? "24x7" : indianSession,
-        timezone: is24h ? "Etc/UTC" : "Asia/Kolkata",
+        // IST for EVERY instrument, 24×7 ones included. The timezone only
+        // labels the axis — it does not change which bars arrive — and a
+        // chart reading UTC next to a blotter reading IST is how a trader
+        // ends up comparing two moments 5½ hours apart and concluding the
+        // price is wrong. The rest of the app converts to IST at the edge;
+        // the chart now does the same.
+        timezone: "Asia/Kolkata",
         ticker: token,
         exchange: inst.exchange,
         listed_exchange: inst.exchange,
