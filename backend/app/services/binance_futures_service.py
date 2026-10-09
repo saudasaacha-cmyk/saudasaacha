@@ -63,6 +63,16 @@ import websockets
 logger = logging.getLogger(__name__)
 
 _WS_URL = "wss://fstream.binance.com/ws"
+# Trades come from Binance's OTHER futures host. Measured from this server,
+# 2026-10-09: fstream.binance.com acknowledges `<sym>@aggTrade` and then never
+# sends a frame — 0 in 60 s for BTCUSDT — while `!bookTicker` and even
+# `<sym>@bookTicker` pour in (2,583 frames in 10 s) on the same socket. The
+# alternate host delivers the same subscription normally: 43 BTCUSDT, 34
+# XAUUSDT and 32 SUIUSDT trades in 30 s.
+#
+# Without it there are no prints at all, so the "last price" is the mid of
+# the book — which is why our candles never matched the exchange's.
+_WS_TRADE_URL = "wss://fstream.binancefuture.com/ws"
 _REST_BASE = "https://fapi.binance.com"
 _STALE_RX_TIMEOUT_SEC = 30       # silent socket → force reconnect (half-open heal)
 _RECONNECT_CAP_SEC = 60
@@ -144,6 +154,10 @@ class BinanceFuturesFeed:
         self._task: asyncio.Task[Any] | None = None
         self._stats_task: asyncio.Task[Any] | None = None
         self._fast_task: asyncio.Task[Any] | None = None
+        self._trade_task: asyncio.Task[Any] | None = None
+        self._trade_ws: Any = None
+        # contracts whose trade stream is live on the trade socket
+        self._trade_subs: set[str] = set()
         self._symbol_count = 0
         self._ws: Any = None
         # contract → when it was last asked for (monotonic)
@@ -244,10 +258,11 @@ class BinanceFuturesFeed:
                                     "params": [
                                         p
                                         for c in chunk
-                                        for p in (
-                                            f"{c.lower()}@bookTicker",
-                                            f"{c.lower()}@aggTrade",
-                                        )
+                                        # Book only: this host never delivers
+                                        # the trade stream (see _WS_TRADE_URL),
+                                        # and subscribing to it here only
+                                        # burnt half the 1024-stream budget.
+                                        for p in (f"{c.lower()}@bookTicker",)
                                     ],
                                     "id": int(time.time() * 1000) % 1_000_000,
                                 }
@@ -269,6 +284,103 @@ class BinanceFuturesFeed:
             except Exception:  # noqa: BLE001 — the all-market stream still feeds
                 logger.warning("binance_fast_lane_failed", exc_info=True)
 
+    async def _trade_loop(self) -> None:
+        """Hold the trade socket and keep its subscriptions matching the
+        fast lane.
+
+        A second connection, to the other futures host, carrying ONE stream
+        per watched contract: `<sym>@aggTrade`. Reconnects with the same
+        backoff as the book socket, and re-subscribes whatever is still
+        being watched — the set is rebuilt from `_wanted_fast()` every pass,
+        so a reconnect needs no separate bookkeeping.
+        """
+        backoff = 1
+        while not self._stop:
+            started = time.monotonic()
+            try:
+                async with websockets.connect(
+                    _WS_TRADE_URL,
+                    ping_interval=20,
+                    ping_timeout=20,
+                    close_timeout=5,
+                    max_size=2**21,
+                ) as ws:
+                    self._trade_ws = ws
+                    self._trade_subs.clear()
+                    logger.info("binance_futures_trade_ws_connected")
+                    reconcile = asyncio.create_task(
+                        self._trade_reconcile(ws), name="binance_futures_trade_subs"
+                    )
+                    try:
+                        async for raw in ws:
+                            if self._stop:
+                                break
+                            try:
+                                msg = json.loads(
+                                    raw if isinstance(raw, str) else raw.decode()
+                                )
+                            except Exception:
+                                continue
+                            if isinstance(msg, dict) and msg.get("e") == "aggTrade":
+                                self._handle_trade(msg)
+                    finally:
+                        reconcile.cancel()
+                        try:
+                            await reconcile
+                        except (asyncio.CancelledError, Exception):
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — the book socket still feeds
+                logger.warning("binance_futures_trade_ws_failed", exc_info=True)
+            finally:
+                self._trade_ws = None
+                self._trade_subs.clear()
+            if self._stop:
+                break
+            if time.monotonic() - started >= _STABLE_CONNECTION_SEC:
+                backoff = 1
+            ceiling = min(backoff, _RECONNECT_CAP_SEC)
+            await asyncio.sleep(ceiling / 2 + random.uniform(0, ceiling / 2))
+            backoff = min(backoff * 2, _RECONNECT_CAP_SEC)
+
+    async def _trade_reconcile(self, ws: Any) -> None:
+        """Subscribe / unsubscribe trade streams to match what's watched."""
+        while not self._stop:
+            try:
+                want = self._wanted_fast()
+                add = sorted(want - self._trade_subs)
+                drop = sorted(self._trade_subs - want)
+                for method, syms in (("SUBSCRIBE", add), ("UNSUBSCRIBE", drop)):
+                    for i in range(0, len(syms), _SUB_CHUNK):
+                        chunk = syms[i : i + _SUB_CHUNK]
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "method": method,
+                                    "params": [f"{c.lower()}@aggTrade" for c in chunk],
+                                    "id": int(time.time() * 1000) % 1_000_000,
+                                }
+                            )
+                        )
+                        # Binance drops a connection that sends more than ~10
+                        # messages a second.
+                        await asyncio.sleep(0.3)
+                if add or drop:
+                    self._trade_subs = set(want)
+                    logger.info(
+                        "binance_trade_subs added=%d dropped=%d total=%d",
+                        len(add),
+                        len(drop),
+                        len(self._trade_subs),
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.warning("binance_trade_subs_failed", exc_info=True)
+                return  # let the socket loop reconnect
+            await asyncio.sleep(_FAST_LANE_INTERVAL_SEC)
+
     # ── lifecycle ─────────────────────────────────────────────────────
     async def start(self) -> None:
         if not self.is_enabled():
@@ -282,12 +394,15 @@ class BinanceFuturesFeed:
         self._fast_task = asyncio.create_task(
             self._fast_lane_loop(), name="binance_futures_fast_lane"
         )
+        self._trade_task = asyncio.create_task(
+            self._trade_loop(), name="binance_futures_trades"
+        )
         logger.info("binance_futures_feed_started")
 
     async def stop(self) -> None:
         self._stop = True
         self._connected = False
-        for t in (self._task, self._stats_task, self._fast_task):
+        for t in (self._task, self._stats_task, self._fast_task, self._trade_task):
             if t is not None:
                 t.cancel()
                 try:
