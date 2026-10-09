@@ -44,10 +44,15 @@ function TradingViewChartInner({
     const ltp = Number(quote.ltp ?? 0);
     const bid = Number(quote.bid ?? 0);
     const ask = Number(quote.ask ?? 0);
+    // The traded price when the feed publishes one — candles are built from
+    // trades, while `ltp` is allowed to follow the mid so the quote never
+    // looks frozen. Keeping them apart is what makes our 1m/5m bars agree
+    // with the exchange's own.
+    const lastTrade = Number((quote as any).last_trade ?? 0);
     if (ltp > 0 || bid > 0) {
-      pushLiveQuote(token, ltp, bid, ask);
+      pushLiveQuote(token, ltp, bid, ask, lastTrade > 0 ? lastTrade : undefined);
     }
-  }, [token, quote?.ltp, quote?.bid, quote?.ask]);
+  }, [token, quote?.ltp, quote?.bid, quote?.ask, (quote as any)?.last_trade]);
 
   useEffect(() => {
     const container = containerRef.current;

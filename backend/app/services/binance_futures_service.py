@@ -424,6 +424,13 @@ class BinanceFuturesFeed:
             )
             return
         t["ltp"] = price
+        # Kept SEPARATE from ltp, which hands itself back to the mid when the
+        # tape goes quiet (see _TRADE_LEAD_SEC). A candle is made of trades:
+        # gold can go twelve seconds without a print while its book moves
+        # 2,939 times, and a bar built from that book shows highs and lows
+        # that never traded — which is exactly why our chart and Binance's
+        # disagreed on the same minute.
+        t["last_trade"] = price
         t["last_trade_ts"] = time.time()
         if t.get("open"):
             t["change"] = price - _f(t["open"])

@@ -203,6 +203,12 @@ export function useMarketStream(tokens: string[]): Map<string, MarketQuote> {
       if (!isPositive(next.bid) && isPositive(prev?.bid)) merged.bid = prev!.bid;
       if (!isPositive(next.ask) && isPositive(prev?.ask)) merged.ask = prev!.ask;
       if (!isPositive(next.ltp) && isPositive(prev?.ltp)) merged.ltp = prev!.ltp;
+      // The traded price is only present on a tick that FOLLOWED a trade;
+      // every other tick carries null and would otherwise wipe it, handing
+      // the chart back to the mid between prints.
+      if (!isPositive(next.last_trade) && isPositive(prev?.last_trade)) {
+        merged.last_trade = prev!.last_trade;
+      }
       return merged;
     }
 

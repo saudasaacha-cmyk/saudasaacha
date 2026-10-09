@@ -145,9 +145,30 @@ interface Subscriber {
  */
 const _activeSubs = new Set<Subscriber>();
 
-function priceFromQuote(ltp: number, bid: number, ask: number): number {
-  if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) return (bid + ask) / 2;
+/**
+ * The price the live candle is built from — the LAST TRADED price.
+ *
+ * This used to take the mid of bid/ask, and that is why a forming candle
+ * never matched the one Binance (or Kite) drew for the same minute. A
+ * candle is made of TRADES. The book moves on every size change with no
+ * trade behind it, so a mid-built bar prints highs and lows that never
+ * happened, and then history — real trade candles — replaces them on the
+ * next reload. That is the whole "1m/5m ke high low match nahi ho rahe"
+ * report: two different definitions of price on one chart.
+ *
+ * The mid stays as a FALLBACK for an instrument whose feed has a book but
+ * no print yet (a freshly subscribed Indian contract, a quiet far month) —
+ * better a mid than an empty bar, but never in preference to a trade.
+ */
+function priceFromQuote(
+  ltp: number,
+  bid: number,
+  ask: number,
+  lastTrade?: number,
+): number {
+  if (Number.isFinite(lastTrade) && (lastTrade as number) > 0) return lastTrade as number;
   if (Number.isFinite(ltp) && ltp > 0) return ltp;
+  if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) return (bid + ask) / 2;
   return NaN;
 }
 
@@ -317,13 +338,22 @@ function generateSyntheticBars(
  * every WebSocket tick; subscribeBars reads the cache instead of
  * polling REST. Result: chart price = order panel price always.
  */
-const _liveQuoteCache = new Map<string, { ltp: number; bid: number; ask: number; ts: number }>();
+const _liveQuoteCache = new Map<
+  string,
+  { ltp: number; bid: number; ask: number; lastTrade?: number; ts: number }
+>();
 
-export function pushLiveQuote(token: string, ltp: number, bid: number, ask: number) {
+export function pushLiveQuote(
+  token: string,
+  ltp: number,
+  bid: number,
+  ask: number,
+  lastTrade?: number,
+) {
   if (!token) return;
   const t = String(token);
-  _liveQuoteCache.set(t, { ltp, bid, ask, ts: Date.now() });
-  const price = priceFromQuote(ltp, bid, ask);
+  _liveQuoteCache.set(t, { ltp, bid, ask, lastTrade, ts: Date.now() });
+  const price = priceFromQuote(ltp, bid, ask, lastTrade);
   if (!(price > 0)) return;
   // Push the tick into every subscriber on this token RIGHT NOW so the
   // candle grows on every WS tick — no waiting on the fallback poll.
@@ -680,6 +710,7 @@ export class CustomDatafeed {
             Number(q.ltp ?? NaN),
             Number(q.bid ?? NaN),
             Number(q.ask ?? NaN),
+            Number((q as any).last_trade ?? NaN),
           );
           applyTickToBar(sub, price);
         } catch {

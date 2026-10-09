@@ -476,6 +476,14 @@ async def _infoway_overlay(token: str, base_quote: dict[str, Any]) -> dict[str, 
             return base_quote
         merged = dict(base_quote)
         merged["ltp"] = ltp
+        # The last PRICE SOMETHING ACTUALLY TRADED AT, where the feed knows
+        # it. `ltp` is what we quote (it falls back to the mid on a quiet
+        # tape so the number never looks frozen); this is what a candle is
+        # drawn from. Absent for feeds that only ever publish trades —
+        # Zerodha's ltp already is one — and the chart falls back to ltp.
+        _lt = float(live.get("last_trade") or 0)
+        if _lt > 0:
+            merged["last_trade"] = _lt
         # Real best-bid / best-ask from Infoway depth book. When the feed
         # publishes no bid/ask (dead / illiquid symbol), leave the side at
         # 0 instead of collapsing to LTP — the order panel reads a 0 here
@@ -1653,6 +1661,14 @@ async def tick_loop(interval_sec: float = 1.0) -> None:
                                 "volume": q["volume"],
                                 "bid": q["bid"],
                                 "ask": q["ask"],
+                                # The chart builds its candle from this when
+                                # the feed knows it — `ltp` follows the mid on
+                                # a quiet tape, and a bar built from the mid
+                                # prints highs the market never traded at.
+                                # Deliberately NOT in the dedupe signature
+                                # above: a trade at the current mid changes
+                                # nothing anybody can see.
+                                "last_trade": q.get("last_trade"),
                                 "ts": q["ts"],
                             },
                         ))
