@@ -272,64 +272,6 @@ function seededRand(seed: number) {
   };
 }
 
-function generateSyntheticBars(
-  symbol: string,
-  mid: number,
-  spread: number,
-  resolution: string,
-  from: number,
-  to: number
-): any[] {
-  if (mid <= 0) return [];
-  const resSec = RESOLUTION_TO_SECONDS[resolution] ?? 300;
-  // Volatility tuned per symbol category — options move a lot more in
-  // percentage terms than indices/equities, so give them more wiggle.
-  const isOption = /CE$|PE$/i.test(symbol);
-  const volPct = isOption ? 0.008 : 0.0005;
-  const resFactor = Math.sqrt(resSec / 300);
-  const volatility = Math.max(spread * 1.5, mid * volPct * resFactor);
-
-  const nowSec = Math.floor(Date.now() / 1000);
-  const toSec = Math.min(to, nowSec);
-  const fromAligned = Math.floor(from / resSec) * resSec;
-  const toAligned = Math.floor(toSec / resSec) * resSec;
-  if (fromAligned >= toAligned) return [];
-
-  const count = Math.min(Math.floor((toAligned - fromAligned) / resSec) + 1, 500);
-  const startSec = toAligned - (count - 1) * resSec;
-
-  const seed = symbol.split("").reduce((a, c) => a + c.charCodeAt(0), 0) + Math.floor(startSec / 86400);
-  const rand = seededRand(seed);
-
-  const increments = Array.from({ length: count }, () => (rand() - 0.5) * volatility * 2);
-  let cumSum = 0;
-  const cumSums = increments.map((inc) => {
-    cumSum += inc;
-    return cumSum;
-  });
-  const lastCum = cumSums[cumSums.length - 1];
-  // Anchor the last bar's close to `mid` so the chart sits exactly on
-  // the live quote when subscribeBars takes over.
-  const prices = cumSums.map((c) => Math.max(0.01, mid + (c - lastCum)));
-
-  const bars: any[] = [];
-  let prev = Math.max(0.01, mid - (cumSums[0] - lastCum));
-  for (let i = 0; i < count; i++) {
-    const open = prev;
-    const close = prices[i];
-    bars.push({
-      time: (startSec + i * resSec) * 1000,
-      open,
-      close,
-      high: Math.max(open, close) + Math.abs(rand() * volatility * 0.4),
-      low: Math.max(0.01, Math.min(open, close) - Math.abs(rand() * volatility * 0.4)),
-      volume: Math.floor(rand() * 500) + 50,
-    });
-    prev = close;
-  }
-  return bars;
-}
-
 /* ── Live quote cache (WebSocket → chart bridge) ─────────────────────
  * The terminal's `useMarketStream` hook delivers sub-second tick data
  * via /ws/marketdata, but the datafeed's subscribeBars runs in a
@@ -535,7 +477,14 @@ export class CustomDatafeed {
       // (the case that left option charts blank).
       const bars = candles
         .map((c: any) => ({
-          time: c.time * 1000,
+          // `time` (epoch seconds) is the canonical field; `date` (ISO) is
+          // the fallback. Reading ONLY `time` silently zeroed out every
+          // Binance and Yahoo series — those builders emitted `date`
+          // alone — and an empty series used to mean a fabricated chart.
+          // Accept both so a shape mismatch can never do that again.
+          time: Number.isFinite(Number(c.time))
+            ? Number(c.time) * 1000
+            : Date.parse(c.date),
           open: c.open,
           high: c.high,
           low: c.low,
@@ -557,7 +506,7 @@ export class CustomDatafeed {
           // TradingView clips the viewport itself. This is the fix for
           // options that only started trading today — they have valid bars
           // but only from today, so the range filter used to remove them all
-          // and hand the chart a blank synthetic series instead.
+          // and hand the chart nothing at all.
           this.lastHistoryBar.set(token, bars[bars.length - 1]);
           onResult(bars, { noData: false });
           return;
@@ -566,7 +515,7 @@ export class CustomDatafeed {
         // within the requested window. If all bars are newer than `to`
         // (TradingView scrolled back further than our history), signal
         // noData:true so TradingView stops paginating — without this it
-        // loops endlessly until the synthetic fallback fires.
+        // loops endlessly asking for history that isn't there.
         const inRange = bars.filter((b: any) => b.time >= fromMs && b.time <= toMs);
         if (inRange.length > 0) {
           this.lastHistoryBar.set(token, inRange[inRange.length - 1]);
@@ -577,39 +526,19 @@ export class CustomDatafeed {
         return;
       }
 
-      // ── Fallback: synthetic candles anchored to the live quote ─────
-      // Only reached when the backend returns zero bars (Zerodha not
-      // connected, very new contract with no history yet, or API error).
-      // Anchoring to the bid/ask mid means the chart's last candle
-      // matches the BUY/SELL price the order panel shows.
-      try {
-        const from = periodParams.from || Math.floor(Date.now() / 1000) - 30 * 86400;
-        const to = periodParams.to || Math.floor(Date.now() / 1000);
-        const q = await InstrumentAPI.quote(token);
-        const bid = Number(q?.bid ?? q?.ltp ?? NaN);
-        const ask = Number(q?.ask ?? q?.ltp ?? NaN);
-        const ltp = Number(q?.ltp ?? NaN);
-        let mid = NaN;
-        let spread = 0;
-        if (Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0) {
-          mid = (bid + ask) / 2;
-          spread = Math.abs(ask - bid);
-        } else if (Number.isFinite(ltp) && ltp > 0) {
-          mid = ltp;
-          spread = ltp * 0.0005;
-        }
-        if (mid > 0) {
-          const synth = generateSyntheticBars(token, mid, spread, resolution, from, to);
-          if (synth.length > 0) {
-            this.lastHistoryBar.set(token, synth[synth.length - 1]);
-            onResult(synth, { noData: false });
-            return;
-          }
-        }
-      } catch {
-        // ignore — fall through to noData
-      }
-
+      // No bars, no chart. There is deliberately no fallback here.
+      //
+      // This used to invent a random walk anchored to the live quote, and
+      // because the backend's Binance/Yahoo candles were being dropped by
+      // the mapping above, that fabricated series is what traders were
+      // actually looking at: the right last price with a shape that never
+      // happened, which is how a client ended up asking where a 4,202 high
+      // came from. It came from nowhere.
+      //
+      // The backend already made this call — it returns an empty list
+      // "instead of fake random-walk OHLC" — and the chart now agrees with
+      // it. An empty chart says "no history"; an invented one says
+      // something false about the market.
       onResult([], { noData: true });
     } catch (err: any) {
       onError(err?.message || "Error loading bars");

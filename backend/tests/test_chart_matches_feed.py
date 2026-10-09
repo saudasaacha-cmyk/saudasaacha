@@ -93,3 +93,20 @@ def test_a_resolved_contract_is_the_last_stop():
     assert binance_block.count("return ") == 1
     # And an empty answer is not cached, so the next request retries.
     assert "if candles:\n            _history_cache" in binance_block
+
+
+def test_every_candle_builder_emits_the_field_the_chart_reads():
+    """The chart maps bars with `c.time` (epoch seconds). Zerodha's builder
+    emitted it; the Binance and Yahoo ones emitted `date` alone, so every
+    one of their bars failed the client's isFinite check and the series
+    came back empty — at which point the chart drew a SYNTHETIC random walk
+    anchored to the live quote. Correct candles, served correctly, that no
+    one ever saw. This is the contract that broke."""
+    import inspect
+
+    from app.api.v1.user.instruments import _fetch_binance_klines, _fetch_yahoo_chart
+
+    for builder in (_fetch_binance_klines, _fetch_yahoo_chart):
+        src = inspect.getsource(builder)
+        assert '"time":' in src, f"{builder.__name__} must emit `time`"
+        assert '"date":' in src, f"{builder.__name__} should keep `date` too"

@@ -976,6 +976,13 @@ async def _fetch_yahoo_chart(
                 continue
             iso = datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
             out.append({
+                # BOTH keys. The chart reads `time` (epoch seconds, the
+                # shape the Zerodha path has always emitted); `date` is
+                # kept for anything reading the ISO form. Emitting only
+                # `date` here meant every bar failed the client's
+                # Number.isFinite(time) check and the whole series was
+                # dropped — see the Binance builder below.
+                "time": int(ts),
                 "date": iso,
                 "open": float(o),
                 "high": float(h),
@@ -1029,6 +1036,13 @@ async def _fetch_binance_klines(
             ts_ms = int(row[0])
             iso = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).isoformat()
             out.append({
+                # `time` is what the chart actually reads. Without it every
+                # bar was dropped client-side and the chart fell through to
+                # a SYNTHETIC random walk anchored to the live price — which
+                # is why the candles never matched Binance however correct
+                # this endpoint was. Zerodha's path emitted `time` all along,
+                # which is why Indian instruments looked fine.
+                "time": ts_ms // 1000,
                 "date": iso,
                 "open": float(row[1]),
                 "high": float(row[2]),
