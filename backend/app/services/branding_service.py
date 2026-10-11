@@ -472,6 +472,72 @@ def admin_host_for(domain: str) -> str:
     return f"admin.{(domain or '').strip().lower().lstrip('.')}"
 
 
+# Public recursive resolvers, used only as a fallback.
+_PUBLIC_RESOLVERS: Final[list[str]] = ["8.8.8.8", "1.1.1.1", "8.8.4.4", "1.0.0.1"]
+
+
+def _make_resolver(nameservers: list[str]):
+    """A dnspython resolver that ignores the system config and our own
+    negative cache, so a stale NXDOMAIN can't bite a retry."""
+    import dns.resolver  # type: ignore
+
+    r = dns.resolver.Resolver(configure=False)
+    r.nameservers = nameservers
+    r.lifetime = 5.0
+    r.timeout = 5.0
+    r.cache = None
+    return r
+
+
+def _authoritative_nameserver_ips(domain: str) -> list[str]:
+    """IPs of the nameservers that are AUTHORITATIVE for ``domain``.
+
+    We ask them directly instead of trusting a recursive resolver,
+    because this host's UDP:53 is intercepted by the provider — a
+    `dig @8.8.8.8` from the server returns the provider's own cached
+    answer, not Google's. That is how a domain whose A record had
+    already been corrected kept failing verification for an hour:
+    every public resolver on the internet saw the new IP, and this one
+    box saw the old one.
+
+    Asking the authoritative servers is also the question we actually
+    mean: "has the operator published this record", not "has some
+    cache caught up yet".
+    """
+    import dns.exception  # type: ignore
+
+    probe = _make_resolver(_PUBLIC_RESOLVERS)
+    labels = (domain or "").strip(".").split(".")
+    # Walk up: admin.foo.co.uk -> foo.co.uk -> co.uk, stopping at the
+    # first zone that answers with NS records.
+    for i in range(len(labels) - 1):
+        zone = ".".join(labels[i:])
+        try:
+            ns_names = [str(r.target).rstrip(".") for r in probe.resolve(zone, "NS")]
+        except dns.exception.DNSException:
+            continue
+        ips: list[str] = []
+        for name in ns_names:
+            try:
+                ips.extend(rd.address for rd in probe.resolve(name, "A"))
+            except dns.exception.DNSException:
+                continue
+        if ips:
+            return ips
+    return []
+
+
+def _resolve_a_records(host: str, nameserver_ips: list[str]) -> tuple[set[str], str | None]:
+    """``(ips, error_class_name_or_None)`` for one host."""
+    import dns.exception  # type: ignore
+
+    try:
+        answers = _make_resolver(nameserver_ips).resolve(host, "A")
+        return {rd.address for rd in answers}, None
+    except dns.exception.DNSException as exc:
+        return set(), exc.__class__.__name__
+
+
 async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
     """Resolve A records for both apex + www and confirm at least one
     points at ``settings.PLATFORM_PUBLIC_IP``.
@@ -489,8 +555,7 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
         )
 
     try:
-        import dns.resolver  # type: ignore
-        import dns.exception  # type: ignore
+        import dns.resolver  # type: ignore  # noqa: F401 - availability probe
     except ImportError:
         return False, (
             "dnspython is not installed in the backend env; "
@@ -511,15 +576,10 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
     #      keeps failing.
     #   2. Public resolvers see the latest authoritative answer fastest
     #      and have no per-tenant negative cache that can wedge us.
-    # Hardcoded list is fine — these are rock-solid and we just need a
-    # working answer; if all four are down DNS itself is broken.
-    resolver = dns.resolver.Resolver(configure=False)
-    resolver.nameservers = ["8.8.8.8", "1.1.1.1", "8.8.4.4", "1.0.0.1"]
-    resolver.lifetime = 5.0
-    resolver.timeout = 5.0
-    # Disable our own negative cache so a stale NXDOMAIN from this
-    # process can't bite a subsequent retry inside the same worker.
-    resolver.cache = None
+    # Authoritative first, public resolvers only if that fails — see
+    # `_authoritative_nameserver_ips` for why a recursive answer can't
+    # be trusted from this host.
+    nameservers = _authoritative_nameserver_ips(domain) or _PUBLIC_RESOLVERS
 
     # The admin host is checked too, but it is OPTIONAL: a tenant who
     # only wants the trading app keeps working exactly as before, and
@@ -531,19 +591,18 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
         (f"www.{domain}", "www"),
         (admin_host_for(domain), "admin"),
     ):
-        try:
-            answers = resolver.resolve(host, "A")
-            ips = {rdata.address for rdata in answers}
-            seen.append(f"{host}={','.join(sorted(ips)) or 'none'}")
-            if target_ip in ips:
-                if target_flag == "apex":
-                    apex_ok = True
-                elif target_flag == "www":
-                    www_ok = True
-                else:
-                    admin_ok = True
-        except dns.exception.DNSException as exc:
-            seen.append(f"{host}=ERR({exc.__class__.__name__})")
+        ips, err = _resolve_a_records(host, nameservers)
+        if err:
+            seen.append(f"{host}=ERR({err})")
+            continue
+        seen.append(f"{host}={','.join(sorted(ips)) or 'none'}")
+        if target_ip in ips:
+            if target_flag == "apex":
+                apex_ok = True
+            elif target_flag == "www":
+                www_ok = True
+            else:
+                admin_ok = True
 
     # Apex MUST resolve to us (it's the canonical record). www is
     # nice-to-have — if it doesn't, we let certbot fail naturally on
@@ -614,34 +673,29 @@ async def resolve_dns_preview(domain: str) -> dict:
         return out
 
     try:
-        import dns.resolver  # type: ignore
-        import dns.exception  # type: ignore
+        import dns.resolver  # type: ignore  # noqa: F401 - availability probe
     except ImportError:
         out["apex"]["error"] = "dnspython not installed in backend"
         out["www"]["error"] = out["apex"]["error"]
         out["admin"]["error"] = out["apex"]["error"]
         return out
 
-    # Same public-resolver bypass as check_dns_a_record — see comment
-    # there for rationale (avoids stale system NXDOMAIN cache).
-    resolver = dns.resolver.Resolver(configure=False)
-    resolver.nameservers = ["8.8.8.8", "1.1.1.1", "8.8.4.4", "1.0.0.1"]
-    resolver.lifetime = 5.0
-    resolver.timeout = 5.0
-    resolver.cache = None
+    # Authoritative, same as check_dns_a_record — the table the admin
+    # reads has to agree with the check that gates provisioning, or
+    # they see green rows next to a failure.
+    nameservers = _authoritative_nameserver_ips(norm) or _PUBLIC_RESOLVERS
 
     for host, key in (
         (norm, "apex"),
         (f"www.{norm}", "www"),
         (admin_host_for(norm), "admin"),
     ):
-        try:
-            answers = resolver.resolve(host, "A")
-            ips = sorted({rdata.address for rdata in answers})
-            out[key]["current"] = ips
-            out[key]["ok"] = expected_ip in ips
-        except dns.exception.DNSException as exc:
-            out[key]["error"] = exc.__class__.__name__
+        ips, err = _resolve_a_records(host, nameservers)
+        if err:
+            out[key]["error"] = err
+            continue
+        out[key]["current"] = sorted(ips)
+        out[key]["ok"] = expected_ip in ips
     return out
 
 
