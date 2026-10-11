@@ -76,3 +76,17 @@ def test_removal_takes_the_admin_block_with_it():
     assert 'CONF_NAME="sachchasauda-branded-${DOMAIN}.conf"' in add
     assert 'CONF_NAME="sachchasauda-branded-${DOMAIN}.conf"' in remove
     assert 'rm -f "$SYMLINK_PATH" "$CONF_PATH"' in remove
+
+
+def test_the_admin_host_resolves_to_the_tenant_who_owns_the_domain():
+    """admin.<domain> has no row of its own — the tenant saved
+    <domain>. Without this the admin login page on a branded host
+    greeted the broker's staff with the platform's name."""
+    from app.services import branding_service
+
+    src = inspect.getsource(branding_service.find_admin_by_domain)
+    assert 'norm.startswith("admin.")' in src
+    # Exact match is tried FIRST, so an admin who deliberately saved
+    # "admin.foo.com" as their trading host still wins on their own
+    # name instead of being handed foo.com's owner.
+    assert "candidates = [norm]" in src

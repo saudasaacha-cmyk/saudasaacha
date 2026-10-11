@@ -215,12 +215,25 @@ async def find_admin_by_domain(domain: str) -> User | None:
         return None
     if not norm:
         return None
-    user = await User.find_one(User.custom_domain == norm)
-    if user is None:
-        return None
-    if user.role != UserRole.ADMIN or user.status != UserStatus.ACTIVE:
-        return None
-    return user
+
+    # Exact first, then with a leading `admin.` removed, so the admin
+    # panel on admin.<domain> resolves to the tenant who owns <domain>.
+    # Exact-first matters: an admin who deliberately saved
+    # "admin.foo.com" as their TRADING host still wins on their own
+    # name instead of being redirected to a foo.com that may be
+    # somebody else's.
+    candidates = [norm]
+    if norm.startswith("admin."):
+        candidates.append(norm[len("admin.") :])
+
+    for candidate in candidates:
+        user = await User.find_one(User.custom_domain == candidate)
+        if user is None:
+            continue
+        if user.role != UserRole.ADMIN or user.status != UserStatus.ACTIVE:
+            continue
+        return user
+    return None
 
 
 async def brand_domain_for_user(user: User) -> str | None:
