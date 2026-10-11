@@ -92,12 +92,12 @@ async function resolveHostBrand(): Promise<{
 export async function generateMetadata(): Promise<Metadata> {
   const { platform, name, logo } = await resolveHostBrand();
   const displayName = name || (platform ? "SachchaSauda Broker" : "Trading Platform");
-  const title = platform
-    ? "SachchaSauda Broker — Indian Trading Platform"
-    : `${displayName} — Trading Platform`;
-  const description = platform
-    ? "Trade Indian stocks, F&O, commodities, currencies, and crypto with SachchaSauda Broker — fast, transparent, dark-themed."
-    : `Trade Indian stocks, F&O, commodities, currencies, and crypto with ${displayName} — fast, transparent, dark-themed.`;
+  const title = `${displayName} — Trading Platform`;
+  // No market list here. This is what WhatsApp, Telegram and search
+  // results quote, it is served under every tenant's own domain, and
+  // the old line named "currencies" — forex, which the platform no
+  // longer carries at all.
+  const description = `Trade with ${displayName} — live prices, instant execution and transparent charges.`;
   // OG/favicon image: the tenant's uploaded logo on a branded domain, else the
   // platform febicon. Absolute URL required so crawlers can fetch it.
   const image = logo || (platform ? "/febicon.png" : null);

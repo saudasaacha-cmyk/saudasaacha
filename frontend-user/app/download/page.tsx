@@ -76,7 +76,7 @@ export async function generateMetadata({
   const name = brand?.brand_name?.trim() || APP_NAME;
   const logo = resolveLogo(brand?.logo_url);
   const title = `${name} — Download App`;
-  const description = `Install the ${name} app to trade Indian stocks, F&O, commodities, currencies and crypto — fast, transparent, dark-themed.`;
+  const description = `Install the ${name} app — live prices, instant execution and transparent charges, on one account.`;
 
   return {
     title,

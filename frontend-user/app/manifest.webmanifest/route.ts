@@ -31,7 +31,7 @@ const PLATFORM_DEFAULT = {
   name: "SachchaSauda Broker",
   short_name: "SachchaSauda",
   description:
-    "Trade Indian stocks, F&O, commodities, currencies, and crypto with SachchaSauda Broker.",
+    "Trade with SachchaSauda Broker — live prices, instant execution and transparent charges.",
   start_url: "/dashboard",
   scope: "/",
   display: "standalone",
@@ -127,7 +127,7 @@ function buildBrandedManifest(b: ResolvedBrand): Record<string, unknown> {
     start_url: "/login",
     name,
     short_name: shortName,
-    description: `${name} — trade Indian markets`,
+    description: `${name} — live prices, instant execution, transparent charges`,
     icons: logo ? brandedIcons : PLATFORM_DEFAULT.icons,
   };
 }
