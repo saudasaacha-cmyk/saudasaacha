@@ -1192,6 +1192,9 @@ export type DnsPreview = {
   expected_ip: string | null;
   apex: DnsRecordCheck;
   www: DnsRecordCheck;
+  /** `admin.<domain>` — optional; only needed to put the admin panel
+   *  on the tenant's own domain. Older backends omit it. */
+  admin?: DnsRecordCheck;
 };
 
 /**

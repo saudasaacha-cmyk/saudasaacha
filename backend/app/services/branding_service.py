@@ -17,6 +17,8 @@ import even on Phase-1 deploys where the feature is gated off.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import re
 from datetime import datetime
@@ -453,6 +455,23 @@ async def save_logo(admin: User, *, content: bytes, mime: str) -> User:
 
 
 # ── DNS + SSL provisioning ────────────────────────────────────────────
+# Strong references to in-flight provisioning tasks. asyncio keeps only
+# weak references to tasks, so without this a certbot run can be
+# collected mid-flight and simply vanish.
+_PROVISION_TASKS: set = set()
+
+
+def admin_host_for(domain: str) -> str:
+    """The hostname the ADMIN panel is served on for a tenant domain.
+
+    `admin.<domain>`, mirroring how the platform itself is laid out
+    (admin.sachchasauda.com). Kept in one place because the DNS check,
+    the preview, the provisioning helper, the CORS allow-list and the
+    UI all have to agree on it.
+    """
+    return f"admin.{(domain or '').strip().lower().lstrip('.')}"
+
+
 async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
     """Resolve A records for both apex + www and confirm at least one
     points at ``settings.PLATFORM_PUBLIC_IP``.
@@ -502,7 +521,16 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
     # process can't bite a subsequent retry inside the same worker.
     resolver.cache = None
 
-    for host, target_flag in ((domain, "apex"), (f"www.{domain}", "www")):
+    # The admin host is checked too, but it is OPTIONAL: a tenant who
+    # only wants the trading app keeps working exactly as before, and
+    # certbot is simply not asked for a name that doesn't resolve —
+    # asking would fail the whole certificate, not just that name.
+    admin_ok = False
+    for host, target_flag in (
+        (domain, "apex"),
+        (f"www.{domain}", "www"),
+        (admin_host_for(domain), "admin"),
+    ):
         try:
             answers = resolver.resolve(host, "A")
             ips = {rdata.address for rdata in answers}
@@ -510,8 +538,10 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
             if target_ip in ips:
                 if target_flag == "apex":
                     apex_ok = True
-                else:
+                elif target_flag == "www":
                     www_ok = True
+                else:
+                    admin_ok = True
         except dns.exception.DNSException as exc:
             seen.append(f"{host}=ERR({exc.__class__.__name__})")
 
@@ -523,7 +553,22 @@ async def check_dns_a_record(domain: str) -> tuple[bool, str | None]:
             f"A record for {domain} does not point to {target_ip}. "
             f"Found: {'; '.join(seen)}"
         )
+    _LAST_ADMIN_DNS[domain] = admin_ok
     return True, None
+
+
+# Whether `admin.<domain>` resolved to us on the last check, so the
+# provisioning step knows whether to ask certbot for that name.
+_LAST_ADMIN_DNS: dict[str, bool] = {}
+
+
+async def admin_host_resolves(domain: str) -> bool:
+    """Does `admin.<domain>` point at us? Re-checked rather than trusted
+    from the cache above when provisioning runs in a separate process."""
+    ok, _ = await check_dns_a_record(domain)
+    if not ok:
+        return False
+    return _LAST_ADMIN_DNS.get(domain, False)
 
 
 async def resolve_dns_preview(domain: str) -> dict:
@@ -538,7 +583,11 @@ async def resolve_dns_preview(domain: str) -> dict:
             "expected_ip": "82.25.110.52",
             "apex": {"current": ["84.32.84.32"], "ok": False, "error": None},
             "www":  {"current": [],              "ok": False, "error": "NXDOMAIN"},
+            "admin":{"current": [],              "ok": False, "error": "NXDOMAIN"},
         }
+
+    The ``admin`` row is the admin panel's own host and is OPTIONAL —
+    a tenant who skips it keeps a working trading app.
 
     Where ``ok`` means at least one resolved A record matches
     ``expected_ip``. Errors are returned per-host (NXDOMAIN, timeout)
@@ -549,16 +598,19 @@ async def resolve_dns_preview(domain: str) -> dict:
         "expected_ip": expected_ip or None,
         "apex": {"current": [], "ok": False, "error": None},
         "www": {"current": [], "ok": False, "error": None},
+        "admin": {"current": [], "ok": False, "error": None},
     }
     if not expected_ip:
         out["apex"]["error"] = "PLATFORM_PUBLIC_IP not configured on server"
         out["www"]["error"] = out["apex"]["error"]
+        out["admin"]["error"] = out["apex"]["error"]
         return out
 
     norm = normalize_domain(domain)
     if not norm:
         out["apex"]["error"] = "Invalid domain"
         out["www"]["error"] = "Invalid domain"
+        out["admin"]["error"] = "Invalid domain"
         return out
 
     try:
@@ -567,6 +619,7 @@ async def resolve_dns_preview(domain: str) -> dict:
     except ImportError:
         out["apex"]["error"] = "dnspython not installed in backend"
         out["www"]["error"] = out["apex"]["error"]
+        out["admin"]["error"] = out["apex"]["error"]
         return out
 
     # Same public-resolver bypass as check_dns_a_record — see comment
@@ -577,7 +630,11 @@ async def resolve_dns_preview(domain: str) -> dict:
     resolver.timeout = 5.0
     resolver.cache = None
 
-    for host, key in ((norm, "apex"), (f"www.{norm}", "www")):
+    for host, key in (
+        (norm, "apex"),
+        (f"www.{norm}", "www"),
+        (admin_host_for(norm), "admin"),
+    ):
         try:
             answers = resolver.resolve(host, "A")
             ips = sorted({rdata.address for rdata in answers})
@@ -614,19 +671,41 @@ async def begin_domain_verification(admin: User) -> User:
     admin.custom_domain_last_error = None
     await admin.save()
 
-    # Enqueue the Celery task. We import lazily so that boot ordering
-    # (workers module imports models which imports services which
-    # could import workers...) stays acyclic.
+    # Run it on THIS process, in the background. It used to be
+    # `provision_ssl.delay(...)`, but this is the only Celery task in
+    # the codebase and no worker has ever run in production — the job
+    # went into Redis and stayed there, so the UI sat on
+    # "Provisioning…" forever with nothing to show for it. Standing up
+    # a worker to carry one occasional job is more moving parts than
+    # the job is worth; certbot already runs in a thread.
+    #
+    # Imported lazily so boot ordering (workers → models → services →
+    # workers) stays acyclic.
     try:
-        from app.workers.branding_tasks import provision_ssl
+        from app.workers.branding_tasks import run_provisioning
 
-        provision_ssl.delay(str(admin.id))
+        admin_id = str(admin.id)
+
+        async def _provision() -> None:
+            try:
+                await run_provisioning(admin_id)
+            except Exception:  # pragma: no cover - never kill the loop
+                logger.exception("branding_provision_ssl_crashed admin_id=%s", admin_id)
+                with contextlib.suppress(Exception):
+                    await mark_domain_failed(
+                        admin.id, "Provisioning crashed — see server logs."
+                    )
+
+        # Held on the app so the garbage collector can't drop a running
+        # task mid-certbot; discarded as soon as it finishes.
+        task = asyncio.create_task(_provision())
+        _PROVISION_TASKS.add(task)
+        task.add_done_callback(_PROVISION_TASKS.discard)
     except Exception:  # pragma: no cover
-        logger.exception("branding_provision_ssl_enqueue_failed admin_id=%s", admin.id)
+        logger.exception("branding_provision_ssl_start_failed admin_id=%s", admin.id)
         admin.custom_domain_status = STATUS_FAILED
         admin.custom_domain_last_error = (
-            "Failed to enqueue SSL provisioning task. "
-            "Check Celery worker is running and CELERY_BROKER_URL is set."
+            "Could not start SSL provisioning. Check the server logs."
         )
         await admin.save()
     return admin

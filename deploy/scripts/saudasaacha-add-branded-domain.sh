@@ -16,13 +16,19 @@
 #  Idempotent: re-running for the same domain overwrites the existing
 #  config and lets certbot detect / renew its cert.
 #
-#  Usage:    saudasaacha-add-branded-domain.sh <DOMAIN> [EMAIL]
-#  Example:  saudasaacha-add-branded-domain.sh broker.example.com ops@example.com
+#  Pass WITH_ADMIN as the 3rd argument to also serve the ADMIN panel on
+#  admin.<DOMAIN> (port 3001) and include that name on the certificate.
+#  The caller decides, because asking certbot for a name whose A record
+#  is missing fails the WHOLE certificate, not just that name.
+#
+#  Usage:    saudasaacha-add-branded-domain.sh <DOMAIN> [EMAIL] [WITH_ADMIN]
+#  Example:  saudasaacha-add-branded-domain.sh broker.example.com ops@example.com with-admin
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 DOMAIN="${1:-}"
 EMAIL="${2:-ops@sachchasauda.com}"
+WITH_ADMIN="${3:-}"
 
 if [[ -z "$DOMAIN" ]]; then
   echo "ERROR: domain argument required" >&2
@@ -39,6 +45,7 @@ fi
 
 DOMAIN="${DOMAIN,,}"  # lowercase
 UPSTREAM_PORT="${SACHCHASAUDA_USER_PORT:-3000}"
+ADMIN_PORT="${SACHCHASAUDA_ADMIN_PORT:-3001}"
 NGINX_AVAIL_DIR="/etc/nginx/sites-available"
 NGINX_ENABLED_DIR="/etc/nginx/sites-enabled"
 CONF_NAME="sachchasauda-branded-${DOMAIN}.conf"
@@ -76,6 +83,35 @@ server {
 }
 EOF
 
+# ── 1b. Admin panel on admin.<DOMAIN> ───────────────────────────────
+# Same file, so one certbot run covers every name and one removal
+# cleans all of it up. Only written when the caller confirmed the DNS
+# record exists — see the header note.
+if [[ "$WITH_ADMIN" == "with-admin" ]]; then
+cat >> "$CONF_PATH" <<EOF
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name admin.${DOMAIN};
+
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${ADMIN_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
+        proxy_read_timeout 86400;
+    }
+}
+EOF
+fi
+
 # Symlink into sites-enabled (idempotent)
 ln -sf "$CONF_PATH" "$SYMLINK_PATH"
 
@@ -96,15 +132,20 @@ nginx -s reload
 # runs. `--redirect` patches the HTTP block to 301 → HTTPS once the
 # cert is installed. `--keep-until-expiring` makes re-runs cheap when
 # a valid cert already exists.
+CERT_NAMES=(-d "$DOMAIN" -d "www.${DOMAIN}")
+if [[ "$WITH_ADMIN" == "with-admin" ]]; then
+  CERT_NAMES+=(-d "admin.${DOMAIN}")
+fi
+
 set +e
 certbot --nginx \
   --non-interactive \
   --agree-tos \
   --keep-until-expiring \
   --redirect \
+  --expand \
   -m "$EMAIL" \
-  -d "$DOMAIN" \
-  -d "www.${DOMAIN}" \
+  "${CERT_NAMES[@]}" \
   2>/tmp/sachchasauda-certbot.err
 CERTBOT_RC=$?
 set -e
@@ -124,5 +165,5 @@ fi
 # certbot --nginx normally reloads automatically, but be explicit.
 nginx -s reload || true
 
-echo "OK: ${DOMAIN} provisioned (cert + nginx live)"
+echo "OK: ${DOMAIN} provisioned (cert + nginx live)${WITH_ADMIN:+ incl. admin.${DOMAIN}}"
 exit 0

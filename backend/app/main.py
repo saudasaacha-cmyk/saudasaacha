@@ -1298,13 +1298,16 @@ async def branding_cors_middleware(request: Request, call_next):
             domains = await all_active_custom_domains()
         except Exception:  # pragma: no cover
             domains = []
-        # Each admin's domain is allowed via both apex and www, http+https.
+        # Each admin's domain is allowed via apex, www AND the admin
+        # panel's own host, over http+https. `admin.<domain>` matters
+        # because the panel is a separate origin from the trading app
+        # and talks to the same API — without it every admin request
+        # from a branded domain dies in preflight.
         allowed_set: set[str] = set()
         for d in domains:
-            allowed_set.add(f"https://{d}")
-            allowed_set.add(f"https://www.{d}")
-            allowed_set.add(f"http://{d}")
-            allowed_set.add(f"http://www.{d}")
+            for host in (d, f"www.{d}", f"admin.{d}"):
+                allowed_set.add(f"https://{host}")
+                allowed_set.add(f"http://{host}")
         cache = {"at": now, "set": allowed_set}
         app.state._branding_cors_cache = cache
 

@@ -231,6 +231,9 @@ function DnsRecordsTable({
     : never }[] = [
     { name: "@", check: (preview?.apex ?? { current: [], ok: false, error: null }) as any },
     { name: "www", check: (preview?.www ?? { current: [], ok: false, error: null }) as any },
+    // Optional: only needed if you also want the admin panel on your
+    // domain. Leaving it out keeps the trading app working.
+    { name: "admin", check: (preview?.admin ?? { current: [], ok: false, error: null }) as any },
   ];
   const renderCurrent = (check: { current: string[]; error: string | null }) => {
     if (check.error) return <span className="text-sell">{check.error}</span>;
@@ -558,6 +561,11 @@ export default function BrandingPage() {
   const customReady = domainSaved && status === "READY";
   const customSignup = customReady ? `https://${domainSaved}/register` : "";
   const customLogin = customReady ? `https://${domainSaved}/login` : "";
+  // The admin panel rides on admin.<domain>. It is only live once that
+  // A record exists — the DNS table below shows whether it does, and
+  // provisioning skips the name rather than failing the whole cert.
+  const adminDnsOk = Boolean(dnsPreviewQuery.data?.admin?.ok);
+  const customAdmin = customReady && adminDnsOk ? `https://admin.${domainSaved}` : "";
 
   const lastError = meQuery.data?.custom_domain_last_error ?? null;
   const activeStep = statusToStep(status, !!domainSaved);
@@ -775,6 +783,17 @@ export default function BrandingPage() {
                 url={customLogin || `https://yourdomain.com/login`}
                 disabled={!customReady}
               />
+              <LinkRow
+                label="Admin"
+                url={customAdmin || `https://admin.yourdomain.com`}
+                disabled={!customAdmin}
+              />
+              {customReady && !adminDnsOk ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Add the <code className="font-mono">admin</code> A record below and
+                  press Retry to put your admin panel on your own domain too.
+                </p>
+              ) : null}
             </div>
           </div>
         </CardContent>
