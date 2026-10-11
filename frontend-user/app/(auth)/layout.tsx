@@ -163,12 +163,18 @@ function AuthLayoutInner({ children }: { children: React.ReactNode }) {
 
           <div className="relative z-10">
             <p className="text-sm font-medium text-white/80">You can easily</p>
+            {/* No market or exchange names here on purpose. This layout is
+                shared by every white-label tenant, and the instrument list
+                moves — the old copy promised IPOs and Mutual Funds, which
+                the platform has never offered, and named only NSE/BSE/MCX
+                after ~740 global contracts had been added. Copy that
+                describes the EXPERIENCE stays true through both. */}
             <h2 className="mt-2 max-w-sm text-2xl font-bold leading-snug text-white xl:text-3xl">
-              Trade Indian markets with clarity, speed and control.
+              Trade with clarity, speed and control.
             </h2>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/75">
-              Equity, F&amp;O, Commodities, IPOs and Mutual Funds — all from one
-              account on NSE, BSE &amp; MCX.
+              Live prices, instant execution and transparent charges — all from
+              one account.
             </p>
           </div>
 
