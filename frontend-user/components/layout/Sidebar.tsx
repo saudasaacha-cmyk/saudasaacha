@@ -19,8 +19,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { BrandLogo } from "@/components/layout/BrandLogo";
 import {
-  buildWhatsappUrl,
   useSupportContacts,
+  useSupportWhatsappUrl,
 } from "@/lib/useSupport";
 
 const items = [
@@ -41,11 +41,9 @@ const items = [
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  // The number is shown as text as well as linked.
   const { data: support } = useSupportContacts();
-  const waUrl = buildWhatsappUrl(
-    support?.whatsapp,
-    "Hi, I need help with my SachchaSauda account",
-  );
+  const waUrl = useSupportWhatsappUrl();
   const hasAnySupport = !!waUrl;
 
   return (

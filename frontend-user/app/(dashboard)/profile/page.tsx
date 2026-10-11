@@ -35,8 +35,9 @@ import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { useAuthStore } from "@/stores/authStore";
 import {
-  buildWhatsappUrl,
+  useBrandName,
   useSupportContacts,
+  useSupportWhatsappUrl,
 } from "@/lib/useSupport";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +66,7 @@ type SubView =
   | "support";
 
 export default function ProfilePage() {
+  const brandName = useBrandName();
   // The persisted login user (zustand `nb.auth`) is our offline-safe seed.
   // It carries every field the main profile screen renders (name, code,
   // email, status, role, is_demo, 2FA), so we can paint a correct profile
@@ -268,7 +270,7 @@ export default function ProfilePage() {
       <SignOutRow />
 
       <p className="px-1 pb-4 pt-2 text-center text-[10px] text-muted-foreground">
-        SachchaSauda Broker · v1.0.0
+        {brandName ? `${brandName} · ` : ""}v1.0.0
       </p>
     </div>
   );
@@ -698,11 +700,9 @@ function AppearanceForm() {
 }
 
 function SupportLinks() {
+  // The number is shown as text as well as linked.
   const { data: support } = useSupportContacts();
-  const waUrl = buildWhatsappUrl(
-    support?.whatsapp,
-    "Hi, I need help with my SachchaSauda account",
-  );
+  const waUrl = useSupportWhatsappUrl();
   if (!waUrl) {
     return (
       <section className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">

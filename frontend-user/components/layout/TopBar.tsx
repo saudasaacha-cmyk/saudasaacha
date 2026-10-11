@@ -11,7 +11,7 @@ import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { BrandLogo } from "@/components/layout/BrandLogo";
 import { cn, formatINR } from "@/lib/utils";
 import { readWalletSnapshot, writeWalletSnapshot } from "@/lib/walletSnapshot";
-import { buildWhatsappUrl, useSupportContacts } from "@/lib/useSupport";
+import { useSupportWhatsappUrl } from "@/lib/useSupport";
 
 /** WhatsApp brand glyph — Lucide doesn't ship the real WhatsApp mark so
  * we inline the official SVG path. Sized to match Lucide's icon
@@ -155,11 +155,7 @@ export function TopBar() {
  * message in a new tab.
  */
 function SupportShortcut() {
-  const { data: support } = useSupportContacts();
-  const waUrl = buildWhatsappUrl(
-    support?.whatsapp,
-    "Hi, I need help with my SachchaSauda account",
-  );
+  const waUrl = useSupportWhatsappUrl();
   if (!waUrl) return null;
   return (
     <Button

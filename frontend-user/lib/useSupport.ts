@@ -1,5 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, unwrap } from "@/lib/api";
+import { useBranding } from "@/lib/branding-context";
+import { APP_NAME } from "@/lib/constants";
 
 export interface SupportContacts {
   whatsapp: string;
@@ -100,4 +102,42 @@ export function buildMailtoUrl(
   if (opts?.body) params.push(`body=${encodeURIComponent(opts.body)}`);
   const qs = params.length > 0 ? `?${params.join("&")}` : "";
   return `mailto:${email}${qs}`;
+}
+
+/**
+ * The support WhatsApp link, with a message prefilled in the brand the
+ * USER is actually signed in to.
+ *
+ * It used to be the string "Hi, I need help with my SachchaSauda
+ * account", repeated at three call sites — so a Rising Bull customer
+ * opened a chat with their own broker introducing themselves as a
+ * customer of somebody else.
+ *
+ * Falls back to the platform name only where the rest of the app does
+ * (`showPlatformDefault`); on a tenant's domain with the brand not yet
+ * resolved the message stays generic rather than naming the super
+ * admin.
+ */
+export function useBrandName(): string {
+  const { branding, showPlatformDefault } = useBranding();
+  return (
+    (branding?.brand_name ?? "").trim() || (showPlatformDefault ? APP_NAME : "")
+  );
+}
+
+export function useSupportWhatsappUrl(): string | null {
+  const { data: support } = useSupportContacts();
+  const name = useBrandName();
+  const prefill = name
+    ? `Hi, I need help with my ${name} account`
+    : "Hi, I need help with my account";
+  return buildWhatsappUrl(support?.whatsapp, prefill);
+}
+
+/** Same as `useSupportWhatsappUrl`, for the deposit screen's own ask. */
+export function useDepositSupportPrefill(): string {
+  const name = useBrandName();
+  return name
+    ? `Hi, I need help adding funds to my ${name} account`
+    : "Hi, I need help adding funds to my account";
 }

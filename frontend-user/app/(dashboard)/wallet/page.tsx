@@ -44,11 +44,7 @@ import { WdRulesBanner } from "@/components/common/WdRulesBanner";
 import { AddFundsWizard } from "@/components/wallet/AddFundsWizard";
 import { BonusCard } from "@/components/wallet/BonusCard";
 import { cn, formatINR, pnlColor } from "@/lib/utils";
-import {
-  buildMailtoUrl,
-  buildWhatsappUrl,
-  useSupportContacts,
-} from "@/lib/useSupport";
+import { buildMailtoUrl, buildWhatsappUrl, useBrandName, useDepositSupportPrefill, useSupportContacts } from "@/lib/useSupport";
 
 // ─────────────────────────────────────────────────────────────────
 // Official-style UPI logo mark (orange/green chevrons + UPI text).
@@ -402,7 +398,13 @@ export default function WalletPage() {
                   the banner below. */}
               {formatINR(Math.max(0, Number(summary?.available_balance ?? 0)))}
             </div>
-            <div className="text-[11px] opacity-80">Wallet · {selectedBank?.account_holder ?? "SachchaSauda Broker"}</div>
+            {/* The holder is a fact about a bank account. When it is
+                missing, say nothing rather than filling in a name —
+                the old fallback hard-coded the platform's, which a
+                tenant's customer read as their own broker's. */}
+            <div className="text-[11px] opacity-80">
+              Wallet{selectedBank?.account_holder ? ` · ${selectedBank.account_holder}` : ""}
+            </div>
           </div>
           <div className="hidden gap-2 sm:flex">
             <button
@@ -1480,12 +1482,10 @@ async function compressImage(file: File): Promise<File> {
  */
 function DepositSupportButton() {
   const { data: support } = useSupportContacts();
-  const waUrl = buildWhatsappUrl(
-    support?.whatsapp,
-    "Hi, I need help adding funds to my SachchaSauda account",
-  );
+  const brandName = useBrandName();
+  const waUrl = buildWhatsappUrl(support?.whatsapp, useDepositSupportPrefill());
   const mailUrl = buildMailtoUrl(support?.email, {
-    subject: "SachchaSauda deposit help",
+    subject: `${brandName || "Deposit"} deposit help`,
   });
   if (!waUrl && !mailUrl) return null;
   const target = waUrl ?? mailUrl!;
