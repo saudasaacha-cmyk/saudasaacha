@@ -1131,7 +1131,22 @@ async def list_scripts(
     if segment:
         query["segment_name"] = segment
     rows = await coll.find(query).to_list(length=None)
-    return [NettingScriptOverride.model_validate(r) for r in rows]
+    out = [NettingScriptOverride.model_validate(r) for r in rows]
+
+    # Hide the platform row for any (segment, symbol) this tier has
+    # overridden. Both would otherwise be listed and read as duplicates,
+    # and only one of them — theirs — actually applies to their users.
+    own = {
+        (r.segment_name, r.symbol)
+        for r in out
+        if r.scope_admin_id is not None or r.scope_broker_id is not None
+    }
+    return [
+        r
+        for r in out
+        if (r.scope_admin_id is not None or r.scope_broker_id is not None)
+        or (r.segment_name, r.symbol) not in own
+    ]
 
 
 async def create_script(
@@ -1274,6 +1289,64 @@ async def create_scripts_bulk(
                 "bulk_script_create_failed sym=%s seg=%s", sym, segment_name
             )
     return {"created": created, "total": len(clean)}
+
+
+async def fork_script_for_scope(
+    script_id: str | PydanticObjectId,
+    patch: dict[str, Any],
+    *,
+    scope_admin_id: PydanticObjectId | None,
+    scope_broker_id: PydanticObjectId | None,
+) -> NettingScriptOverride:
+    """Copy-on-write: take an INHERITED override and make the caller's own.
+
+    An admin sees the super-admin's platform rows so they know what they
+    inherit, but those rows belong to the platform — editing them would
+    change the setting for every other admin's users too. So the first
+    edit forks: the platform row is left exactly as it is, and the admin
+    gets a row of their own carrying the same values plus their change.
+    The resolver already prefers the more specific scope, so that row
+    wins for their users and nobody else's.
+
+    Idempotent: a second edit finds the forked row and updates it, which
+    also keeps the (segment, symbol, scope) unique index happy.
+    """
+    src = await NettingScriptOverride.get(PydanticObjectId(script_id))
+    if src is None:
+        raise NotFoundError("Script override not found")
+
+    existing = await NettingScriptOverride.find_one(
+        NettingScriptOverride.segment_name == src.segment_name,
+        NettingScriptOverride.symbol == src.symbol,
+        NettingScriptOverride.scope_admin_id == scope_admin_id,
+        NettingScriptOverride.scope_broker_id == scope_broker_id,
+    )
+    if existing is not None:
+        return await update_script(existing.id, patch)
+
+    # Carry the inherited values across, so forking changes ONLY the
+    # field the admin touched — the rest keeps behaving as it did.
+    fields = src.model_dump(
+        exclude={"id", "revision_id", "created_at", "updated_at"},
+    )
+    fields["scope_admin_id"] = scope_admin_id
+    fields["scope_broker_id"] = scope_broker_id
+    doc = NettingScriptOverride(**fields)
+    for k, v in patch.items():
+        if k in NETTING_FIELDS:
+            setattr(doc, k, v)
+    if patch.get("lotSize") is not None:
+        doc.lotSize = float(patch["lotSize"])
+    await doc.insert()
+    await _wipe_eff_cache_debounced()
+    logger.info(
+        "netting_script_forked symbol=%s segment=%s admin=%s broker=%s",
+        src.symbol,
+        src.segment_name,
+        scope_admin_id,
+        scope_broker_id,
+    )
+    return doc
 
 
 async def update_script(script_id: str | PydanticObjectId, patch: dict[str, Any]) -> NettingScriptOverride:

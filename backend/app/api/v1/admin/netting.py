@@ -474,6 +474,14 @@ def _scope_for(
     return admin.id, None
 
 
+def _is_platform_script(script: Any) -> bool:
+    """A row every tier inherits — authored by super-admin, no scope."""
+    return (
+        getattr(script, "scope_admin_id", None) is None
+        and getattr(script, "scope_broker_id", None) is None
+    )
+
+
 def _can_edit_script(actor: User, script: Any) -> bool:
     """Return True iff `actor` may mutate this script override."""
     sad = getattr(script, "scope_admin_id", None)
@@ -558,15 +566,37 @@ async def update_script(
     existing = await svc.get_script(script_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Script override not found")
-    if not _can_edit_script(admin, existing):
-        raise HTTPException(
-            status_code=403,
-            detail="You can only edit script overrides scoped to your tier.",
-        )
     patch = payload.get("patch") or {k: v for k, v in payload.items() if k != "patch"}
     if not isinstance(patch, dict):
         raise HTTPException(status_code=400, detail="patch must be an object")
-    return APIResponse(data=_ser_script(await svc.update_script(script_id, patch)))
+
+    if _can_edit_script(admin, existing):
+        return APIResponse(data=_ser_script(await svc.update_script(script_id, patch)))
+
+    # Not theirs — but an admin / broker is SHOWN the platform rows so
+    # they can see what they inherit, and being shown a setting you
+    # cannot change for your own users is not useful. Editing an
+    # inherited row forks it: the platform row is untouched and still
+    # applies to everyone else, while the caller gets their own row
+    # carrying the same values plus their change.
+    if _is_platform_script(existing) and admin.role in (
+        UserRole.ADMIN,
+        UserRole.BROKER,
+    ):
+        scope_admin_id, scope_broker_id = _scope_for(admin)
+        doc = await svc.fork_script_for_scope(
+            script_id,
+            patch,
+            scope_admin_id=scope_admin_id,
+            scope_broker_id=scope_broker_id,
+        )
+        return APIResponse(data=_ser_script(doc))
+
+    # Another tier's row — not inherited, not theirs.
+    raise HTTPException(
+        status_code=403,
+        detail="You can only edit script overrides scoped to your tier.",
+    )
 
 
 @router.delete("/scripts/{script_id}", response_model=APIResponse[dict])
@@ -579,6 +609,15 @@ async def delete_script(
     if existing is None:
         return APIResponse(data={"ok": True})
     if not _can_edit_script(admin, existing):
+        if _is_platform_script(existing):
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "This override is set platform-wide and applies to every "
+                    "admin. You can't delete it, but you can change any of its "
+                    "values — that creates your own override for your users."
+                ),
+            )
         raise HTTPException(
             status_code=403,
             detail="You can only delete script overrides scoped to your tier.",
