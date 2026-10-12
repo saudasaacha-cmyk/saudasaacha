@@ -5,10 +5,15 @@ direct clients and nothing else, by design. With every client created under a
 sub-admin, that page reads "0 users" while the platform carries hundreds —
 there was no way to see, let alone hand over, the whole book.
 
-Contacts stay masked. The same operator who asked for this asked, a week
-earlier, that no admin — super admin included — be able to read a client's
-email or phone, and an export that undoes that is just the privacy control
-with an extra click.
+Contacts ARE included here, on the operator's explicit instruction, and only
+here: the Users page and every admin API still hand back "••••••••", so a
+sub-admin or broker cannot read a client's email or phone anywhere in the
+panel. This export is super-admin-only and every download is written to the
+audit log with who took which pool — which is what makes the exception
+accountable rather than a hole.
+
+A generated placeholder (`<code>@noemail…`, `NOMOB…`) prints as a dash: it is
+an absence, not an address, and a column of them reads as data.
 """
 
 from __future__ import annotations
@@ -193,6 +198,9 @@ async def collect_rows(
             return f"Admin: {names.get(str(u.assigned_admin_id), '—')}"
         return "Super admin"
 
+    def _contact(v: str | None) -> str:
+        return "—" if user_service.is_placeholder_contact(v) or not v else str(v)
+
     def _money(v: Any) -> float:
         try:
             return round(float(str(v)), 2)
@@ -207,9 +215,8 @@ async def collect_rows(
             {
                 "user_code": u.user_code or "",
                 "full_name": u.full_name or "",
-                # Masked, exactly as on screen — see the module docstring.
-                "email": user_service.masked_contact(u.email) or "—",
-                "mobile": user_service.masked_contact(u.mobile) or "—",
+                "email": _contact(u.email),
+                "mobile": _contact(u.mobile),
                 "owner": _owner_label(u),
                 "status": str(u.status.value if hasattr(u.status, "value") else u.status)
                 + (" · demo" if u.is_demo else ""),
@@ -265,15 +272,27 @@ def to_xlsx(rows: list[dict[str, Any]], owner_label: str) -> bytes:
 
 
 def to_pdf(rows: list[dict[str, Any]], owner_label: str) -> bytes:
-    """Landscape A4. Contacts are dropped rather than printed as dots — on
-    paper a column of "••••••••" is just a column of noise."""
+    """Landscape A4, all fifteen columns.
+
+    Email is the one field that can be long enough to break a table, so it —
+    with the name and the owner — is wrapped in a Paragraph and given a share
+    of the width; everything else is a short number or a code.
+    """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-    cols = [(k, h) for k, h in COLUMNS if k not in ("email", "mobile")]
+    cols = list(COLUMNS)
+    # Proportions, not millimetres — scaled to whatever width the page has.
+    weights = {
+        "user_code": 1.0, "full_name": 1.5, "email": 2.6, "mobile": 1.1,
+        "owner": 1.5, "status": 0.9, "balance": 1.1, "credit": 0.9,
+        "used_margin": 1.1, "settlement": 1.1, "weekly_pnl": 1.1,
+        "open_positions": 0.8, "open_pnl": 1.0, "created_at": 1.3,
+        "last_login_at": 1.3,
+    }
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -286,8 +305,8 @@ def to_pdf(rows: list[dict[str, Any]], owner_label: str) -> bytes:
     )
     styles = getSampleStyleSheet()
     body = styles["BodyText"]
-    body.fontSize = 7
-    body.leading = 9
+    body.fontSize = 6.5
+    body.leading = 8
 
     data: list[list[Any]] = [[h for _k, h in cols]]
     for row in rows:
@@ -297,22 +316,29 @@ def to_pdf(rows: list[dict[str, Any]], owner_label: str) -> bytes:
                     f"{row.get(k, 0):,.2f}"
                     if k in _MONEY_KEYS
                     else Paragraph(str(row.get(k, "")), body)
-                    if k in ("full_name", "owner")
+                    if k in ("full_name", "owner", "email")
                     else str(row.get(k, ""))
                 )
                 for k, _h in cols
             ]
         )
 
-    table = Table(data, repeatRows=1, hAlign="LEFT")
+    avail = landscape(A4)[0] - 20 * mm
+    total_w = sum(weights[k] for k, _h in cols)
+    table = Table(
+        data,
+        colWidths=[avail * weights[k] / total_w for k, _h in cols],
+        repeatRows=1,
+        hAlign="LEFT",
+    )
     table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B1220")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("FONTSIZE", (0, 0), (-1, -1), 6.5),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("ALIGN", (5, 1), (-3, -1), "RIGHT"),
+                ("ALIGN", (6, 1), (-3, -1), "RIGHT"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CBD5E1")),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),

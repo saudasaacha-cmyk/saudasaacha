@@ -76,8 +76,9 @@ export function UserExportDialog({
         <DialogHeader>
           <DialogTitle>Download users</DialogTitle>
           <DialogDescription>
-            Pick whose clients to take. Balance, credit, used margin, settlement
-            due, this week&apos;s P&amp;L and open positions come with every row.
+            Pick whose clients to take. Contact details, balance, credit, used
+            margin, settlement due, this week&apos;s P&amp;L and open positions
+            come with every row.
           </DialogDescription>
         </DialogHeader>
 
@@ -123,9 +124,10 @@ export function UserExportDialog({
           </div>
 
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Email and phone stay hidden, the same as on screen — the PDF leaves
-            those two columns out entirely. Every download is written to the
-            audit log.
+            The file carries each client&apos;s real email and phone — the one
+            place they are readable, since the panel itself still shows
+            <code> ••••••••</code> everywhere. Every download is written to the
+            audit log: who took which pool, in what format, how many rows.
           </p>
         </div>
 
