@@ -400,7 +400,16 @@ class UserChannelHub(_BaseHub):
     # clients. Adding it is purely additive: existing topics behave
     # identically, and new clients listening for ``marketwatch`` now
     # actually receive the event.
-    _ALLOWED_TOPICS = frozenset({"positions", "orders", "wallet", "kyc", "marketwatch", "risk"})
+    # Every topic anything publishes to `user:{id}:<topic>`. A topic
+    # missing here is dropped SILENTLY — the publisher succeeds, Redis
+    # fans it out, and `_route_keys` returns no sockets. That is how
+    # admin broadcasts reached the bell icon (the DB row) but never
+    # popped a toast or rang: "notification" was not on this list.
+    # Keep it in step with the publishers; `rg 'f"user:\{' backend/app`
+    # lists them all.
+    _ALLOWED_TOPICS = frozenset(
+        {"positions", "orders", "wallet", "kyc", "marketwatch", "risk", "notification"}
+    )
 
     async def _do_subscribe(self, ps: Any) -> None:
         await ps.psubscribe("user:*")
