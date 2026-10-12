@@ -280,6 +280,25 @@ async def notify_payment_details_changed(actor, what: str) -> int:
         )
     except Exception:  # pragma: no cover - never fail the edit
         logger.exception("payment_details_notify_publish_failed actor=%s", actor.id)
+
+    # Web Push as well as the socket. The socket only reaches a tab that
+    # is open; this is the alert most likely to matter when the app is
+    # CLOSED, because the next thing the user does is open their bank
+    # app and send money to whatever account they remember. Best-effort
+    # and no-ops when VAPID is unconfigured, same as the broadcast path.
+    try:
+        from app.services import push_service
+
+        await push_service.send_to_users(
+            recipients,
+            title=title,
+            body=message,
+            url="/wallet",
+            tag=f"mp-payment-{actor.id}",
+        )
+    except Exception:  # pragma: no cover
+        logger.exception("payment_details_webpush_failed actor=%s", actor.id)
+
     logger.info(
         "payment_details_changed_notified actor=%s role=%s users=%d",
         actor.id,
