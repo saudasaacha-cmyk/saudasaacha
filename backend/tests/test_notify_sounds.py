@@ -62,3 +62,45 @@ def test_the_payment_alert_carries_its_category():
     src = inspect.getsource(notify_payment_details_changed)
     assert '"category": "payment"' in src
     assert '"type": "notification"' in src
+
+
+def test_each_category_falls_through_on_its_own():
+    """A broker who set only the payment tone keeps inheriting the other
+    two. Resolving as a block would silently reset them."""
+    from app.api.v1.user.support import get_notify_sounds as fn
+
+    src = inspect.getsource(fn)
+    body = src[src.index("for category, fallback"):]
+    # The owner walk happens INSIDE the per-category loop.
+    assert "for owner in owners" in body
+    assert "break" in body
+
+
+def test_the_cascade_is_broker_then_admin_then_platform():
+    from app.api.v1.user.support import get_notify_sounds as fn
+
+    src = inspect.getsource(fn)
+    i_broker = src.index("broker_ancestry")
+    i_admin = src.index("assigned_admin_id")
+    i_platform = src.index("_read_setting")
+    assert i_broker < i_admin < i_platform
+
+
+def test_a_super_admin_is_pushed_to_the_platform_rows():
+    """Writing a personal override would leave the row everyone else
+    inherits untouched while looking like it had changed."""
+    from app.api.v1.admin.settings import set_my_notify_sounds
+
+    src = inspect.getsource(set_my_notify_sounds)
+    assert "UserRole.SUPER_ADMIN" in src
+    assert "status_code=400" in src
+
+
+def test_clearing_an_override_stores_null_not_an_empty_string():
+    """None means inherit. An empty string stored instead would resolve
+    to falsy too, but it reads as "set to nothing" in the database and
+    the admin UI would show it as a real choice."""
+    from app.api.v1.admin.settings import set_my_notify_sounds
+
+    src = inspect.getsource(set_my_notify_sounds)
+    assert 'or None' in src

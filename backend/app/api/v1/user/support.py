@@ -211,11 +211,36 @@ async def get_notify_sounds(user: CurrentUser):
     DETAILS changing, and everything else. Those are the three things a
     user needs to tell apart without looking at the screen — a deposit
     landing and the deposit account changing are very different news.
+
+    Resolved per category, closest owner first — broker, then their
+    admin, then the platform row the super admin set. Each category
+    falls through independently, so a broker who set only the payment
+    tone keeps inheriting the other two instead of silently resetting
+    them to the defaults.
     """
+    owners: list[User] = []
+    broker_anc = user.broker_ancestry or []
+    if broker_anc:
+        b = await User.get(broker_anc[-1])
+        if b is not None:
+            owners.append(b)
+    if user.assigned_admin_id is not None:
+        a = await User.get(user.assigned_admin_id)
+        if a is not None:
+            owners.append(a)
+
     out = {}
     for category, fallback in _SOUND_DEFAULTS.items():
-        value = await _read_setting(f"notify.sound_{category}")
-        out[category] = (str(value).strip() if value else "") or fallback
+        chosen = ""
+        for owner in owners:
+            tone = (getattr(owner, f"notify_sound_{category}", None) or "").strip()
+            if tone:
+                chosen = tone
+                break
+        if not chosen:
+            value = await _read_setting(f"notify.sound_{category}")
+            chosen = (str(value).strip() if value else "")
+        out[category] = chosen or fallback
     return APIResponse(data=out)
 
 

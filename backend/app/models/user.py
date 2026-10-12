@@ -327,6 +327,17 @@ class User(TimestampMixin):
     trade_alert: bool = False
     trade_alert_sound: str = "chime"
 
+    # ── Notification tones this actor's OWN users hear ───────────────
+    # Set by an ADMIN or BROKER in Platform Settings. None = inherit,
+    # which is the normal state: broker → their admin → the platform
+    # row the super admin set. Stored here rather than in a new
+    # collection because an actor's settings already live on their user
+    # doc (see trade_alert_sound above) and the cascade only ever needs
+    # the two ids a user already carries.
+    notify_sound_general: str | None = None
+    notify_sound_money: str | None = None
+    notify_sound_payment: str | None = None
+
     # Tokens already seeded into this user's marketwatch by
     # `default_watchlist.ensure_defaults`. Remembering them is what lets a
     # user delete a default instrument and have it STAY deleted, while

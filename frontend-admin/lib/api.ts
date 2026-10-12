@@ -730,6 +730,21 @@ export type ChartLevelVisibility = {
   isSuperAdmin: boolean;
 };
 
+export type MyNotifySounds = {
+  /** null per category = following the tier above. */
+  mine: Record<string, string | null>;
+  /** What this actor's users hear today when `mine` is null. */
+  inherited: Record<string, string | null>;
+  is_super_admin: boolean;
+};
+
+export const NotifySoundsAPI = {
+  mine: () => unwrap<MyNotifySounds>(api.get("/admin/settings/notify-sounds")),
+  /** `""` clears a category and goes back to inheriting. */
+  save: (patch: Record<string, string>) =>
+    unwrap<{ ok: boolean }>(api.put("/admin/settings/notify-sounds", patch)),
+};
+
 export const CryptoConfigAPI = {
   get: () => unwrap<CryptoConfig>(api.get("/admin/crypto-config")),
   update: (body: {

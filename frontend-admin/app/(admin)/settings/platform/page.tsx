@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminAuthStore } from "@/stores/authStore";
-import { SettingsAPI, AdminAuthAPI } from "@/lib/api";
+import { SettingsAPI, AdminAuthAPI, NotifySoundsAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -962,67 +962,92 @@ function ChangePasswordCard() {
   );
 }
 
-// ── Notification tones (super-admin only) ────────────────────────────
+// ── Notification tones ───────────────────────────────────────────────
 // Three categories, not one per event type. The point of a different
 // sound is that the user can tell WHAT happened without looking, and
 // there are three things worth telling apart: money arrived, the
 // details for sending money changed, and everything else. Nine tones
 // nobody can distinguish would be worse than three they can.
+//
+// Every tier sees this card. Super admin edits the PLATFORM rows —
+// theirs is the default everyone inherits. An admin or broker writes
+// their own override, which applies to their own users only; leaving a
+// category on "Same as above" keeps inheriting, so a broker who only
+// cares about the payment tone doesn't have to restate the other two.
 const SOUND_KEYS = [
   {
-    key: "notify.sound_payment",
+    key: "payment",
     label: "Payment details changed",
     hint: "Deposit bank or crypto address was edited — the one users must not miss.",
   },
   {
-    key: "notify.sound_money",
+    key: "money",
     label: "Money in or out",
     hint: "Deposit approved, withdrawal processed, funds added, bonus credited.",
   },
   {
-    key: "notify.sound_general",
+    key: "general",
     label: "Everything else",
     hint: "Admin messages, margin warnings, KYC updates.",
   },
 ] as const;
 
+const INHERIT = "__inherit__";
+
+function toneLabel(id: string | null | undefined): string {
+  return NOTIFY_SOUNDS.find((s) => s.id === id)?.label ?? "";
+}
+
 function NotifySoundsCard() {
   const admin = useAdminAuthStore((s) => s.admin);
   const isSuperAdmin = String(admin?.role || "") === "SUPER_ADMIN";
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [mine, setMine] = useState<Record<string, string | null>>({});
+  const [inherited, setInherited] = useState<Record<string, string | null>>({});
   const [saving, setSaving] = useState("");
 
   useEffect(() => {
-    if (!isSuperAdmin) return;
     let alive = true;
-    SettingsAPI.platformList("notifications")
-      .then((rows) => {
-        if (!alive) return;
-        const next: Record<string, string> = {};
-        for (const { key } of SOUND_KEYS) {
-          next[key] = String(
-            (rows || []).find((r: any) => r?.key === key)?.value ?? "",
-          );
-        }
-        setValues(next);
-      })
-      .catch(() => {
-        /* leave empty — the selects fall back to the first tone */
-      });
+    if (isSuperAdmin) {
+      SettingsAPI.platformList("notifications")
+        .then((rows) => {
+          if (!alive) return;
+          const next: Record<string, string> = {};
+          for (const { key } of SOUND_KEYS) {
+            next[key] = String(
+              (rows || []).find((r: any) => r?.key === `notify.sound_${key}`)
+                ?.value ?? "",
+            );
+          }
+          setMine(next);
+        })
+        .catch(() => {});
+    } else {
+      NotifySoundsAPI.mine()
+        .then((d) => {
+          if (!alive) return;
+          setMine(d.mine || {});
+          setInherited(d.inherited || {});
+        })
+        .catch(() => {});
+    }
     return () => {
       alive = false;
     };
   }, [isSuperAdmin]);
 
-  if (!isSuperAdmin) return null;
-
-  async function save(key: string, id: string) {
-    setValues((v) => ({ ...v, [key]: id }));
-    playSound(id); // hear it the moment you pick it
-    setSaving(key);
+  async function save(category: string, choice: string) {
+    const id = choice === INHERIT ? "" : choice;
+    setMine((v) => ({ ...v, [category]: id || null }));
+    // Hear what you picked; for "same as above" play what they'd inherit.
+    playSound(id || inherited[category] || NOTIFY_SOUNDS[0].id);
+    setSaving(category);
     try {
-      await SettingsAPI.updatePlatform(key, id);
-      toast.success("Tone saved");
+      if (isSuperAdmin) {
+        await SettingsAPI.updatePlatform(`notify.sound_${category}`, id);
+      } else {
+        await NotifySoundsAPI.save({ [category]: id });
+      }
+      toast.success(id ? "Tone saved" : "Back to the tone set above you");
     } catch (e: any) {
       toast.error(e?.message || "Failed to save");
     } finally {
@@ -1035,39 +1060,51 @@ function NotifySoundsCard() {
       <CardHeader>
         <CardTitle>Notification tones</CardTitle>
         <CardDescription>
-          What users hear in the trading app. Picking a tone plays it, so you
-          can tell them apart before saving.
+          {isSuperAdmin
+            ? "What every user on the platform hears, unless their admin or broker sets their own. Picking a tone plays it."
+            : "What YOUR users hear. Leave a row on “Same as above” to keep following the platform. Picking a tone plays it."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {SOUND_KEYS.map(({ key, label, hint }) => (
-          <div key={key} className="flex flex-wrap items-center gap-3">
-            <div className="min-w-56 flex-1">
-              <div className="text-sm font-medium">{label}</div>
-              <p className="text-xs text-muted-foreground">{hint}</p>
+        {SOUND_KEYS.map(({ key, label, hint }) => {
+          const current = mine[key] || "";
+          return (
+            <div key={key} className="flex flex-wrap items-center gap-3">
+              <div className="min-w-56 flex-1">
+                <div className="text-sm font-medium">{label}</div>
+                <p className="text-xs text-muted-foreground">{hint}</p>
+              </div>
+              <select
+                value={current || (isSuperAdmin ? NOTIFY_SOUNDS[0].id : INHERIT)}
+                disabled={saving === key}
+                onChange={(e) => void save(key, e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                {!isSuperAdmin && (
+                  <option value={INHERIT}>
+                    Same as above
+                    {toneLabel(inherited[key]) ? ` (${toneLabel(inherited[key])})` : ""}
+                  </option>
+                )}
+                {NOTIFY_SOUNDS.map((snd) => (
+                  <option key={snd.id} value={snd.id}>
+                    {snd.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  playSound(current || inherited[key] || NOTIFY_SOUNDS[0].id)
+                }
+              >
+                Play
+              </Button>
             </div>
-            <select
-              value={values[key] || NOTIFY_SOUNDS[0].id}
-              disabled={saving === key}
-              onChange={(e) => void save(key, e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {NOTIFY_SOUNDS.map((snd) => (
-                <option key={snd.id} value={snd.id}>
-                  {snd.label}
-                </option>
-              ))}
-            </select>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => playSound(values[key] || NOTIFY_SOUNDS[0].id)}
-            >
-              Play
-            </Button>
-          </div>
-        ))}
+          );
+        })}
       </CardContent>
     </Card>
   );

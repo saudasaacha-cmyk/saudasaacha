@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from beanie import PydanticObjectId
@@ -249,6 +249,73 @@ async def update_platform_setting(key: str, payload: UpdatePlatformSettingReques
     return APIResponse(data={"ok": True})
 
 
+# ── Notification tones ──────────────────────────────────────────────
+_SOUND_CATEGORIES = ("general", "money", "payment")
+
+
+@router.get("/settings/notify-sounds", response_model=APIResponse[dict])
+async def get_my_notify_sounds(admin: CurrentAdmin):
+    """This actor's own tone choices, plus what they'd inherit.
+
+    `mine` is null per category when nothing is set — that is the normal
+    state and it means "follow the tier above", not "silent". `inherited`
+    is what a user would hear today, so the UI can label the default
+    option with the actual tone instead of the word "default".
+    """
+    mine = {
+        c: getattr(admin, f"notify_sound_{c}", None) or None
+        for c in _SOUND_CATEGORIES
+    }
+    inherited = {}
+    for c in _SOUND_CATEGORIES:
+        row = await PlatformSetting.find_one(
+            PlatformSetting.setting_key == f"notify.sound_{c}"
+        )
+        inherited[c] = str(row.setting_value) if row is not None else None
+    return APIResponse(
+        data={
+            "mine": mine,
+            "inherited": inherited,
+            "is_super_admin": admin.role == UserRole.SUPER_ADMIN,
+        }
+    )
+
+
+@router.put("/settings/notify-sounds", response_model=APIResponse[dict])
+async def set_my_notify_sounds(payload: dict, admin: CurrentAdmin):
+    """Set or clear this actor's tones.
+
+    A super admin edits the PLATFORM rows instead — theirs IS the
+    default, and writing it to their user doc would leave the row every
+    other tier inherits untouched while appearing to have changed it.
+
+    An empty string clears the override and goes back to inheriting;
+    that is why the field is nullable rather than defaulted.
+    """
+    if admin.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=400,
+            detail="Super admin sets the platform tones, not a personal override.",
+        )
+    changed = {}
+    for c in _SOUND_CATEGORIES:
+        if c not in payload:
+            continue
+        value = (str(payload[c] or "")).strip() or None
+        setattr(admin, f"notify_sound_{c}", value)
+        changed[c] = value
+    if changed:
+        await admin.save()
+        await log_event(
+            action=AuditAction.SETTING_CHANGE,
+            entity_type="NotifySounds",
+            entity_id=str(admin.id),
+            actor_id=admin.id,
+            new_values=changed,
+        )
+    return APIResponse(data={"ok": True, "mine": changed})
+
+
 # ── Holidays ────────────────────────────────────────────────────────
 @router.get("/holidays", response_model=APIResponse[list])
 async def list_holidays(admin: CurrentAdmin, year: int | None = None):
@@ -462,7 +529,8 @@ async def list_audit(
     # is its TARGET, so without this a super-admin action AIMED at the admin
     # (impersonate / sub-admin create) still leaked through.
     hide_super_filter: dict[str, Any] | None = None
-    from app.models.user import User as _User, UserRole as _UserRole
+    from app.models.user import User as _User
+    from app.models.user import UserRole as _UserRole
 
     if admin.role != _UserRole.SUPER_ADMIN:
         sa_ids = [
