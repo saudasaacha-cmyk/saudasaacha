@@ -289,6 +289,10 @@ export default function AdminUsersPage() {
         }
       />
 
+      {me?.role === "SUPER_ADMIN" && (
+        <UserExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      )}
+
       {/* Live / Demo mode toggle */}
       <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1">
         <button
@@ -687,9 +691,6 @@ function MoneyTile({
       <div className={`mt-0.5 truncate font-tabular text-xs font-semibold ${valueClass}`} title={display}>
         {display}
       </div>
-      {me?.role === "SUPER_ADMIN" && (
-        <UserExportDialog open={exportOpen} onOpenChange={setExportOpen} />
-      )}
     </div>
   );
 }
