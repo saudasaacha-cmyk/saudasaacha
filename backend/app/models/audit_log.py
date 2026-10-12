@@ -29,6 +29,8 @@ class AuditAction(StrEnum):
     PASSWORD_CHANGE = "PASSWORD_CHANGE"
     PASSWORD_RESET = "PASSWORD_RESET"
     IMPERSONATE = "IMPERSONATE"
+    # Taking the book out of the system — who pulled which pool, and when.
+    EXPORT = "EXPORT"
     APPROVE = "APPROVE"
     REJECT = "REJECT"
     WALLET_ADJUST = "WALLET_ADJUST"

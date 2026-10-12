@@ -30,6 +30,7 @@ from app.schemas.common import APIResponse
 from app.services import user_service, wallet_service
 from app.services.audit_service import log_event
 from app.utils.decimal_utils import to_decimal128
+from app.utils.time_utils import now_ist
 
 router = APIRouter(prefix="/users", tags=["admin-users"])
 
@@ -316,6 +317,70 @@ async def list_users(
             "items": items,
             "meta": {"page": page, "page_size": page_size, "total": total, "total_pages": (total + page_size - 1) // page_size},
         }
+    )
+
+
+# ── Export the book ─────────────────────────────────────────────────
+# Super admin only. The Users page shows an actor's OWN pool, so a super
+# admin whose clients all sit under sub-admins sees an empty page while the
+# platform carries hundreds; this is how the whole book comes out.
+@router.get("/export/owners", response_model=APIResponse[list])
+async def export_owners(admin: CurrentAdmin):
+    """Who the export can be scoped to: every admin and broker, plus 'all'
+    and the super admin's own direct clients."""
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super admin only.")
+    from app.services import user_export_service
+
+    return APIResponse(data=await user_export_service.owner_options())
+
+
+@router.get("/export")
+async def export_users(
+    admin: CurrentAdmin,
+    owner: str = Query(default="all", max_length=64),
+    format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),
+    include_demo: bool = Query(default=False),
+    include_closed: bool = Query(default=False),
+):
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super admin only.")
+    from app.services import user_export_service
+
+    if owner not in (user_export_service.OWNER_ALL, user_export_service.OWNER_SELF):
+        try:
+            PydanticObjectId(owner)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail="Unknown owner.") from exc
+
+    options = {o["value"]: o["label"] for o in await user_export_service.owner_options()}
+    label = options.get(owner, "Selected owner")
+    rows = await user_export_service.collect_rows(
+        owner, include_demo=include_demo, include_closed=include_closed
+    )
+    if format == "pdf":
+        data = user_export_service.to_pdf(rows, label)
+        media, ext = "application/pdf", "pdf"
+    else:
+        data = user_export_service.to_xlsx(rows, label)
+        media, ext = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        )
+    await log_event(
+        action=AuditAction.EXPORT,
+        entity_type="users",
+        actor_id=admin.id,
+        new_values={"owner": owner, "label": label, "format": ext, "rows": len(rows)},
+    )
+    stamp = now_ist().strftime("%Y%m%d-%H%M")
+    filename = f"users-{owner}-{stamp}.{ext}"
+    from fastapi.responses import Response
+
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

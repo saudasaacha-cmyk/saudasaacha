@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, TrendingDown, TrendingUp } from "lucide-react";
+import { Download, Plus, Search, TrendingDown, TrendingUp } from "lucide-react";
 import { UsersAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/common/PageHeader";
+import { UserExportDialog } from "@/components/admin/UserExportDialog";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusPill } from "@/components/common/StatusPill";
 import { UserActionMenu, LiveTradeStatsDialog } from "@/components/admin/UserActionMenu";
@@ -42,6 +43,7 @@ type LiveStat = {
 
 export default function AdminUsersPage() {
   const me = useAdminAuthStore((s) => s.admin);
+  const [exportOpen, setExportOpen] = useState(false);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>("");
   const [mode, setMode] = useState<"live" | "demo">("live");
@@ -272,11 +274,18 @@ export default function AdminUsersPage() {
         title={isDemo ? "Demo users" : "All users"}
         description={`${total} ${isDemo ? "demo" : ""} users`}
         actions={
-          <Button asChild>
-            <Link href="/users/new">
-              <Plus className="size-4" /> New user
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {me?.role === "SUPER_ADMIN" && (
+              <Button variant="secondary" onClick={() => setExportOpen(true)} className="gap-2">
+                <Download className="size-4" /> Download
+              </Button>
+            )}
+            <Button asChild>
+              <Link href="/users/new">
+                <Plus className="size-4" /> New user
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -678,6 +687,9 @@ function MoneyTile({
       <div className={`mt-0.5 truncate font-tabular text-xs font-semibold ${valueClass}`} title={display}>
         {display}
       </div>
+      {me?.role === "SUPER_ADMIN" && (
+        <UserExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      )}
     </div>
   );
 }

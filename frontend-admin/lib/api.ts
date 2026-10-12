@@ -245,8 +245,24 @@ export const DashboardAPI = {
   riskAlerts: () => unwrap<any[]>(api.get("/admin/dashboard/risk-alerts")),
 };
 
+export type UserExportOwner = { value: string; label: string };
+
 export const UsersAPI = {
   list: (params?: any) => unwrap<{ items: any[]; meta: any }>(api.get("/admin/users", { params })),
+  /** Super admin only: who the export can be scoped to. */
+  exportOwners: () =>
+    unwrap<UserExportOwner[]>(api.get("/admin/users/export/owners")),
+  /** Super admin only: the whole book as a file. Returns the raw bytes —
+   *  the request needs the auth header, so a plain link would 401. */
+  exportFile: async (params: {
+    owner: string;
+    format: "xlsx" | "pdf";
+    include_demo?: boolean;
+    include_closed?: boolean;
+  }) => {
+    const res = await api.get("/admin/users/export", { params, responseType: "blob" });
+    return res.data as Blob;
+  },
   detail: (id: string) => unwrap<any>(api.get(`/admin/users/${id}`)),
   create: (body: any) => unwrap<any>(api.post("/admin/users", body)),
   update: (id: string, body: any) => unwrap<any>(api.put(`/admin/users/${id}`, body)),
