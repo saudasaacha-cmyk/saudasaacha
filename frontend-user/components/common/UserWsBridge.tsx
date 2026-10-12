@@ -5,9 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { STORAGE_KEYS, WS_URL } from "@/lib/constants";
+import { fetchNotifySounds } from "@/lib/useSupport";
 import {
   ensureNotificationPermission,
-  playNotifyPing,
+  loadNotifySounds,
+  playCategorySound,
   primeVoiceOnFirstGesture,
   showNativeNotification,
   speakNotification,
@@ -82,6 +84,12 @@ function walletReasonToToast(
  * `app/(dashboard)/layout.tsx`); it renders nothing.
  */
 export function UserWsBridge() {
+  // Pull the admin's tone choices once per page load. Failure leaves
+  // the defaults, so the chime never depends on this call.
+  useEffect(() => {
+    void loadNotifySounds(fetchNotifySounds);
+  }, []);
+
   const qc = useQueryClient();
   const user = useAuthStore((s) => s.user);
 
@@ -180,7 +188,7 @@ export function UserWsBridge() {
               `. Add funds or reduce positions to avoid auto square-off.`;
             toast.warning(title, { description: body, duration: 10000 });
             if (userNotificationsEnabled()) {
-              playNotifyPing();
+              playCategorySound("general");
               showNativeNotification(title, body, { tag: "mp-risk-warning" });
             }
             break;
@@ -202,7 +210,7 @@ export function UserWsBridge() {
                 } else {
                   toast.warning(t.title, { description: t.body, duration: 7000 });
                 }
-                playNotifyPing();
+                playCategorySound("money");
                 // Unique tag per event so successive admin Add Fund /
                 // deposit approvals each show as their own tray row
                 // instead of collapsing onto the first one.
@@ -225,7 +233,7 @@ export function UserWsBridge() {
                   description: p.name ? `${p.name}: ₹${p.amount} bonus credit` : `₹${p.amount} bonus credit`,
                   duration: 7000,
                 });
-                playNotifyPing();
+                playCategorySound("money");
               }
             }
             break;
@@ -247,7 +255,9 @@ export function UserWsBridge() {
                 else if (lvl === "WARNING") toast.warning(title, opts);
                 else if (lvl === "SUCCESS") toast.success(title, opts);
                 else toast(title, opts);
-                playNotifyPing();
+                // The sender tags the category; a payment-details change
+                // must not sound like an ordinary message.
+                playCategorySound(p.category);
                 // Native OS tray popup — same path the wallet events use so
                 // an admin broadcast surfaces in the Android tray / desktop
                 // banner even when the tab is backgrounded. Unique tag per

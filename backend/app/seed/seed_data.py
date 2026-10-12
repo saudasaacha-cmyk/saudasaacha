@@ -167,6 +167,35 @@ async def seed_platform_settings() -> None:
             True,
             "Number of expiries exposed to users",
         ),
+        # Per-category alert tones for the USER app. Public so the browser
+        # can read them without an extra authenticated round-trip on every
+        # page. Values are ids from NOTIFY_SOUNDS (frontend notify-sound.ts);
+        # an id we later rename falls back to the first tone rather than
+        # going silent.
+        (
+            "notify.sound_general",
+            "chime",
+            SettingType.STRING,
+            "notifications",
+            True,
+            "Tone for ordinary notifications (admin messages, KYC, margin)",
+        ),
+        (
+            "notify.sound_money",
+            "coin",
+            SettingType.STRING,
+            "notifications",
+            True,
+            "Tone for money movement (deposit, withdrawal, funds added)",
+        ),
+        (
+            "notify.sound_payment",
+            "alert",
+            SettingType.STRING,
+            "notifications",
+            True,
+            "Tone for a change to deposit / payment details",
+        ),
     ]
     for k, v, t, cat, public, desc in defaults:
         existing = await PlatformSetting.find_one(PlatformSetting.setting_key == k)

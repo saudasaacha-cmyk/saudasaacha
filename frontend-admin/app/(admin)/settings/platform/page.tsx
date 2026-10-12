@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/common/PageHeader";
+import { NOTIFY_SOUNDS, playSound } from "@/lib/notify-sound";
 import { cn } from "@/lib/utils";
 import { playNotifyPing } from "@/lib/notify-sound";
 
@@ -80,6 +81,7 @@ export default function PlatformSettingsPage() {
         <NotificationsCard />
         <WeeklySettlementCard />
         <PromoButtonCard />
+        <NotifySoundsCard />
         <PaymentGatewayCard />
         <CarryForwardToggleCard />
         <TermsCard />
@@ -955,6 +957,117 @@ function ChangePasswordCard() {
         >
           {saving ? "Saving…" : "Change password"}
         </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Notification tones (super-admin only) ────────────────────────────
+// Three categories, not one per event type. The point of a different
+// sound is that the user can tell WHAT happened without looking, and
+// there are three things worth telling apart: money arrived, the
+// details for sending money changed, and everything else. Nine tones
+// nobody can distinguish would be worse than three they can.
+const SOUND_KEYS = [
+  {
+    key: "notify.sound_payment",
+    label: "Payment details changed",
+    hint: "Deposit bank or crypto address was edited — the one users must not miss.",
+  },
+  {
+    key: "notify.sound_money",
+    label: "Money in or out",
+    hint: "Deposit approved, withdrawal processed, funds added, bonus credited.",
+  },
+  {
+    key: "notify.sound_general",
+    label: "Everything else",
+    hint: "Admin messages, margin warnings, KYC updates.",
+  },
+] as const;
+
+function NotifySoundsCard() {
+  const admin = useAdminAuthStore((s) => s.admin);
+  const isSuperAdmin = String(admin?.role || "") === "SUPER_ADMIN";
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState("");
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let alive = true;
+    SettingsAPI.platformList("notifications")
+      .then((rows) => {
+        if (!alive) return;
+        const next: Record<string, string> = {};
+        for (const { key } of SOUND_KEYS) {
+          next[key] = String(
+            (rows || []).find((r: any) => r?.key === key)?.value ?? "",
+          );
+        }
+        setValues(next);
+      })
+      .catch(() => {
+        /* leave empty — the selects fall back to the first tone */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [isSuperAdmin]);
+
+  if (!isSuperAdmin) return null;
+
+  async function save(key: string, id: string) {
+    setValues((v) => ({ ...v, [key]: id }));
+    playSound(id); // hear it the moment you pick it
+    setSaving(key);
+    try {
+      await SettingsAPI.updatePlatform(key, id);
+      toast.success("Tone saved");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to save");
+    } finally {
+      setSaving("");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Notification tones</CardTitle>
+        <CardDescription>
+          What users hear in the trading app. Picking a tone plays it, so you
+          can tell them apart before saving.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {SOUND_KEYS.map(({ key, label, hint }) => (
+          <div key={key} className="flex flex-wrap items-center gap-3">
+            <div className="min-w-56 flex-1">
+              <div className="text-sm font-medium">{label}</div>
+              <p className="text-xs text-muted-foreground">{hint}</p>
+            </div>
+            <select
+              value={values[key] || NOTIFY_SOUNDS[0].id}
+              disabled={saving === key}
+              onChange={(e) => void save(key, e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {NOTIFY_SOUNDS.map((snd) => (
+                <option key={snd.id} value={snd.id}>
+                  {snd.label}
+                </option>
+              ))}
+            </select>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => playSound(values[key] || NOTIFY_SOUNDS[0].id)}
+            >
+              Play
+            </Button>
+          </div>
+        ))}
       </CardContent>
     </Card>
   );

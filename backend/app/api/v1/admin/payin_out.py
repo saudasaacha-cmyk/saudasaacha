@@ -12,13 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.v1.admin._owner import build_owner_map, owner_fields
 from app.core.dependencies import (
     CurrentAdmin,
-    SuperAdmin,
     assert_user_in_scope,
     require_perm,
     scoped_user_ids,
 )
 from app.models.audit_log import AuditAction
-from app.models.user import UserRole
 from app.models.bank_account import CompanyBankAccount
 from app.models.transaction import (
     DepositRequest,
@@ -26,10 +24,10 @@ from app.models.transaction import (
     SettlementRequest,
     SettlementStatus,
     TransactionType,
-    WdRule,
     WithdrawalRequest,
     WithdrawalStatus,
 )
+from app.models.user import UserRole
 from app.schemas.admin.common import (
     ApproveDepositRequest,
     ApproveWithdrawalRequest,
@@ -39,6 +37,7 @@ from app.schemas.admin.common import (
 from app.schemas.common import APIResponse
 from app.services import wallet_service
 from app.services.audit_service import log_event
+from app.services.notification_service import notify_payment_details_changed
 from app.utils.decimal_utils import to_decimal
 from app.utils.time_utils import now_utc
 
@@ -1022,6 +1021,7 @@ async def create_bank(
             )
         raise
     await _invalidate_company_banks_cache(owner_admin_id, owner_broker_id)
+    await _tell_users_payment_details_changed(admin, "A deposit bank account")
     return APIResponse(data={"id": str(row.id)})
 
 
@@ -1054,6 +1054,14 @@ def _assert_bank_in_scope(r: CompanyBankAccount, admin) -> None:
         )
 
 
+async def _tell_users_payment_details_changed(admin, what: str) -> None:
+    """Fire-and-forget: a bank edit must never fail because the alert did."""
+    try:
+        await notify_payment_details_changed(admin, what)
+    except Exception:  # noqa: BLE001
+        logger.exception("payment_details_notify_failed admin=%s", admin.id)
+
+
 @router.put("/bank-accounts/{bank_id}", response_model=APIResponse[dict])
 async def update_bank(
     bank_id: str,
@@ -1079,6 +1087,7 @@ async def update_bank(
             setattr(r, k, payload[k])
     await r.save()
     await _invalidate_company_banks_cache(r.owner_admin_id, r.owner_broker_id)
+    await _tell_users_payment_details_changed(admin, "A deposit bank account")
     return APIResponse(data={"id": str(r.id)})
 
 
@@ -1096,6 +1105,7 @@ async def delete_bank(
     owner_broker_id = r.owner_broker_id
     await r.delete()
     await _invalidate_company_banks_cache(owner_admin_id, owner_broker_id)
+    await _tell_users_payment_details_changed(admin, "A deposit bank account")
     return APIResponse(data={"ok": True})
 
 
@@ -1154,18 +1164,22 @@ async def list_wd_rules(admin: CurrentAdmin):
           ]
         }
     """
-    from app.services import wd_rules_service
     from app.models.transaction import (
         BrokerWdRule as _BrokerWdRule,
+    )
+    from app.models.transaction import (
         SubAdminWdRule as _SubAdminWdRule,
+    )
+    from app.models.transaction import (
         SuperAdminWdRule as _SuperAdminWdRule,
     )
+    from app.services import wd_rules_service
 
     tier, owner_id = _admin_tier(admin)
 
     def _serialize_own(row) -> dict[str, Any]:
         if row is None:
-            return {f: None for f in wd_rules_service._RULE_FIELDS}
+            return dict.fromkeys(wd_rules_service._RULE_FIELDS)
         d: dict[str, Any] = {}
         for f in wd_rules_service._RULE_FIELDS:
             v = getattr(row, f, None)
@@ -1308,8 +1322,8 @@ async def update_wd_rule(
     else:
         target_tier, owner_id = _admin_tier(admin)
 
-    from app.services import wd_rules_service
     from app.models.audit_log import AuditAction
+    from app.services import wd_rules_service
     from app.services.audit_service import log_event
 
     try:

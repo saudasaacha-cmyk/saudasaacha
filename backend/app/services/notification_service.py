@@ -38,12 +38,15 @@ from typing import Any
 
 from beanie import PydanticObjectId
 
+from app.core.redis_client import publish_batch
 from app.models.notification import (
     AdminNotification,
     AdminNotificationEventType,
+    Notification,
     NotificationLevel,
+    NotificationType,
 )
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, UserStatus
 
 logger = logging.getLogger(__name__)
 
@@ -208,3 +211,79 @@ async def create_for_admins(
         logger.exception("notif_publish_event_failed")
 
     return len(rows)
+
+
+# ── Payment details changed ──────────────────────────────────────────
+async def notify_payment_details_changed(actor, what: str) -> int:
+    """Tell the actor's OWN users that their deposit details changed.
+
+    Scoped the same way the bank rows themselves are owned
+    (`payin_out._owner_filter`): a sub-admin's change reaches that
+    sub-admin's clients, a broker's reaches theirs, and the super
+    admin's reaches the direct pool. Deliberately NOT the whole subtree
+    — a broker's client deposits into the broker's account, so the
+    admin above them changing theirs is not news the client can act on,
+    and money alerts that don't apply are how people learn to ignore
+    them.
+
+    Returns how many users were notified. Best-effort throughout: a
+    failure here must never fail the bank edit that triggered it.
+    """
+    query: dict = {"role": UserRole.CLIENT.value, "status": UserStatus.ACTIVE.value}
+    if actor.role == UserRole.SUPER_ADMIN:
+        query["assigned_admin_id"] = None
+    elif actor.role == UserRole.BROKER:
+        query["assigned_broker_id"] = actor.id
+    else:
+        query["assigned_admin_id"] = actor.id
+
+    recipients = [u.id for u in await User.find(query).to_list()]
+    if not recipients:
+        return 0
+
+    title = "Deposit details updated"
+    message = (
+        f"{what} has changed. Please use the latest details shown on the "
+        "deposit screen before sending any money."
+    )
+
+    await Notification.insert_many(
+        [
+            Notification(
+                user_id=uid,
+                type=NotificationType.SYSTEM,
+                level=NotificationLevel.WARNING,
+                title=title,
+                message=message,
+                data={"link": "/wallet", "category": "payment"},
+            )
+            for uid in recipients
+        ]
+    )
+
+    payload = {
+        "type": "notification",
+        "payload": {
+            "title": title,
+            "message": message,
+            "link": "/wallet",
+            "level": "WARNING",
+            # Picks the tone on the client. Money details changing is not
+            # the same event as money arriving, and it should not sound
+            # like it.
+            "category": "payment",
+        },
+    }
+    try:
+        await publish_batch(
+            [(f"user:{uid}:notification", payload) for uid in recipients]
+        )
+    except Exception:  # pragma: no cover - never fail the edit
+        logger.exception("payment_details_notify_publish_failed actor=%s", actor.id)
+    logger.info(
+        "payment_details_changed_notified actor=%s role=%s users=%d",
+        actor.id,
+        actor.role,
+        len(recipients),
+    )
+    return len(recipients)

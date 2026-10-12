@@ -141,3 +141,8 @@ export function useDepositSupportPrefill(): string {
     ? `Hi, I need help adding funds to my ${name} account`
     : "Hi, I need help adding funds to my account";
 }
+
+/** Per-category alert tones, set by the admin in Platform Settings. */
+export function fetchNotifySounds() {
+  return unwrap<Record<string, string>>(api.get("/user/support/notify-sounds"));
+}

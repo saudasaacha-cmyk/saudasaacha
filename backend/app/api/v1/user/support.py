@@ -198,6 +198,27 @@ async def get_promo_button(user: CurrentUser):
     )
 
 
+# Fallbacks must match the seeded defaults — a deployment whose settings
+# rows predate this feature still rings, rather than going quiet.
+_SOUND_DEFAULTS = {"general": "chime", "money": "coin", "payment": "alert"}
+
+
+@router.get("/notify-sounds", response_model=APIResponse[dict])
+async def get_notify_sounds(user: CurrentUser):
+    """Which tone to play for each class of notification.
+
+    Three categories, not one per event type: money arriving, money
+    DETAILS changing, and everything else. Those are the three things a
+    user needs to tell apart without looking at the screen — a deposit
+    landing and the deposit account changing are very different news.
+    """
+    out = {}
+    for category, fallback in _SOUND_DEFAULTS.items():
+        value = await _read_setting(f"notify.sound_{category}")
+        out[category] = (str(value).strip() if value else "") or fallback
+    return APIResponse(data=out)
+
+
 @router.get("", response_model=APIResponse[dict])
 async def get_support_contacts(user: CurrentUser):
     """Returns the effective WhatsApp + email for THIS user. WhatsApp

@@ -8,6 +8,8 @@ oxapay dashboard is returned for convenience.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -15,6 +17,9 @@ from app.core.config import settings
 from app.core.dependencies import CurrentAdmin
 from app.schemas.common import APIResponse
 from app.services import crypto_config_service
+from app.services.notification_service import notify_payment_details_changed
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/crypto-config", tags=["admin-crypto"])
 
@@ -50,4 +55,11 @@ async def update_crypto_config(payload: CryptoConfigUpdate, admin: CurrentAdmin)
     )
     data = crypto_config_service.to_admin_dict(cfg)
     data["webhook_url"] = _webhook_url(admin)
+    # Crypto deposit details are payment details too — a user sending to a
+    # stale wallet address loses the money. Best-effort: the save already
+    # succeeded and must not be undone by a failed alert.
+    try:
+        await notify_payment_details_changed(admin, "Crypto deposit settings")
+    except Exception:  # noqa: BLE001
+        logger.exception("crypto_payment_notify_failed admin=%s", admin.id)
     return APIResponse(data=data, message="Crypto payment settings saved.")
