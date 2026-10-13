@@ -27,9 +27,31 @@ from app.core.ws_hub import user_channel_hub
 from app.core.ws_limiter import acquire as ws_limit_acquire
 from app.core.ws_limiter import client_ip as ws_client_ip
 from app.core.ws_limiter import release as ws_limit_release
+from app.services import presence_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _heartbeat(ws: WebSocket, user_id: str) -> None:
+    """Keep the socket warm and the user's presence fresh.
+
+    The two belong together: presence is "this app checked in recently",
+    and the heartbeat IS the check-in. Marked once on connect, refreshed
+    on every beat, and left to expire on its own — see
+    `presence_service` for why a disconnect doesn't clear it.
+    """
+    await presence_service.mark_online(user_id)
+    try:
+        while True:
+            await asyncio.sleep(25)
+            if not await safe_send_text(ws, json.dumps({"type": "heartbeat"})):
+                return
+            await presence_service.mark_online(user_id)
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        return
+    except Exception:  # pragma: no cover
+        return
 
 
 @router.websocket("/ws/user")
@@ -79,18 +101,7 @@ async def user_ws(ws: WebSocket, token: str = Query(...)):
 
     user_channel_hub.add(str(user_id), ws)
 
-    async def heartbeat():
-        try:
-            while True:
-                await asyncio.sleep(25)
-                if not await safe_send_text(ws, json.dumps({"type": "heartbeat"})):
-                    return
-        except (WebSocketDisconnect, asyncio.CancelledError):
-            return
-        except Exception:  # pragma: no cover
-            return
-
-    hb_task = asyncio.create_task(heartbeat())
+    hb_task = asyncio.create_task(_heartbeat(ws, str(user_id)))
 
     try:
         # The hub is now responsible for forwarding messages to this

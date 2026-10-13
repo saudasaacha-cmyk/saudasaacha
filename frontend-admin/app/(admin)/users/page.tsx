@@ -12,6 +12,7 @@ import { UserExportDialog } from "@/components/admin/UserExportDialog";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusPill } from "@/components/common/StatusPill";
 import { UserActionMenu, LiveTradeStatsDialog } from "@/components/admin/UserActionMenu";
+import { OnlineUsersCard } from "@/components/admin/OnlineUsersCard";
 import { OwnerBadge } from "@/components/admin/OwnerBadge";
 import { LedgerSheet } from "@/components/admin/LedgerSheet";
 import { useAdminAuthStore } from "@/stores/authStore";
@@ -292,6 +293,11 @@ export default function AdminUsersPage() {
       {me?.role === "SUPER_ADMIN" && (
         <UserExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       )}
+
+      {/* Who has the app open right now. Above the table on purpose —
+          it is the question an operator opens this page to answer, and
+          the ACTIVE column below answers a different one. */}
+      <OnlineUsersCard />
 
       {/* Live / Demo mode toggle */}
       <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1">

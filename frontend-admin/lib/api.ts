@@ -247,7 +247,22 @@ export const DashboardAPI = {
 
 export type UserExportOwner = { value: string; label: string };
 
+export type OnlineUser = {
+  id: string;
+  user_code: string;
+  full_name: string;
+  role: string;
+  status: string;
+  is_demo: boolean;
+  /** Epoch seconds the session started. */
+  online_since: number | null;
+  last_login_at: string | null;
+};
+
 export const UsersAPI = {
+  /** Users whose app is checking in right now — not the ACTIVE status. */
+  online: () =>
+    unwrap<{ users: OnlineUser[]; ttl_sec: number }>(api.get("/admin/users/online")),
   list: (params?: any) => unwrap<{ items: any[]; meta: any }>(api.get("/admin/users", { params })),
   /** Super admin only: who the export can be scoped to. */
   exportOwners: () =>

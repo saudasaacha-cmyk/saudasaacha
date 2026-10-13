@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC
 from typing import Any
 
 from beanie import PydanticObjectId
@@ -324,6 +325,64 @@ async def list_users(
 # Super admin only. The Users page shows an actor's OWN pool, so a super
 # admin whose clients all sit under sub-admins sees an empty page while the
 # platform carries hundreds; this is how the whole book comes out.
+@router.get("/online", response_model=APIResponse[dict])
+async def list_online_users(
+    admin: CurrentAdmin,
+    _: None = Depends(require_perm("users", "read")),
+):
+    """Users whose app is connected right now, newest session first.
+
+    "Online" means their socket has checked in within the last
+    `presence_service.TTL_SEC`, not that their account is ACTIVE — the
+    status column already answers that. Scoped to the caller's own pool
+    like every other user list here, so an admin sees their clients and
+    not the platform's.
+    """
+    from app.services import presence_service
+
+    presence = await presence_service.online_user_ids()
+    if not presence:
+        return APIResponse(data={"users": [], "ttl_sec": presence_service.TTL_SEC})
+
+    oids = []
+    for uid in presence:
+        try:
+            oids.append(PydanticObjectId(uid))
+        except Exception:  # noqa: BLE001 - a junk key must not 500 the page
+            continue
+
+    scope = await scoped_user_filter(admin)
+    query: dict[str, Any] = {"_id": {"$in": oids}}
+    and_clauses = [scope] if "$or" in scope else []
+    if and_clauses:
+        query["$and"] = and_clauses
+    else:
+        query.update(scope)
+
+    rows = await User.find(query).to_list()
+    out = []
+    for u in rows:
+        since = presence.get(str(u.id))
+        out.append(
+            {
+                "id": str(u.id),
+                "user_code": u.user_code,
+                "full_name": u.full_name,
+                "role": str(u.role),
+                "status": str(u.status),
+                "is_demo": bool(getattr(u, "is_demo", False)),
+                "online_since": since,
+                "last_login_at": u.last_login_at.isoformat()
+                if u.last_login_at
+                else None,
+            }
+        )
+    out.sort(key=lambda r: r["online_since"] or 0, reverse=True)
+    return APIResponse(
+        data={"users": out, "ttl_sec": presence_service.TTL_SEC}
+    )
+
+
 @router.get("/export/owners", response_model=APIResponse[list])
 async def export_owners(admin: CurrentAdmin):
     """Who the export can be scoped to: every admin and broker, plus 'all'
@@ -1059,6 +1118,7 @@ async def delete_user(
     # tombstoned below (not for demo) so re-registration + the delete audit
     # trail survive.
     import asyncio as _asyncio
+
     from app.models.order import Order
     from app.models.position import Position
     from app.models.trade import Trade
@@ -1124,8 +1184,9 @@ async def update_credit_limit(
 ):
     """Adjust the user's credit_limit by `delta` (positive = give credit,
     negative = take credit). The new total cannot go below 0."""
-    from bson import Decimal128
     from decimal import Decimal
+
+    from bson import Decimal128
 
     from app.utils.decimal_utils import to_decimal
 
@@ -1184,7 +1245,7 @@ async def kill_switch(
     """
     from beanie import PydanticObjectId
 
-    from app.models._base import OrderAction, OrderType, ProductType
+    from app.models._base import OrderAction, OrderType
     from app.models.order import Order, OrderStatus
     from app.models.position import Position, PositionStatus
     from app.services import order_service
@@ -1408,8 +1469,9 @@ async def live_trade_stats(user_id: str, admin: CurrentAdmin):
       • open_positions   — list of currently-open positions (symbol,
                            qty, avg, ltp, floating P&L per row)
     """
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
-    from decimal import Decimal
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
 
     from app.models.position import Position, PositionStatus
     from app.services import (
@@ -1431,7 +1493,7 @@ async def live_trade_stats(user_id: str, admin: CurrentAdmin):
     today_start = now_ist_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     days_back = (now_ist_dt.weekday() + 1) % 7  # Sun = 0
     week_start_ist = today_start - _td(days=days_back)
-    week_start = week_start_ist.astimezone(_tz.utc)
+    week_start = week_start_ist.astimezone(UTC)
 
     usd_inr = market_data_service.get_usd_inr_rate()
 
