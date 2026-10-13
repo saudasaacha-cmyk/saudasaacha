@@ -30,6 +30,7 @@ import {
   Plug,
   Ruler,
   ShieldCheck,
+  UserCheck,
   Users,
   Crown,
   Wallet,
@@ -73,6 +74,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: "Users",
     items: [
       { href: "/users", label: "All users", icon: Users, perm: "users" },
+      // Platform-wide, unscoped, contacts readable — super admin only, like
+      // the user-book export it shares a service shape with.
+      { href: "/active-users", label: "Active Users", icon: UserCheck, superOnly: true },
       { href: "/send-notification", label: "Send Notification", icon: MessageCircle, perm: "users" },
     ],
   },

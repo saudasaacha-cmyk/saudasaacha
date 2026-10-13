@@ -57,9 +57,17 @@ def masked_contact(value: str | None) -> str | None:
 
 
 def is_placeholder_contact(value: str | None) -> bool:
-    """True for a generated stand-in — the UI shows a dash instead."""
+    """True for a generated stand-in — the UI shows a dash instead.
+
+    Matches ANY `@noemail.*` host, not just the current brand's: accounts
+    created while NO_EMAIL_DOMAIN carried an earlier brand
+    (`@noemail.marginplant.com`) hold the same absence, and testing only
+    today's constant made them read as real addresses — "••••••••" in the
+    panel and a printed address in the super-admin export.
+    """
     v = (value or "").strip()
-    return v.endswith("@" + NO_EMAIL_DOMAIN) or v.startswith(NO_MOBILE_PREFIX)
+    low = v.lower()
+    return "@noemail." in low or v.upper().startswith(NO_MOBILE_PREFIX)
 
 
 # Six characters, letters and digits mixed. O/0 and I/1/L are left out —

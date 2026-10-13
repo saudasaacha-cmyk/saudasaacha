@@ -259,10 +259,73 @@ export type OnlineUser = {
   last_login_at: string | null;
 };
 
+/**
+ * A row of the platform-wide Active Users roster (super admin only).
+ *
+ * `status` is always ACTIVE — that's what the list selects on. `online`
+ * is the separate question of whether their app is checked in right now.
+ * `email` / `mobile` are REAL here, not `••••••••`: this endpoint and the
+ * user-book export are the only two that hand them back.
+ */
+export type ActiveUser = {
+  id: string;
+  user_code: string;
+  full_name: string;
+  role: string;
+  /** "Client" / "Broker" / "Sub-broker" / "Super admin" — display form. */
+  role_label: string;
+  /** "Super admin" | "Admin: X" | "Broker: Y" */
+  owner: string;
+  email: string;
+  mobile: string;
+  status: string;
+  is_demo: boolean;
+  online: boolean;
+  /** Epoch seconds the session started, null when offline. */
+  online_since: number | null;
+  last_login_at: string | null;
+  created_at: string | null;
+};
+
+export type ActiveUsersMeta = {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+  /** How many of `total` are connected right now. */
+  online: number;
+  ttl_sec: number;
+};
+
+export type ActiveUsersQuery = {
+  q?: string;
+  role?: string;
+  online_only?: boolean;
+  include_demo?: boolean;
+};
+
 export const UsersAPI = {
   /** Users whose app is checking in right now — not the ACTIVE status. */
   online: () =>
     unwrap<{ users: OnlineUser[]; ttl_sec: number }>(api.get("/admin/users/online")),
+  /** Super admin only: every ACTIVE account platform-wide, online first.
+   *  Unscoped on purpose — clients of every admin / broker plus the
+   *  admin-tier login accounts themselves. */
+  active: (params: ActiveUsersQuery & { page?: number; page_size?: number }) =>
+    unwrap<{ items: ActiveUser[]; meta: ActiveUsersMeta }>(
+      api.get("/admin/users/active", { params }),
+    ),
+  /** Super admin only: the same roster as a file, with the page's filters
+   *  applied. Raw bytes — the request needs the auth header. */
+  activeExportFile: async (
+    params: ActiveUsersQuery & { format: "xlsx" | "pdf" },
+  ) => {
+    const res = await api.get("/admin/users/active/export", {
+      params,
+      responseType: "blob",
+    });
+    return res.data as Blob;
+  },
   list: (params?: any) => unwrap<{ items: any[]; meta: any }>(api.get("/admin/users", { params })),
   /** Super admin only: who the export can be scoped to. */
   exportOwners: () =>

@@ -443,6 +443,110 @@ async def export_users(
     )
 
 
+# ── Active users (platform-wide) ─────────────────────────────────────
+# Every other list on this router is scoped to the caller's own pool, so a
+# super admin whose clients sit under sub-admins cannot answer "who is
+# active across the platform". These two deliberately ignore scope — and
+# are therefore super-admin only, with real contacts, like /users/export.
+@router.get("/active", response_model=APIResponse[dict])
+async def list_active_users(
+    admin: CurrentAdmin,
+    q: str | None = None,
+    role: str | None = None,
+    online_only: bool = Query(default=False),
+    include_demo: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    _: None = Depends(require_perm("users", "read")),
+):
+    """Every ACTIVE account on the platform, online sessions first.
+
+    Two senses of "active" in one row: `status == ACTIVE` (allowed to
+    trade) and `online` (socket checked in within `ttl_sec`). Admin,
+    broker and sub-broker login accounts are included alongside clients,
+    each row carrying its owner.
+    """
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super admin only.")
+    from app.services import active_users_service, presence_service
+
+    rows = await active_users_service.collect_rows(
+        q=q, role=role, online_only=online_only, include_demo=include_demo
+    )
+    total = len(rows)
+    # Sliced in Python, not Mongo: the sort key is presence, which lives in
+    # Redis, so the merge has to happen before the page is cut.
+    start = (page - 1) * page_size
+    return APIResponse(
+        data={
+            "items": rows[start : start + page_size],
+            "meta": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+                "online": sum(1 for r in rows if r["online"]),
+                "ttl_sec": presence_service.TTL_SEC,
+            },
+        }
+    )
+
+
+@router.get("/active/export")
+async def export_active_users(
+    admin: CurrentAdmin,
+    q: str | None = None,
+    role: str | None = None,
+    online_only: bool = Query(default=False),
+    include_demo: bool = Query(default=False),
+    format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),
+    _: None = Depends(require_perm("users", "read")),
+):
+    """The same roster as a file. Carries the filters the page was showing
+    so what downloads is what the operator was looking at."""
+    if admin.role != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Super admin only.")
+    from app.services import active_users_service
+
+    rows = await active_users_service.collect_rows(
+        q=q, role=role, online_only=online_only, include_demo=include_demo
+    )
+    if format == "pdf":
+        data = active_users_service.to_pdf(rows)
+        media, ext = "application/pdf", "pdf"
+    else:
+        data = active_users_service.to_xlsx(rows)
+        media, ext = (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xlsx",
+        )
+    # Contacts leave the building in this file — same accountability the
+    # user-book export carries.
+    await log_event(
+        action=AuditAction.EXPORT,
+        entity_type="active_users",
+        actor_id=admin.id,
+        new_values={
+            "format": ext,
+            "rows": len(rows),
+            "online_only": online_only,
+            "include_demo": include_demo,
+            "role": role or "all",
+            "q": q or "",
+        },
+    )
+    stamp = now_ist().strftime("%Y%m%d-%H%M")
+    from fastapi.responses import Response
+
+    return Response(
+        content=data,
+        media_type=media,
+        headers={
+            "Content-Disposition": f'attachment; filename="active-users-{stamp}.{ext}"'
+        },
+    )
+
+
 @router.get("/live-stats", response_model=APIResponse[dict])
 async def users_live_stats(
     admin: CurrentAdmin,
