@@ -174,7 +174,7 @@ const PRESETS: {
   {
     id: "login",
     label: "Login",
-    actions: ["LOGIN", "LOGOUT", "LOGIN_FAILED"],
+    actions: ["LOGIN", "LOGOUT", "LOGIN_FAILED", "LOGIN_IP_PURGE"],
   },
   {
     id: "settings",
@@ -567,6 +567,7 @@ const ACTION_LABELS: Record<string, string> = {
   LOGIN: "Logged in",
   LOGOUT: "Logged out",
   LOGIN_FAILED: "Failed login",
+  LOGIN_IP_PURGE: "Login IPs cleared",
   CREATE: "Created",
   DELETE: "Deleted",
   APPROVE: "Approved",
@@ -784,6 +785,16 @@ function fmtAuditMessage(row: any): { summary: string; tone: "normal" | "warn" }
     case "LOGIN_FAILED":
       summary = `Failed login attempt for ${target || actor}`;
       break;
+    case "LOGIN_IP_PURGE": {
+      // The system runs this at midnight, so there is often no actor.
+      const who = row.new_values?.trigger === "manual" ? actor : "The system";
+      const accounts = Number(row.new_values?.accounts_cleared ?? 0);
+      const auditRows = Number(row.new_values?.audit_rows_cleared ?? 0);
+      summary =
+        `${who} cleared the stored login IPs of admin accounts — ` +
+        `${accounts} account${accounts === 1 ? "" : "s"} and ${auditRows} login row${auditRows === 1 ? "" : "s"}`;
+      break;
+    }
     case "SETTING_CHANGE":
       summary = `${actor} changed a setting${m.tier ? ` (${m.tier})` : ""}`;
       break;

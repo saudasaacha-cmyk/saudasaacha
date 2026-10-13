@@ -34,6 +34,33 @@ def _require_admin_or_super(admin) -> None:
         raise HTTPException(status_code=403, detail="Admin or super-admin only")
 
 
+# ── Admin-tier login IP records ──────────────────────────────────────
+# An admin's login IP is kept in two places (the account's last_login_ip
+# and the ip_address on its LOGIN audit rows). Super admin can see what
+# is stored and wipe both; a daily loop does the same at 00:00 IST.
+@router.get("/settings/admin-login-ips", response_model=APIResponse[dict])
+async def get_admin_login_ips(admin: CurrentAdmin):
+    _require_super_admin(admin)
+    from app.services import admin_ip_cleanup_service
+
+    return APIResponse(data=await admin_ip_cleanup_service.stats())
+
+
+@router.post("/settings/admin-login-ips/clear", response_model=APIResponse[dict])
+async def clear_admin_login_ips(admin: CurrentAdmin):
+    """Wipe them now. Idempotent — a second click clears nothing and
+    still returns 200 with zero counts."""
+    _require_super_admin(admin)
+    from app.services import admin_ip_cleanup_service
+
+    summary = await admin_ip_cleanup_service.purge(
+        actor_id=admin.id, trigger="manual"
+    )
+    # The card re-reads its counters off the same shape it renders.
+    summary["stats"] = await admin_ip_cleanup_service.stats()
+    return APIResponse(data=summary)
+
+
 # ── Weekly settlement controls ───────────────────────────────────────
 @router.post("/settings/weekly-settlement/run", response_model=APIResponse[dict])
 async def trigger_weekly_settlement(admin: CurrentAdmin, force: bool = Query(True)):

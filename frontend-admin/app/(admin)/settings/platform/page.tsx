@@ -14,9 +14,11 @@ import {
   Mail,
   Megaphone,
   Moon,
+  Network,
   Palette,
   Play,
   ShieldCheck,
+  Trash2,
   Sun,
   User,
   Volume2,
@@ -24,7 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAdminAuthStore } from "@/stores/authStore";
-import { SettingsAPI, AdminAuthAPI, NotifySoundsAPI } from "@/lib/api";
+import { SettingsAPI, AdminAuthAPI, NotifySoundsAPI, type AdminLoginIpStats } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -84,6 +86,7 @@ export default function PlatformSettingsPage() {
         <NotifySoundsCard />
         <PaymentGatewayCard />
         <CarryForwardToggleCard />
+        <AdminLoginIpCard />
         <TermsCard />
       </div>
     </div>
@@ -778,6 +781,151 @@ function WeeklySettlementCard() {
           <li>· Profit credited / loss debited to each user's wallet.</li>
           <li>· Same side &amp; lots kept; entry price resets, P&amp;L back to 0.</li>
           <li>· "Run now" is idempotent — safe to test before Saturday.</li>
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Admin login IP records (super-admin only) ────────────────────────
+// Every admin-tier login leaves its IP in two places: the account's
+// `last_login_ip` (invisible everywhere in the panel) and the IP column on
+// its LOGIN rows in Audit logs. This card is the one place that shows what
+// is stored, and clears both at once. A loop does the same automatically
+// at 00:00 IST, so the records never build up beyond a day.
+function AdminLoginIpCard() {
+  const admin = useAdminAuthStore((s) => s.admin);
+  const isSuperAdmin = String(admin?.role || "") === "SUPER_ADMIN";
+
+  const [stats, setStats] = useState<AdminLoginIpStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [clearing, setClearing] = useState(false);
+
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    let alive = true;
+    SettingsAPI.getAdminLoginIps()
+      .then((d) => alive && setStats(d))
+      .catch(() => {})
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [isSuperAdmin]);
+
+  if (!isSuperAdmin) return null;
+
+  async function clearNow() {
+    const n = stats?.accounts_with_ip ?? 0;
+    const rows = stats?.audit_rows_with_ip ?? 0;
+    if (
+      !window.confirm(
+        `Clear stored login IPs for ${n} admin account${n === 1 ? "" : "s"} and ${rows} audit row${rows === 1 ? "" : "s"}?\n\n` +
+          "The audit rows stay — only the IP is removed, so who logged in and when is still on record.",
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    try {
+      const res = await SettingsAPI.clearAdminLoginIps();
+      setStats(res.stats);
+      toast.success("Login IPs cleared", {
+        description: `${res.accounts_cleared} account${res.accounts_cleared === 1 ? "" : "s"} · ${res.audit_rows_cleared} audit row${res.audit_rows_cleared === 1 ? "" : "s"}`,
+      });
+    } catch (e: any) {
+      toast.error(e?.message || "Could not clear login IPs");
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  const held = stats?.accounts_with_ip ?? 0;
+  const rows = stats?.audit_rows_with_ip ?? 0;
+  const nothingStored = !loading && held === 0 && rows === 0;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Network className="size-4 text-primary" /> Admin login IPs
+        </CardTitle>
+        <CardDescription>
+          IPs recorded when a super admin, admin or broker logs in. Cleared
+          automatically every day at {stats?.purge_at_ist ?? "00:00"} IST.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-md border border-border bg-card p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Accounts
+            </div>
+            <div className="mt-0.5 text-lg font-semibold tabular-nums">
+              {loading ? "…" : held}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                of {stats?.accounts ?? 0}
+              </span>
+            </div>
+          </div>
+          <div className="rounded-md border border-border bg-card p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Audit rows
+            </div>
+            <div className="mt-0.5 text-lg font-semibold tabular-nums">
+              {loading ? "…" : rows}
+            </div>
+          </div>
+        </div>
+
+        {/* What is actually sitting there. Super admin is the only role
+            that may read these, and seeing them is what makes the button
+            mean something. */}
+        {stats?.samples?.length ? (
+          <div className="max-h-36 overflow-auto rounded-md border border-border">
+            <table className="w-full text-[11px]">
+              <tbody className="divide-y divide-border/40">
+                {stats.samples.map((s) => (
+                  <tr key={s.user_code}>
+                    <td className="px-2 py-1.5 font-mono">{s.user_code}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">
+                      {s.role === "SUPER_ADMIN"
+                        ? "Super admin"
+                        : s.role === "ADMIN"
+                          ? "Admin"
+                          : "Broker"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono text-muted-foreground">
+                      {s.ip}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full justify-center gap-2 border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+          disabled={loading || clearing || nothingStored}
+          onClick={clearNow}
+        >
+          {clearing ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+          {clearing ? "Clearing…" : nothingStored ? "Nothing stored" : "Clear now"}
+        </Button>
+
+        <ul className="space-y-1 text-[11px] text-muted-foreground">
+          <li>· Clears the account&apos;s stored IP and the IP on its login audit rows.</li>
+          <li>· Audit rows stay — only the IP goes, so logins remain on record.</li>
+          <li>· Clients&apos; login IPs are not touched.</li>
+          <li>
+            ·{" "}
+            {stats?.last_purge_at
+              ? `Last cleared ${new Date(stats.last_purge_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })} IST.`
+              : "Never cleared yet."}
+          </li>
         </ul>
       </CardContent>
     </Card>

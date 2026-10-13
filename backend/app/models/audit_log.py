@@ -31,6 +31,11 @@ class AuditAction(StrEnum):
     IMPERSONATE = "IMPERSONATE"
     # Taking the book out of the system — who pulled which pool, and when.
     EXPORT = "EXPORT"
+    # Wiping the login IPs held against admin-tier accounts (daily at
+    # 00:00 IST, or on demand from Platform Settings). Its own member so
+    # the audit filter can surface it as a chip — and so the one row that
+    # survives a purge says a purge happened.
+    LOGIN_IP_PURGE = "LOGIN_IP_PURGE"
     APPROVE = "APPROVE"
     REJECT = "REJECT"
     WALLET_ADJUST = "WALLET_ADJUST"

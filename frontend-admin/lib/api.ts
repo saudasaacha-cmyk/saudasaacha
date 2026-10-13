@@ -1206,6 +1206,27 @@ export const ManagementAPI = {
       .then((r) => r.data?.data ?? r.data),
 };
 
+/** What the Platform Settings "Admin login IPs" card renders. */
+export type AdminLoginIpStats = {
+  /** Admin-tier accounts (super admin + admins + brokers/sub-brokers). */
+  accounts: number;
+  /** How many of those currently carry a stored login IP. */
+  accounts_with_ip: number;
+  /** LOGIN / LOGOUT / LOGIN_FAILED audit rows still holding an IP. */
+  audit_rows_with_ip: number;
+  samples: {
+    user_code: string;
+    full_name: string;
+    role: string;
+    ip: string | null;
+    last_login_at: string | null;
+  }[];
+  last_purge_at: string | null;
+  /** "HH:MM" IST the daily purge fires at. */
+  purge_at_ist: string;
+  next_purge_at: string;
+};
+
 export const SettingsAPI = {
   platformList: (category?: string) => unwrap<any[]>(api.get("/admin/settings/platform", { params: { category } })),
   updatePlatform: (key: string, setting_value: any) =>
@@ -1227,6 +1248,19 @@ export const SettingsAPI = {
     ),
   setWeeklySettlementEnabled: (enabled: boolean) =>
     unwrap<{ enabled: boolean }>(api.put("/admin/settings/weekly-settlement/enabled", { setting_value: enabled })),
+  // Login IPs held against admin-tier accounts (super-admin only). Stored
+  // in two places — the account's last_login_ip and the ip_address on its
+  // LOGIN audit rows — and cleared from both at once, daily at 00:00 IST
+  // or on demand from the Platform Settings card.
+  getAdminLoginIps: () => unwrap<AdminLoginIpStats>(api.get("/admin/settings/admin-login-ips")),
+  clearAdminLoginIps: () =>
+    unwrap<{
+      accounts_cleared: number;
+      audit_rows_cleared: number;
+      accounts_scanned: number;
+      trigger: string;
+      stats: AdminLoginIpStats;
+    }>(api.post("/admin/settings/admin-login-ips/clear")),
   holidays: (year?: number) => unwrap<any[]>(api.get("/admin/holidays", { params: { year } })),
   createHoliday: (body: any) => unwrap<any>(api.post("/admin/holidays", body)),
   deleteHoliday: (id: string) => unwrap<any>(api.delete(`/admin/holidays/${id}`)),

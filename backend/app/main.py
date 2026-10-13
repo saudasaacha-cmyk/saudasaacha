@@ -819,6 +819,21 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     setattr(app, "_eod_order_cleanup_task", eod_cancel_task)
 
+    # Admin login-IP purge: at 00:00 IST, wipe the login IPs held against
+    # super-admin / admin / broker accounts — both `User.last_login_ip` and
+    # the `ip_address` on their LOGIN audit rows. Polls every 5 min and
+    # tracks the last-run IST day in Redis, so a redeploy after midnight
+    # doesn't re-purge (which would eat the IPs of logins since). Mongo-only
+    # → own leader lock.
+    from app.services.admin_ip_cleanup_service import admin_ip_cleanup_loop
+    admin_ip_task: _asyncio.Task = _asyncio.create_task(
+        _supervise(
+            "admin_ip_cleanup",
+            _leader_only("admin_ip_cleanup", admin_ip_cleanup_loop, interval_sec=300.0),
+        )
+    )
+    setattr(app, "_admin_ip_cleanup_task", admin_ip_task)
+
     # Tracker self-heal: every 15 min, walk every UserPositionTracker row
     # and recompute it from the live Position docs. Catches any drift
     # introduced by an unexpected restart / fill retry / partial flow,
@@ -1100,6 +1115,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             etask2.cancel()
             try:
                 await etask2
+            except (asyncio.CancelledError, Exception):
+                pass
+    except Exception:
+        pass
+
+    # Stop admin login-IP purge loop cleanly
+    try:
+        from app.services.admin_ip_cleanup_service import stop_admin_ip_cleanup
+        stop_admin_ip_cleanup()
+        aiptask = getattr(app, "_admin_ip_cleanup_task", None)
+        if aiptask is not None:
+            aiptask.cancel()
+            try:
+                await aiptask
             except (asyncio.CancelledError, Exception):
                 pass
     except Exception:
