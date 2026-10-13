@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -26,6 +26,7 @@ import { formatINR, formatINRCompact, formatNumber, pnlColor } from "@/lib/utils
 import { PageHeader } from "@/components/common/PageHeader";
 import { readDashboardSnapshot, writeDashboardSnapshot } from "@/lib/dashboardSnapshot";
 import { useAdminAuthStore } from "@/stores/authStore";
+import { userAppOrigin } from "@/lib/user-app-url";
 
 /**
  * Tile palette. Each tone maps to:
@@ -83,15 +84,15 @@ export default function AdminDashboardPage() {
   const admin = useAdminAuthStore((s) => s.admin);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Use the admin's connected custom domain if it's fully provisioned
-  // (STATUS_READY), otherwise fall back to the platform user app URL.
-  // For BROKERs, custom_domain reflects the parent admin's domain so the
-  // referral link points at the correct white-labelled frontend.
-  const appUrl =
-    admin?.custom_domain && admin.custom_domain_status === "READY"
-      ? `https://${admin.custom_domain}`
-      : process.env.NEXT_PUBLIC_USER_APP_URL?.replace(/\/$/, "") ??
-        "https://app.sachchasauda.com";
+  // The tenant's own domain when one is live, else the platform user app
+  // — see `lib/user-app-url` for the full cascade. For a BROKER the backend
+  // resolves the PARENT ADMIN's domain into `custom_domain`, so a broker
+  // under an admin on risingbull.live hands out a risingbull.live link,
+  // and one under an admin with no domain falls through to the platform.
+  const appUrl = useMemo(
+    () => userAppOrigin(admin),
+    [admin?.custom_domain, admin?.custom_domain_status],
+  );
   const referralLink = admin?.user_code
     ? `${appUrl}/register?ref=${admin.user_code}`
     : null;

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { BrandingAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/common/PageHeader";
+import { platformUserAppOrigin } from "@/lib/user-app-url";
 
 /**
  * "Download App" — gives the admin/broker a single shareable link they can
@@ -26,20 +27,9 @@ export default function DownloadAppPage() {
   const domainSaved = ((meQuery.data as any)?.custom_domain ?? "").trim();
   const status = (meQuery.data as any)?.custom_domain_status ?? null;
 
-  // Client-facing origin — the END-USER app, not the admin host. Same
-  // resolution the Branding page uses: env override → strip "admin." →
-  // fallback to sachchasauda.com.
-  const platformOrigin = useMemo(() => {
-    const fromEnv = (process.env.NEXT_PUBLIC_USER_APP_URL || "").trim();
-    if (fromEnv) return fromEnv.replace(/\/+$/, "").replace(/^http:/, "https:");
-    if (typeof window === "undefined") return "https://sachchasauda.com";
-    const url = new URL(window.location.origin);
-    url.protocol = "https:";
-    if (url.hostname.startsWith("admin.")) {
-      url.hostname = url.hostname.slice("admin.".length);
-    }
-    return url.origin;
-  }, []);
+  // Client-facing origin — the END-USER app, not the admin host. Shared
+  // resolution: see `lib/user-app-url`.
+  const platformOrigin = useMemo(() => platformUserAppOrigin(), []);
 
   const platformLink = userCode
     ? `${platformOrigin}/download?ref=${userCode}`

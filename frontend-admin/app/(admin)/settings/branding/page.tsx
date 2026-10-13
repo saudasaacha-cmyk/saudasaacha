@@ -54,6 +54,7 @@ import {
   type DomainStatus,
 } from "@/lib/api";
 import { API_URL } from "@/lib/constants";
+import { platformUserAppOrigin } from "@/lib/user-app-url";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -537,23 +538,12 @@ export default function BrandingPage() {
   // ── Derived values ────────────────────────────────────────────────
   const userCode = meQuery.data?.user_code ?? "";
   const domainSaved = (meQuery.data?.custom_domain ?? "").trim();
-  // Branded links are CLIENT-FACING (signup / login) — they must point
-  // at the END-USER frontend (e.g. https://sachchasauda.com), NOT the
-  // admin panel host (admin.sachchasauda.com). Resolution order:
-  //   1. NEXT_PUBLIC_USER_APP_URL  (explicit override, recommended)
-  //   2. Strip a leading "admin." subdomain off the current origin
-  //   3. Hard fallback to https://sachchasauda.com (SSR / mis-config)
-  const platformOrigin = useMemo(() => {
-    const fromEnv = (process.env.NEXT_PUBLIC_USER_APP_URL || "").trim();
-    if (fromEnv) return fromEnv.replace(/\/+$/, "").replace(/^http:/, "https:");
-    if (typeof window === "undefined") return "https://sachchasauda.com";
-    const url = new URL(window.location.origin);
-    url.protocol = "https:";
-    if (url.hostname.startsWith("admin.")) {
-      url.hostname = url.hostname.slice("admin.".length);
-    }
-    return url.origin;
-  }, []);
+  // Branded links are CLIENT-FACING (signup / login) — they must point at
+  // the END-USER frontend (e.g. https://sachchasauda.com), NOT the admin
+  // panel host (admin.sachchasauda.com). These are the deliberately
+  // platform-hosted ones, so they resolve without the tenant domain and
+  // carry `?ref=`; see `lib/user-app-url` for the cascade.
+  const platformOrigin = useMemo(() => platformUserAppOrigin(), []);
   // Platform-side links use ?ref= for attribution + branding hint.
   const platformSignup = userCode ? `${platformOrigin}/register?ref=${userCode}` : "";
   const platformLogin = userCode ? `${platformOrigin}/login?ref=${userCode}` : "";
