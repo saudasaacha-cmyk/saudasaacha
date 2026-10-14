@@ -74,9 +74,18 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: "Users",
     items: [
       { href: "/users", label: "All users", icon: Users, perm: "users" },
-      // Platform-wide, unscoped, contacts readable — super admin only, like
-      // the user-book export it shares a service shape with.
-      { href: "/active-users", label: "Active Users", icon: UserCheck, superOnly: true },
+      // Platform-wide, unscoped, contacts readable — the super admin's, like
+      // the user-book export it shares a service shape with. `empPerm` lets
+      // them hand it to one of THEIR employees: the EMPLOYEE branch of
+      // filterAdminNav returns before `superOnly` is considered, so a granted
+      // employee sees it while admins and brokers never do.
+      {
+        href: "/active-users",
+        label: "Active Users",
+        icon: UserCheck,
+        superOnly: true,
+        empPerm: "active_users",
+      },
       { href: "/send-notification", label: "Send Notification", icon: MessageCircle, perm: "users" },
     ],
   },

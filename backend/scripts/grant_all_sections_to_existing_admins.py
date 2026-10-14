@@ -30,8 +30,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("grant_all_sections")
 
 
+# Sections that are NOT a sub-admin's to hold, however broad the backfill.
+# `active_users` is the platform-wide roster with readable contacts — giving
+# it to every sub-admin would hand each of them the whole book's email and
+# phone, and let them pass it on to their own employees.
+SUPER_ADMIN_ONLY = {"active_users"}
+
+
 def _all_true() -> AdminPermissions:
-    return AdminPermissions(**{f: True for f in AdminPermissions.model_fields})
+    return AdminPermissions(
+        **{
+            f: f not in SUPER_ADMIN_ONLY
+            for f in AdminPermissions.model_fields
+        }
+    )
 
 
 async def main() -> None:

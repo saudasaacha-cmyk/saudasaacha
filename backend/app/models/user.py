@@ -142,6 +142,13 @@ class AdminPermissions(BaseModel):
     # Default False — only the super-admin has it until granted. Gates the
     # "Transfer User" sidebar section + the /management/transfer/* endpoints.
     transfer_users: bool = False
+    # Users → Active Users: the PLATFORM-WIDE roster with readable contacts.
+    # Unlike every other section here this is not scoped to the holder's own
+    # pool, so it is only ever granted by the SUPER ADMIN to their OWN
+    # employees — `_assert_can_see_active_users` rejects anyone else even if
+    # the flag somehow ends up set, and the sub-admin permission grid does
+    # not offer it. Keep it out of any "grant every section" backfill.
+    active_users: bool = False
 
 
 # Tri-state permissions granted by an admin to a broker (or by a broker to

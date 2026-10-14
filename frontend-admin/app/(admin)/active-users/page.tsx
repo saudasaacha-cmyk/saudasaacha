@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { useAdminAuthStore } from "@/stores/authStore";
+import { canSee } from "@/lib/permissions";
 
 /**
  * Who can trade, and who is actually here.
@@ -63,7 +64,14 @@ function stampIST(value: string | number | null): string {
 
 export default function ActiveUsersPage() {
   const me = useAdminAuthStore((s) => s.admin);
-  const isSuperAdmin = me?.role === "SUPER_ADMIN";
+  // Mirrors `_assert_can_see_active_users` on the backend exactly: the super
+  // admin, or an EMPLOYEE granted the section. Spelling out the role rather
+  // than trusting `canSee` alone matters — canSee would also pass an ADMIN
+  // carrying a hand-set flag, and that admin would get a page that renders
+  // and then 403s on every request.
+  const allowed =
+    me?.role === "SUPER_ADMIN" ||
+    (me?.role === "EMPLOYEE" && canSee(me, "active_users"));
 
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
@@ -83,7 +91,7 @@ export default function ActiveUsersPage() {
   const { data, isFetching } = useQuery({
     queryKey: ["admin", "active-users", { q, role, onlineOnly, includeDemo, page }],
     queryFn: () => UsersAPI.active({ ...filters, page, page_size: pageSize }),
-    enabled: isSuperAdmin,
+    enabled: allowed,
     // The online column is the live half of this page; the roster half
     // barely moves. One slow poll keeps both honest without the 1.5 s
     // cadence the trading tables need.
@@ -115,11 +123,12 @@ export default function ActiveUsersPage() {
     }
   }
 
-  // The nav item is already super-admin gated, but a typed URL isn't.
-  if (!isSuperAdmin) {
+  // The nav item is already gated, but a typed URL isn't.
+  if (!allowed) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-        This page is for the super admin only.
+        This page is for the super admin, or an employee granted the Active
+        Users section.
       </div>
     );
   }

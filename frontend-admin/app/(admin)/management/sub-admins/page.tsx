@@ -97,6 +97,11 @@ const ALL_OFF: AdminPermissions = {
   download_app: false,
   bonuses: false,
   transfer_users: false,
+  // Deliberately absent from PERMISSION_LABELS above: Active Users is the
+  // platform-wide roster with readable contacts, so it is never a sub-admin's
+  // to hold — only the super admin's own employees are granted it. Present
+  // here purely so the object satisfies AdminPermissions.
+  active_users: false,
 };
 
 export default function SubAdminsPage() {

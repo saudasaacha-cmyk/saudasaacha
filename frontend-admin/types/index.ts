@@ -36,6 +36,11 @@ export interface AdminPermissions {
   bonuses: boolean;
   // Transfer User section — move own users to another admin (super-admin grants).
   transfer_users: boolean;
+  // Users → Active Users: the PLATFORM-WIDE roster with readable contacts.
+  // Not pool-scoped like the rest, so only the super admin's own employees
+  // are ever granted it — the sub-admin grid doesn't offer it and the
+  // backend rejects any other holder.
+  active_users: boolean;
 }
 
 // Tri-state permission level (admin → broker grant, or broker → sub-broker).

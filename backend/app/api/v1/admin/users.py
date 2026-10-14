@@ -446,8 +446,38 @@ async def export_users(
 # ── Active users (platform-wide) ─────────────────────────────────────
 # Every other list on this router is scoped to the caller's own pool, so a
 # super admin whose clients sit under sub-admins cannot answer "who is
-# active across the platform". These two deliberately ignore scope — and
-# are therefore super-admin only, with real contacts, like /users/export.
+# active across the platform". These two deliberately ignore scope and hand
+# back real contacts, like /users/export — so access is the super admin's,
+# plus any employee THEY have granted it to.
+async def _assert_can_see_active_users(admin: User) -> None:
+    """Super admin, or an employee of the super admin holding `active_users`.
+
+    The employer check matters: this roster is not pool-scoped, so a
+    sub-admin's staff holding the flag would read the whole platform's email
+    and phone list. `employee_service.cap_permissions` already stops a
+    sub-admin granting what they don't hold, and the sub-admin grid never
+    offers this one — this is the backstop that makes a hand-crafted grant
+    harmless too. One extra `User.get` on a page that already runs several
+    collection scans.
+    """
+    if admin.role == UserRole.SUPER_ADMIN:
+        return
+    perms = getattr(admin, "admin_permissions", None)
+    if (
+        admin.role == UserRole.EMPLOYEE
+        and perms is not None
+        and getattr(perms, "active_users", False)
+    ):
+        employer_id = getattr(admin, "assigned_admin_id", None)
+        employer = await User.get(employer_id) if employer_id else None
+        if employer is not None and employer.role == UserRole.SUPER_ADMIN:
+            return
+    raise HTTPException(
+        status_code=403,
+        detail="Super admin only, or an employee granted the Active Users section.",
+    )
+
+
 @router.get("/active", response_model=APIResponse[dict])
 async def list_active_users(
     admin: CurrentAdmin,
@@ -457,7 +487,6 @@ async def list_active_users(
     include_demo: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
-    _: None = Depends(require_perm("users", "read")),
 ):
     """Every ACTIVE account on the platform, online sessions first.
 
@@ -465,9 +494,12 @@ async def list_active_users(
     trade) and `online` (socket checked in within `ttl_sec`). Admin,
     broker and sub-broker login accounts are included alongside clients,
     each row carrying its owner.
+
+    Gated on `active_users` alone, NOT on the `users` section: the whole
+    point of the grant is handing an employee this page without the rest
+    of user management.
     """
-    if admin.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Super admin only.")
+    await _assert_can_see_active_users(admin)
     from app.services import active_users_service, presence_service
 
     rows = await active_users_service.collect_rows(
@@ -500,12 +532,10 @@ async def export_active_users(
     online_only: bool = Query(default=False),
     include_demo: bool = Query(default=False),
     format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),
-    _: None = Depends(require_perm("users", "read")),
 ):
     """The same roster as a file. Carries the filters the page was showing
     so what downloads is what the operator was looking at."""
-    if admin.role != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Super admin only.")
+    await _assert_can_see_active_users(admin)
     from app.services import active_users_service
 
     rows = await active_users_service.collect_rows(
