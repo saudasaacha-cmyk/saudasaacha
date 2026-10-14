@@ -15,6 +15,7 @@ from app.core.dependencies import (
     CurrentAdmin,
     assert_role_aware_perm,
     assert_user_in_scope,
+    effective_scope_actor,
     require_perm,
     scoped_user_filter,
 )
@@ -44,14 +45,16 @@ logger = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _ser(u: User) -> dict:
+def _ser(u: User, *, reveal: bool = False) -> dict:
     return {
         "id": str(u.id),
         "user_code": u.user_code,
-        # Masked, always — see user_service.masked_contact. `*_set` tells
-        # the UI "hidden" from "never filled in" without leaking either.
-        "email": user_service.masked_contact(u.email),
-        "mobile": user_service.masked_contact(u.mobile),
+        # Masked unless this admin was granted `user_contacts` — see
+        # user_service.can_read_contacts. `*_set` tells the UI "hidden" from
+        # "never filled in" without leaking either, and still does when the
+        # value is revealed.
+        "email": user_service.contact_out(u.email, reveal=reveal),
+        "mobile": user_service.contact_out(u.mobile, reveal=reveal),
         "email_set": not user_service.is_placeholder_contact(u.email),
         "mobile_set": not user_service.is_placeholder_contact(u.mobile),
         "full_name": u.full_name,
@@ -233,7 +236,8 @@ async def list_users(
     # Python-level safety net (live mode only): strip any demo users that slipped through
     if mode != "demo":
         rows = [r for r in rows if not getattr(r, "is_demo", False) and "@demo.local" not in (r.email or "")]
-    items = [_ser(u) for u in rows]
+    reveal = await user_service.can_read_contacts(admin)
+    items = [_ser(u, reveal=reveal) for u in rows]
     await _enrich_admin_broker_names(items)
 
     # Batch-load wallets for the page so the admin list can surface the
@@ -449,33 +453,50 @@ async def export_users(
 # active across the platform". These two deliberately ignore scope and hand
 # back real contacts, like /users/export — so access is the super admin's,
 # plus any employee THEY have granted it to.
-async def _assert_can_see_active_users(admin: User) -> None:
-    """Super admin, or an employee of the super admin holding `active_users`.
+async def _resolve_active_users_access(admin: User) -> dict[str, Any]:
+    """How much of the roster this actor may see, or 403.
 
-    The employer check matters: this roster is not pool-scoped, so a
-    sub-admin's staff holding the flag would read the whole platform's email
-    and phone list. `employee_service.cap_permissions` already stops a
-    sub-admin granting what they don't hold, and the sub-admin grid never
-    offers this one — this is the backstop that makes a hand-crafted grant
-    harmless too. One extra `User.get` on a page that already runs several
-    collection scans.
+    Returns the kwargs to hand `active_users_service.collect_rows`:
+
+    * SUPER_ADMIN (and their employees, who resolve to the platform pool)
+      → `scope=None`: the whole platform, admin-tier login accounts
+      included. This is the view the page was built for.
+    * An ADMIN granted `active_users` → their OWN pool via the same
+      `scoped_user_filter` the All Users page uses, so the two always agree,
+      and `clients_only` so their broker / employee logins stay on their own
+      pages. Another admin's users are never in scope.
+    * An EMPLOYEE granted it → whatever their parent admin would see
+      (`scoped_user_filter` resolves the employee to its parent), which for a
+      sub-admin's staff is that sub-admin's pool.
+    * BROKER → never. There is no `active_users` key in BrokerPermissions.
+
+    Contacts inside the rows are a SEPARATE grant (`user_contacts`): an
+    admin can be allowed to see who is active without being allowed to read
+    their phone numbers.
     """
-    if admin.role == UserRole.SUPER_ADMIN:
-        return
     perms = getattr(admin, "admin_permissions", None)
-    if (
-        admin.role == UserRole.EMPLOYEE
-        and perms is not None
-        and getattr(perms, "active_users", False)
-    ):
-        employer_id = getattr(admin, "assigned_admin_id", None)
-        employer = await User.get(employer_id) if employer_id else None
-        if employer is not None and employer.role == UserRole.SUPER_ADMIN:
-            return
-    raise HTTPException(
-        status_code=403,
-        detail="Super admin only, or an employee granted the Active Users section.",
-    )
+    granted = bool(perms and getattr(perms, "active_users", False))
+    if admin.role == UserRole.SUPER_ADMIN:
+        scope = None
+    elif admin.role in (UserRole.ADMIN, UserRole.EMPLOYEE) and granted:
+        actor = await effective_scope_actor(admin)
+        # An employee of the SUPER admin inherits the platform-wide view;
+        # scoped_user_filter would hand back the super admin's own thin
+        # direct pool, which is not what this page means for them.
+        scope = None if actor.role == UserRole.SUPER_ADMIN else await scoped_user_filter(admin)
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Needs the Active Users section — granted by the super admin "
+                "per admin, or to an employee."
+            ),
+        )
+    return {
+        "scope": scope,
+        "clients_only": scope is not None,
+        "reveal_contacts": await user_service.can_read_contacts(admin),
+    }
 
 
 @router.get("/active", response_model=APIResponse[dict])
@@ -496,14 +517,15 @@ async def list_active_users(
     each row carrying its owner.
 
     Gated on `active_users` alone, NOT on the `users` section: the whole
-    point of the grant is handing an employee this page without the rest
-    of user management.
+    point of the grant is handing an admin or employee this page without
+    the rest of user management. The super admin sees the platform; a
+    granted admin sees their own pool.
     """
-    await _assert_can_see_active_users(admin)
+    access = await _resolve_active_users_access(admin)
     from app.services import active_users_service, presence_service
 
     rows = await active_users_service.collect_rows(
-        q=q, role=role, online_only=online_only, include_demo=include_demo
+        q=q, role=role, online_only=online_only, include_demo=include_demo, **access
     )
     total = len(rows)
     # Sliced in Python, not Mongo: the sort key is presence, which lives in
@@ -534,12 +556,14 @@ async def export_active_users(
     format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),
 ):
     """The same roster as a file. Carries the filters the page was showing
-    so what downloads is what the operator was looking at."""
-    await _assert_can_see_active_users(admin)
+    so what downloads is what the operator was looking at — and the same
+    scope and contact masking, so the file can never reveal more than the
+    screen it came from."""
+    access = await _resolve_active_users_access(admin)
     from app.services import active_users_service
 
     rows = await active_users_service.collect_rows(
-        q=q, role=role, online_only=online_only, include_demo=include_demo
+        q=q, role=role, online_only=online_only, include_demo=include_demo, **access
     )
     if format == "pdf":
         data = active_users_service.to_pdf(rows)
@@ -563,6 +587,10 @@ async def export_active_users(
             "include_demo": include_demo,
             "role": role or "all",
             "q": q or "",
+            # Which book left the building, and whether contacts went with
+            # it — the whole point of auditing this download.
+            "scope": "platform" if access["scope"] is None else "own_pool",
+            "contacts": bool(access["reveal_contacts"]),
         },
     )
     stamp = now_ist().strftime("%Y%m%d-%H%M")
@@ -749,7 +777,7 @@ async def get_user(
     _: None = Depends(require_perm("users", "read")),
 ):
     u = await assert_user_in_scope(admin, user_id)
-    detail = _ser(u)
+    detail = _ser(u, reveal=await user_service.can_read_contacts(admin))
     wallet = await wallet_service.summary(u.id)
     # Realized P&L that reconciles with deposits (balance = deposits + realised).
     # The wallet's running `realized_pnl` field only tracks PNL ledger rows and
@@ -937,7 +965,9 @@ async def create_user(
         actor_id=admin.id,
         target_user_id=user.id,
     )
-    return APIResponse(data=_ser(user))
+    return APIResponse(
+        data=_ser(user, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.put("/{user_id}", response_model=APIResponse[dict])
@@ -1004,7 +1034,9 @@ async def update_user(
     await log_event(
         action=AuditAction.UPDATE, entity_type="User", entity_id=u.id, actor_id=admin.id, target_user_id=u.id
     )
-    return APIResponse(data=_ser(u))
+    return APIResponse(
+        data=_ser(u, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.post("/{user_id}/block", response_model=APIResponse[dict])
@@ -1032,7 +1064,9 @@ async def block(
         target_user_id=u.id,
         metadata={"reason": payload.reason},
     )
-    return APIResponse(data=_ser(u))
+    return APIResponse(
+        data=_ser(u, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.post("/{user_id}/unblock", response_model=APIResponse[dict])
@@ -1049,7 +1083,9 @@ async def unblock(
     await log_event(
         action=AuditAction.UNBLOCK, entity_type="User", entity_id=u.id, actor_id=admin.id, target_user_id=u.id
     )
-    return APIResponse(data=_ser(u))
+    return APIResponse(
+        data=_ser(u, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.post("/{user_id}/auto-settlement", response_model=APIResponse[dict])
@@ -1083,7 +1119,9 @@ async def set_auto_settlement(
         new_values={"auto_settlement": enabled},
         metadata={"action": "AUTO_SETTLEMENT_TOGGLE"},
     )
-    return APIResponse(data=_ser(u))
+    return APIResponse(
+        data=_ser(u, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.post("/{user_id}/trade-alert", response_model=APIResponse[dict])
@@ -1125,7 +1163,9 @@ async def set_trade_alert(
         },
         metadata={"action": "TRADE_ALERT_TOGGLE"},
     )
-    return APIResponse(data=_ser(u))
+    return APIResponse(
+        data=_ser(u, reveal=await user_service.can_read_contacts(admin))
+    )
 
 
 @router.post("/{user_id}/reset-password", response_model=APIResponse[dict])

@@ -1,24 +1,27 @@
-"""Super-admin roster of every ACTIVE account on the platform.
+"""Roster of ACTIVE accounts — who may trade, and who is actually here.
 
-Answers one question the rest of the panel cannot: who, across the WHOLE
-platform, is allowed to trade right now — and of those, who actually has
-the app open. Every other user list here is scoped to the caller's own
-pool (`scoped_user_filter`), so a super admin whose clients all sit under
-sub-admins and brokers sees their own thin slice; this deliberately
-ignores scope and walks the entire book, admin and broker login accounts
-included, each row labelled with its owner.
+Answers one question the rest of the panel cannot. Every other user list
+is scoped to the caller's own pool, so a super admin whose clients all sit
+under sub-admins and brokers sees their own thin slice and has no way to
+ask "who is active across the platform".
 
-Two different notions of "active" sit in the same row on purpose, because
-operators conflate them and then act on the wrong one:
+Two notions of "active" sit in the same row on purpose, because operators
+conflate them and then act on the wrong one:
 
 * `status` is ACTIVE — the account is not blocked, pending or closed.
 * `online` — their socket has checked in within `presence_service.TTL_SEC`.
 
-Contacts are REAL here, not `••••••••`. That mirrors the existing
-super-admin-only export (`user_export_service`) and carries the same
-guard rails: super admin only, and every file download is written to the
-audit log. A generated placeholder (`<code>@noemail…`, `NOMOB…`) prints
-as a dash — it is an absence, not an address.
+Who sees what is the CALLER's business, not this module's: it takes a
+`scope` clause (None = the whole platform, for the super admin; an owned-
+pool filter for a granted admin) and a `reveal_contacts` flag, both
+resolved by `_resolve_active_users_access` in the users router. Contacts
+obey the `user_contacts` permission — an admin may be allowed to see who
+is active without being allowed to read their phone number — and the
+Excel / PDF builders here render whatever `collect_rows` produced, so a
+download can never show more than the page it came from.
+
+A generated placeholder (`<code>@noemail…`, `NOMOB…`) prints as a dash:
+it is an absence, not an address.
 """
 
 from __future__ import annotations
@@ -54,6 +57,13 @@ COLUMNS: list[tuple[str, str]] = [
 # "sare admin, broker and super admin ke user bhi"), so unlike the Users
 # page there is no role exclusion — only this ordering, which keeps the
 # hierarchy readable in a sheet that has no grouping.
+_ADMIN_TIER_ROLES: list[str] = [
+    UserRole.SUPER_ADMIN.value,
+    UserRole.ADMIN.value,
+    UserRole.BROKER.value,
+    UserRole.EMPLOYEE.value,
+]
+
 _ROLE_ORDER: dict[str, int] = {
     UserRole.SUPER_ADMIN.value: 0,
     UserRole.ADMIN.value: 1,
@@ -77,8 +87,13 @@ def _role_label(u: User) -> str:
     return role.replace("_", " ").capitalize()
 
 
-def _contact(value: str | None) -> str:
-    return "—" if not value or user_service.is_placeholder_contact(value) else str(value)
+def _contact(value: str | None, reveal: bool) -> str:
+    """Dash for an absence, the real value when granted, else the mask.
+
+    A dash rather than `None` because this string also lands in a sheet and
+    a PDF cell, where an empty column reads as a data error.
+    """
+    return user_service.contact_out(value, reveal=reveal) or "—"
 
 
 def _stamp(dt: datetime | None) -> str:
@@ -103,22 +118,46 @@ async def _owner_names() -> dict[str, str]:
 
 
 def _query(
-    *, q: str | None, role: str | None, include_demo: bool
+    *,
+    q: str | None,
+    role: str | None,
+    include_demo: bool,
+    scope: dict[str, Any] | None,
+    clients_only: bool,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {"status": UserStatus.ACTIVE.value}
     if role:
         out["role"] = role
+    elif clients_only:
+        # A granted ADMIN's roster is their CLIENTS. Their own pool clause
+        # also matches the broker and employee login accounts they created,
+        # and those are managed on their own pages.
+        out["role"] = {"$nin": _ADMIN_TIER_ROLES}
     if not include_demo:
         out["is_demo"] = {"$ne": True}
         out["email"] = {"$not": re.compile(r"@demo\.local$", re.IGNORECASE)}
+    # Scope and search can BOTH be `$or`s, so they are ANDed rather than
+    # merged — merging two `$or` keys into one dict silently drops the first.
+    and_clauses: list[dict[str, Any]] = []
     if q:
         regex = re.compile(re.escape(q.strip()), re.IGNORECASE)
-        out["$or"] = [
-            {"email": regex},
-            {"mobile": regex},
-            {"user_code": regex},
-            {"full_name": regex},
-        ]
+        and_clauses.append(
+            {
+                "$or": [
+                    {"email": regex},
+                    {"mobile": regex},
+                    {"user_code": regex},
+                    {"full_name": regex},
+                ]
+            }
+        )
+    if scope:
+        if "$or" in scope:
+            and_clauses.append(scope)
+        else:
+            out.update(scope)
+    if and_clauses:
+        out["$and"] = and_clauses
     return out
 
 
@@ -128,6 +167,9 @@ async def collect_rows(
     role: str | None = None,
     online_only: bool = False,
     include_demo: bool = False,
+    scope: dict[str, Any] | None = None,
+    clients_only: bool = False,
+    reveal_contacts: bool = True,
 ) -> list[dict[str, Any]]:
     """One row per ACTIVE account, online sessions first.
 
@@ -135,9 +177,22 @@ async def collect_rows(
     "online, longest session first", which cannot be expressed in the
     Mongo query (presence lives in Redis), so paging has to happen after
     the merge. Callers slice what they need.
+
+    `scope` is a Mongo clause limiting which accounts are visible — `None`
+    for the super admin's platform-wide view, the caller's owned pool for a
+    granted ADMIN. `reveal_contacts` decides whether email / mobile come
+    back real or masked (`user_contacts` permission).
     """
     presence = await presence_service.online_user_ids()
-    users = await User.find(_query(q=q, role=role, include_demo=include_demo)).to_list()
+    users = await User.find(
+        _query(
+            q=q,
+            role=role,
+            include_demo=include_demo,
+            scope=scope,
+            clients_only=clients_only,
+        )
+    ).to_list()
     if not users:
         return []
 
@@ -163,9 +218,11 @@ async def collect_rows(
                 "role": str(u.role.value if hasattr(u.role, "value") else u.role),
                 "role_label": _role_label(u),
                 "owner": _owner(u),
-                # Real, not masked — see the module docstring.
-                "email": _contact(u.email),
-                "mobile": _contact(u.mobile),
+                # Real or masked, per the actor's `user_contacts` grant —
+                # the same rule the All Users page applies, so a page and
+                # its download can never disagree with each other.
+                "email": _contact(u.email, reveal_contacts),
+                "mobile": _contact(u.mobile, reveal_contacts),
                 "status": str(u.status.value if hasattr(u.status, "value") else u.status),
                 "is_demo": bool(getattr(u, "is_demo", False)),
                 "online": since is not None,

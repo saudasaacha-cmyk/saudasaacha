@@ -16,18 +16,25 @@ import { canSee } from "@/lib/permissions";
  * Who can trade, and who is actually here.
  *
  * Every other user list in this panel is scoped to the caller's own pool,
- * which leaves a super admin unable to answer the one question this page
- * exists for: across the WHOLE platform — every admin's clients, every
- * broker's and sub-broker's, plus the admin-tier accounts themselves —
- * which are ACTIVE, and of those, which have the app open right now.
+ * which leaves a super admin unable to answer the question this page exists
+ * for: across the WHOLE platform — every admin's clients, every broker's
+ * and sub-broker's, plus the admin-tier accounts themselves — which are
+ * ACTIVE, and of those, which have the app open right now.
  *
- * Contacts are readable here rather than `••••••••`, matching the
- * super-admin user-book export. The gate is the role (enforced on the
- * server too, not just by hiding the nav item) and every file download is
- * written to the audit log.
+ * An ADMIN granted the section gets the same page over THEIR pool only
+ * (their clients and their brokers' / sub-brokers'), which is why the copy
+ * and the role filter below change shape by role rather than being written
+ * for the platform view alone.
+ *
+ * Contacts are a SEPARATE grant (`user_contacts`): without it this page
+ * shows "••••••••" like the rest of the panel, and the download does too.
+ * Both gates are enforced server-side — hiding the nav item is not the
+ * security boundary — and every download is written to the audit log.
  */
 const REFETCH_MS = 20_000;
 
+/** Platform view: admin-tier logins are rows too, so they are filterable.
+ *  A scoped admin only ever sees clients, so the filter is pointless there. */
 const ROLE_OPTIONS = [
   { value: "", label: "All roles" },
   { value: "CLIENT", label: "Clients" },
@@ -64,14 +71,14 @@ function stampIST(value: string | number | null): string {
 
 export default function ActiveUsersPage() {
   const me = useAdminAuthStore((s) => s.admin);
-  // Mirrors `_assert_can_see_active_users` on the backend exactly: the super
-  // admin, or an EMPLOYEE granted the section. Spelling out the role rather
-  // than trusting `canSee` alone matters — canSee would also pass an ADMIN
-  // carrying a hand-set flag, and that admin would get a page that renders
-  // and then 403s on every request.
-  const allowed =
-    me?.role === "SUPER_ADMIN" ||
-    (me?.role === "EMPLOYEE" && canSee(me, "active_users"));
+  // Mirrors `_resolve_active_users_access` on the backend: super admin, or
+  // an ADMIN / EMPLOYEE granted the section. `canSee` returns true for
+  // SUPER_ADMIN on any key and reads the granted sections otherwise; a
+  // BROKER has no such key, so it returns false for them.
+  const allowed = canSee(me, "active_users");
+  // Platform-wide for the super admin (and their staff, who inherit it);
+  // own-pool for a granted admin. Drives the copy and the role filter.
+  const platformWide = me?.role === "SUPER_ADMIN";
 
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
@@ -127,8 +134,8 @@ export default function ActiveUsersPage() {
   if (!allowed) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
-        This page is for the super admin, or an employee granted the Active
-        Users section.
+        You don&apos;t have the Active Users section. The super admin grants it
+        per admin, and an admin can pass it to their employees.
       </div>
     );
   }
@@ -137,6 +144,11 @@ export default function ActiveUsersPage() {
   const total = meta?.total ?? 0;
   const online = meta?.online ?? 0;
   const totalPages = meta?.total_pages ?? 1;
+  // Read off the rows rather than re-deriving the permission: whatever the
+  // server decided to send is what the note should describe.
+  const contactsHidden = (data?.items ?? []).some(
+    (r) => r.email?.includes("•") || r.mobile?.includes("•"),
+  );
 
   const columns: Column<ActiveUser>[] = [
     {
@@ -236,7 +248,9 @@ export default function ActiveUsersPage() {
     <div className="space-y-4">
       <PageHeader
         title="Active users"
-        description={`${total} active account${total === 1 ? "" : "s"} across the platform · ${online} online right now`}
+        description={`${total} active account${total === 1 ? "" : "s"} ${
+          platformWide ? "across the platform" : "in your pool"
+        } · ${online} online right now`}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -261,12 +275,23 @@ export default function ActiveUsersPage() {
       />
 
       <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-        Every account with status <span className="font-semibold">ACTIVE</span> —
-        your own clients, every admin&apos;s, every broker&apos;s and
-        sub-broker&apos;s, plus the admin-tier logins themselves. The green dot
-        is the separate question of whether their app is checked in right now
-        (drops off after {meta?.ttl_sec ?? 90}s of silence). Email and phone are
-        readable here and nowhere else in the panel; downloads are audit-logged.
+        Every account with status <span className="font-semibold">ACTIVE</span>{" "}
+        {platformWide ? (
+          <>
+            — your own clients, every admin&apos;s, every broker&apos;s and
+            sub-broker&apos;s, plus the admin-tier logins themselves.
+          </>
+        ) : (
+          <>
+            in your pool — your own clients and those of your brokers and
+            sub-brokers. Other admins&apos; users are not included.
+          </>
+        )}{" "}
+        The green dot is the separate question of whether their app is checked
+        in right now (drops off after {meta?.ttl_sec ?? 90}s of silence).
+        {contactsHidden
+          ? " Email and phone show as •••••••• — ask the super admin for the “Show users' email & mobile” permission to read them."
+          : " Email and phone are readable here; downloads are audit-logged."}
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -282,20 +307,24 @@ export default function ActiveUsersPage() {
             className="pl-9"
           />
         </div>
-        <select
-          value={role}
-          onChange={(e) => {
-            setPage(1);
-            setRole(e.target.value);
-          }}
-          className="h-10 rounded-md border border-border bg-background px-3 text-sm"
-        >
-          {ROLE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        {/* A scoped admin only ever gets clients, so the filter would be a
+            dropdown whose every option returns the same rows. */}
+        {platformWide && (
+          <select
+            value={role}
+            onChange={(e) => {
+              setPage(1);
+              setRole(e.target.value);
+            }}
+            className="h-10 rounded-md border border-border bg-background px-3 text-sm"
+          >
+            {ROLE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        )}
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"

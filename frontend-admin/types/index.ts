@@ -36,11 +36,13 @@ export interface AdminPermissions {
   bonuses: boolean;
   // Transfer User section — move own users to another admin (super-admin grants).
   transfer_users: boolean;
-  // Users → Active Users: the PLATFORM-WIDE roster with readable contacts.
-  // Not pool-scoped like the rest, so only the super admin's own employees
-  // are ever granted it — the sub-admin grid doesn't offer it and the
-  // backend rejects any other holder.
+  // Users → Active Users. Super admin's own view is platform-wide; a granted
+  // admin gets the same page scoped to THEIR pool.
   active_users: boolean;
+  // Read users' real email + mobile instead of the "••••••••" mask. Separate
+  // from `active_users` on purpose — seeing who is active and reading their
+  // phone number are two different grants.
+  user_contacts: boolean;
 }
 
 // Tri-state permission level (admin → broker grant, or broker → sub-broker).
@@ -67,6 +69,10 @@ export interface BrokerPermissions {
   // VIEW = see existing banks in own pool; EDIT = add / update / delete.
   banks: PermissionLevel;
   bonuses: PermissionLevel;
+  // Read the real email + mobile of users in this broker's subtree. VIEW and
+  // EDIT mean the same thing (nothing to write here). Only honoured while
+  // the broker's parent ADMIN holds `user_contacts` themselves.
+  user_contacts: PermissionLevel;
   // EDIT lets the broker reset THEIR users' passwords (separate from `users`).
   user_password: PermissionLevel;
   // EDIT lets the broker set their OWN support WhatsApp number for their

@@ -326,12 +326,13 @@ async def list_broker_subtree_users(
     rows, total = await svc.list_subtree_clients(
         broker_id, page=page, page_size=page_size
     )
+    reveal = await user_service.can_read_contacts(actor)
     items = [
         {
             "id": str(u.id),
             "user_code": u.user_code,
-            "email": user_service.masked_contact(u.email),
-            "mobile": user_service.masked_contact(u.mobile),
+            "email": user_service.contact_out(u.email, reveal=reveal),
+            "mobile": user_service.contact_out(u.mobile, reveal=reveal),
             "full_name": u.full_name,
             "role": u.role.value,
             "status": u.status.value,

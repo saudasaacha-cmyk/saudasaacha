@@ -47,6 +47,11 @@ import type { AdminPermissions } from "@/types";
 
 const PERMISSION_LABELS: Array<{ key: keyof AdminPermissions; label: string }> = [
   { key: "users", label: "Users" },
+  // Who is active in THIS admin's pool (their clients + their brokers').
+  { key: "active_users", label: "Active Users" },
+  // Off by default platform-wide: without it this admin — and everyone
+  // below them — sees "••••••••" instead of their users' email / phone.
+  { key: "user_contacts", label: "Show users' email & mobile" },
   { key: "kyc", label: "KYC review" },
   { key: "deposits", label: "Deposits" },
   { key: "withdrawals", label: "Withdrawals" },
@@ -97,11 +102,8 @@ const ALL_OFF: AdminPermissions = {
   download_app: false,
   bonuses: false,
   transfer_users: false,
-  // Deliberately absent from PERMISSION_LABELS above: Active Users is the
-  // platform-wide roster with readable contacts, so it is never a sub-admin's
-  // to hold — only the super admin's own employees are granted it. Present
-  // here purely so the object satisfies AdminPermissions.
   active_users: false,
+  user_contacts: false,
 };
 
 export default function SubAdminsPage() {
@@ -1026,6 +1028,7 @@ const BROKER_PERMS_ALL_OFF: BrokerPermissions = {
   sub_brokers: "OFF",
   banks: "OFF",
   bonuses: "OFF",
+  user_contacts: "OFF",
   user_password: "OFF",
   support: "OFF",
 };

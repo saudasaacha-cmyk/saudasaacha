@@ -61,6 +61,9 @@ const PERMISSION_LABELS: Array<{ key: keyof BrokerPermissions; label: string }> 
   { key: "brokerage", label: "Brokerage" },
   { key: "sub_brokers", label: "Sub-brokers" },
   { key: "bonuses", label: "Bonuses" },
+  // Only takes effect while YOU still hold "Show users' email & mobile" —
+  // if the super admin revokes yours, your brokers' goes with it.
+  { key: "user_contacts", label: "Show users' email & mobile" },
   { key: "user_password", label: "Change password" },
   { key: "support", label: "Support number" },
 ];
@@ -80,6 +83,7 @@ const ALL_OFF: BrokerPermissions = {
   sub_brokers: "OFF",
   banks: "OFF",
   bonuses: "OFF",
+  user_contacts: "OFF",
   user_password: "OFF",
   support: "OFF",
 };

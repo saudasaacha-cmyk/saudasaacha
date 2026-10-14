@@ -41,9 +41,10 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 
 const PERMISSION_LABELS: Array<{ key: keyof AdminPermissions; label: string }> = [
   { key: "users", label: "Users" },
-  // Platform-wide roster with readable contacts. Only the super admin can
-  // hand this out, so it is absent from a sub-admin's own grid (see below).
+  // Scoped to whoever grants it: the super admin's employee sees the whole
+  // platform, a sub-admin's employee sees that sub-admin's pool.
   { key: "active_users", label: "Active Users" },
+  { key: "user_contacts", label: "Show users' email & mobile" },
   { key: "kyc", label: "KYC review" },
   { key: "deposits", label: "Deposits" },
   { key: "withdrawals", label: "Withdrawals" },
@@ -75,6 +76,7 @@ const ALL_OFF: AdminPermissions = {
   orders: false, positions: false, marketwatch: false,
   money_transactions: false, broker_deposits: false, download_app: false,
   bonuses: false, transfer_users: false, active_users: false,
+  user_contacts: false,
 };
 
 export default function EmployeesPage() {

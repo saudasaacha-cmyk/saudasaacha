@@ -30,11 +30,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("grant_all_sections")
 
 
-# Sections that are NOT a sub-admin's to hold, however broad the backfill.
-# `active_users` is the platform-wide roster with readable contacts — giving
-# it to every sub-admin would hand each of them the whole book's email and
-# phone, and let them pass it on to their own employees.
-SUPER_ADMIN_ONLY = {"active_users"}
+# Sections this backfill must never hand out, however broad it is.
+# Both are explicit per-admin decisions by the super admin:
+#   active_users  — the Active Users roster.
+#   user_contacts — reads users' real email + phone instead of the mask.
+# Granting either to every existing sub-admin in one sweep would quietly
+# undo a privacy default and let each of them pass it to their own
+# employees and brokers.
+SUPER_ADMIN_ONLY = {"active_users", "user_contacts"}
 
 
 def _all_true() -> AdminPermissions:

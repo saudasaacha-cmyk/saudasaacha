@@ -10,7 +10,7 @@ from beanie.operators import Or
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationFailedError
 from app.core.security import hash_password
-from app.models._base import ALL_SEGMENTS
+from app.models._base import ALL_SEGMENTS, PermissionLevel
 from app.models.user import (
     KycInfo,
     User,
@@ -21,7 +21,6 @@ from app.models.user import (
 )
 from app.models.wallet import Wallet
 from app.utils.validators import is_valid_mobile_in, normalize_mobile_in
-
 
 # Stand-ins for a missing email / phone on an admin-created account.
 NO_EMAIL_DOMAIN = "noemail.sachchasauda.com"
@@ -54,6 +53,67 @@ def masked_contact(value: str | None) -> str | None:
     if not value or is_placeholder_contact(value):
         return None
     return CONTACT_MASK
+
+
+async def can_read_contacts(actor: Any) -> bool:
+    """May this admin-tier actor read their users' real email / phone?
+
+    No, for everyone, until granted — the mask is the platform default.
+    The super admin turns it on per ADMIN (`AdminPermissions.user_contacts`)
+    and an ADMIN turns it on per BROKER (`BrokerPermissions.user_contacts`).
+
+    A downline grant is only honoured while the PARENT admin still holds it,
+    so revoking one admin's access closes their brokers, sub-brokers and
+    employees in the same stroke — no sweep over child rows, and no window
+    where a revoked admin's staff can still read what the admin can't.
+    """
+    role = getattr(actor, "role", None)
+    if role == UserRole.SUPER_ADMIN:
+        return True
+
+    async def _parent_allows() -> bool:
+        parent_id = getattr(actor, "assigned_admin_id", None)
+        if parent_id is None:
+            # Sits directly under the super admin — nothing above to revoke.
+            return True
+        parent = await User.get(parent_id)
+        if parent is None:
+            return False
+        if parent.role == UserRole.SUPER_ADMIN:
+            return True
+        return bool(
+            parent.admin_permissions
+            and getattr(parent.admin_permissions, "user_contacts", False)
+        )
+
+    if role in (UserRole.ADMIN, UserRole.EMPLOYEE):
+        perms = getattr(actor, "admin_permissions", None)
+        if not (perms and getattr(perms, "user_contacts", False)):
+            return False
+        # An ADMIN is granted by the super admin, so there is no further
+        # ceiling; an EMPLOYEE's grant dies with their admin's.
+        return True if role == UserRole.ADMIN else await _parent_allows()
+
+    if role == UserRole.BROKER:
+        bperms = getattr(actor, "broker_permissions", None)
+        level = getattr(bperms, "user_contacts", None) if bperms else None
+        if level is None or str(level) == PermissionLevel.OFF.value:
+            return False
+        return await _parent_allows()
+
+    return False
+
+
+def contact_out(value: str | None, *, reveal: bool) -> str | None:
+    """The contact as this actor should receive it.
+
+    `None` for a placeholder or empty value either way — an absence is not
+    a secret, and the UI renders it as "—". Otherwise the real string when
+    the actor was granted contacts, else the mask.
+    """
+    if not value or is_placeholder_contact(value):
+        return None
+    return str(value) if reveal else CONTACT_MASK
 
 
 def is_placeholder_contact(value: str | None) -> bool:

@@ -142,13 +142,23 @@ class AdminPermissions(BaseModel):
     # Default False — only the super-admin has it until granted. Gates the
     # "Transfer User" sidebar section + the /management/transfer/* endpoints.
     transfer_users: bool = False
-    # Users → Active Users: the PLATFORM-WIDE roster with readable contacts.
-    # Unlike every other section here this is not scoped to the holder's own
-    # pool, so it is only ever granted by the SUPER ADMIN to their OWN
-    # employees — `_assert_can_see_active_users` rejects anyone else even if
-    # the flag somehow ends up set, and the sub-admin permission grid does
-    # not offer it. Keep it out of any "grant every section" backfill.
+    # Users → Active Users. The SUPER ADMIN's own view is platform-wide;
+    # a granted ADMIN sees the same page scoped to THEIR pool (their clients
+    # plus their brokers' and sub-brokers'), never another admin's — see
+    # `_resolve_active_users_access`. Contacts inside it obey `user_contacts`
+    # below, so "can see who is active" and "can read their phone number"
+    # stay two separate grants.
     active_users: bool = False
+    # Lets this admin read their users' REAL email + mobile instead of the
+    # "••••••••" mask every other admin-tier actor gets. Applies everywhere
+    # contacts are rendered (All Users, Active Users, broker subtree and
+    # sub-admin user lists) and to the Active Users export. Default False —
+    # the mask is the platform default and this is an explicit, per-admin
+    # decision by the super admin. Keep out of any "grant everything"
+    # backfill. A broker's own grant (BrokerPermissions.user_contacts) is
+    # only honoured while their parent admin still holds this, so revoking
+    # it here closes the admin's whole downline at once.
+    user_contacts: bool = False
 
 
 # Tri-state permissions granted by an admin to a broker (or by a broker to
@@ -188,6 +198,12 @@ class BrokerPermissions(BaseModel):
     # before their number takes effect. (Existing brokers are backfilled to EDIT
     # by scripts/backfill_broker_support_perm.py so they keep working.)
     support: PermissionLevel = PermissionLevel.OFF
+    # Read the real email + mobile of users in this broker's subtree rather
+    # than the mask. VIEW and EDIT mean the same thing here — there is no
+    # "write a contact" action on this surface. Granted by the broker's
+    # ADMIN, and only honoured while that admin holds
+    # `AdminPermissions.user_contacts` themselves.
+    user_contacts: PermissionLevel = PermissionLevel.OFF
 
 
 # ── User document ───────────────────────────────────────────────────
