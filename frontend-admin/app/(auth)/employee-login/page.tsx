@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -12,7 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BrandLogo } from "@/components/layout/BrandLogo";
+import { HostBrandMark } from "@/components/branding/HostBrandMark";
+import { useHostBranding } from "@/lib/useHostBranding";
 import { InstallPWAButton } from "@/components/pwa/InstallPWAButton";
 
 const schema = z.object({
@@ -22,7 +24,9 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 export default function EmployeeLoginPage() {
+  const hostBrand = useHostBranding();
   const router = useRouter();
+  const qc = useQueryClient();
   const employeeLogin = useAdminAuthStore((s) => s.employeeLogin);
 
   const form = useForm<FormValues>({
@@ -33,6 +37,9 @@ export default function EmployeeLoginPage() {
   async function onSubmit(values: FormValues) {
     try {
       await employeeLogin(values.identifier, values.password);
+      // See the admin login page — nothing cached under a previous
+      // identity may survive a sign-in.
+      qc.clear();
       toast.success("Welcome");
       router.push("/dashboard");
     } catch (err) {
@@ -44,14 +51,19 @@ export default function EmployeeLoginPage() {
     <main className="grid min-h-screen place-items-center bg-background p-6">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-3">
-          <BrandLogo href={null} size="md" showAdminBadge={false} />
+          {/* Host-resolved, like the admin login: an employee of a
+              white-labelled admin lands on THEIR host and must not be
+              greeted by the platform's name. */}
+          <HostBrandMark brand={hostBrand} />
           <div className="inline-flex w-fit items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-xs uppercase tracking-wider text-primary">
             <Users className="size-3" />
             Employee access
           </div>
           <CardTitle className="text-2xl">Employee Login</CardTitle>
           <CardDescription>
-            Sign in with the credentials your admin gave you. You&apos;ll see only the sections you were granted.
+            {hostBrand.brand_name ? `${hostBrand.brand_name} — s` : "S"}ign in
+            with the credentials your admin gave you. You&apos;ll see only the
+            sections you were granted.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -81,7 +93,9 @@ export default function EmployeeLoginPage() {
           <div className="mt-5 space-y-2 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs font-semibold">Install MP Admin app</div>
+                <div className="text-xs font-semibold">
+                  Install {hostBrand.brand_name || "MP Admin"} app
+                </div>
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   One-tap home-screen launcher. Stays signed in like a native app.
                 </p>

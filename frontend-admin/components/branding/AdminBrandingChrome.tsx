@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAdminAuthStore } from "@/stores/authStore";
+import { useHostBranding } from "@/lib/useHostBranding";
 import { API_URL, APP_NAME } from "@/lib/constants";
 
 // Applies tenant white-label chrome (browser tab title + favicon) on
@@ -17,20 +18,36 @@ import { API_URL, APP_NAME } from "@/lib/constants";
 // Mounted inside `<Providers>` so it lives for the whole admin app.
 export function AdminBrandingChrome() {
   const admin = useAdminAuthStore((s) => s.admin);
+  // The HOST is the fallback source, and the only one available before
+  // sign-in: on admin.<tenant-domain> the login screen had no admin to
+  // read a brand from, so the tab said "SachchaSauda Broker Admin" to
+  // people who have never heard of the platform.
+  const hostBrand = useHostBranding();
   const role = admin?.role;
-  const brandName = (admin?.brand_name ?? "").trim();
-  const logoPath = admin?.logo_url ?? null;
   const userCode = (admin?.user_code ?? "").trim();
 
-  // SUPER_ADMIN never gets tenant chrome — always platform default.
+  // SUPER_ADMIN never gets tenant chrome — always platform default, even
+  // when they are working on a tenant's host.
   const isTenant = role === "ADMIN" || role === "BROKER";
-  const tenantName = isTenant && brandName ? brandName : null;
-  const tenantLogo =
-    isTenant && logoPath
-      ? logoPath.startsWith("http")
-        ? logoPath
-        : `${API_URL}${logoPath}`
-      : null;
+  const isSuper = role === "SUPER_ADMIN";
+  // Signed-in brand wins over the host's; the host covers pre-login and
+  // the employee screens (an EMPLOYEE's auth payload carries no brand).
+  const brandName = (
+    (isTenant ? admin?.brand_name : null) ??
+    (isSuper ? null : hostBrand.brand_name) ??
+    ""
+  ).trim();
+  const logoPath =
+    (isTenant ? admin?.logo_url : null) ??
+    (isSuper ? null : hostBrand.logo_url) ??
+    null;
+
+  const tenantName = brandName || null;
+  const tenantLogo = logoPath
+    ? logoPath.startsWith("http")
+      ? logoPath
+      : `${API_URL}${logoPath}`
+    : null;
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -100,14 +117,41 @@ export function AdminBrandingChrome() {
     // name + logo. Super-admins / pre-login keep the platform default.
     const manifestEl = head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
     if (manifestEl) {
-      const desired = isTenant && userCode
-        ? `/manifest.webmanifest?u=${encodeURIComponent(userCode)}`
-        : "/manifest.webmanifest";
+      // `?u=` once we know who is signed in; `?d=` on a tenant host
+      // before that, so an install from the login screen is still named
+      // and iconed for the tenant rather than "MP Admin".
+      const host = window.location.hostname.toLowerCase();
+      const desired =
+        isTenant && userCode
+          ? `/manifest.webmanifest?u=${encodeURIComponent(userCode)}`
+          : !isSuper && (hostBrand.brand_name || hostBrand.logo_url) && host
+            ? `/manifest.webmanifest?d=${encodeURIComponent(host)}`
+            : "/manifest.webmanifest";
       if (manifestEl.getAttribute("href") !== desired) {
         manifestEl.setAttribute("href", desired);
       }
     }
-  }, [tenantName, tenantLogo, isTenant, userCode]);
+
+    // iOS home-screen label. Static in the SSR <head>, so it needs the
+    // same runtime swap as the title for a tenant install to read right.
+    const appleTitle = head.querySelector<HTMLMetaElement>(
+      'meta[name="apple-mobile-web-app-title"]',
+    );
+    if (appleTitle) {
+      const desired = tenantName || "MP Admin";
+      if (appleTitle.getAttribute("content") !== desired) {
+        appleTitle.setAttribute("content", desired);
+      }
+    }
+  }, [
+    tenantName,
+    tenantLogo,
+    isTenant,
+    isSuper,
+    userCode,
+    hostBrand.brand_name,
+    hostBrand.logo_url,
+  ]);
 
   return null;
 }

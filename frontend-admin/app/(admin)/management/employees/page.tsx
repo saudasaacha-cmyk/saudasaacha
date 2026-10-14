@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
+import { adminPanelOrigin } from "@/lib/user-app-url";
 
 const PERMISSION_LABELS: Array<{ key: keyof AdminPermissions; label: string }> = [
   { key: "users", label: "Users" },
@@ -117,9 +118,11 @@ export default function EmployeesPage() {
   });
 
   function copyLoginLink() {
-    const url = `${window.location.origin}/employee-login`;
+    // The white-labelled admin's staff sign in on THEIR host
+    // (admin.<domain>), not on whichever host this admin is using.
+    const url = `${adminPanelOrigin(admin)}/employee-login`;
     navigator.clipboard?.writeText(url);
-    toast.success("Employee login link copied");
+    toast.success(`Employee login link copied — ${url}`);
   }
 
   const cols: Column<any>[] = [

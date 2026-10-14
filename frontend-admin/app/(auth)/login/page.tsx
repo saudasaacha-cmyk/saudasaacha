@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,12 +9,11 @@ import { toast } from "sonner";
 import { ShieldCheck } from "lucide-react";
 import { useAdminAuthStore } from "@/stores/authStore";
 import { ApiError } from "@/lib/api";
-import { API_URL } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { BrandLogo } from "@/components/layout/BrandLogo";
+import { HostBrandMark } from "@/components/branding/HostBrandMark";
 import { useHostBranding } from "@/lib/useHostBranding";
 import { InstallPWAButton } from "@/components/pwa/InstallPWAButton";
 
@@ -26,6 +26,7 @@ type FormValues = z.infer<typeof schema>;
 export default function AdminLoginPage() {
   const hostBrand = useHostBranding();
   const router = useRouter();
+  const qc = useQueryClient();
   const login = useAdminAuthStore((s) => s.login);
 
   const form = useForm<FormValues>({
@@ -36,6 +37,10 @@ export default function AdminLoginPage() {
   async function onSubmit(values: FormValues) {
     try {
       await login(values.identifier, values.password);
+      // Drop this tab's in-memory cache so nothing from a previously
+      // signed-in admin survives the switch. The store clears the
+      // localStorage copy; the four "Login as" flows do the same pair.
+      qc.clear();
       toast.success("Authenticated");
       router.push("/dashboard");
     } catch (err) {
@@ -49,27 +54,7 @@ export default function AdminLoginPage() {
         <CardHeader className="space-y-3">
           {/* On a tenant's own admin host the brand comes from the host,
               because there is no signed-in admin to read it from yet. */}
-          {hostBrand.brand_name || hostBrand.logo_url ? (
-            <div className="flex items-center gap-2.5">
-              {hostBrand.logo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={
-                    hostBrand.logo_url.startsWith("http")
-                      ? hostBrand.logo_url
-                      : `${API_URL}${hostBrand.logo_url}`
-                  }
-                  alt=""
-                  className="size-9 rounded-md object-contain"
-                />
-              ) : null}
-              <span className="text-lg font-bold tracking-tight">
-                {hostBrand.brand_name}
-              </span>
-            </div>
-          ) : (
-            <BrandLogo href={null} size="md" showAdminBadge={false} />
-          )}
+          <HostBrandMark brand={hostBrand} />
           <div className="inline-flex w-fit items-center gap-2 rounded-md bg-destructive/10 px-2 py-1 text-xs uppercase tracking-wider text-destructive">
             <ShieldCheck className="size-3" />
             Restricted access · Admin only
@@ -114,7 +99,9 @@ export default function AdminLoginPage() {
           <div className="mt-5 space-y-2 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs font-semibold">Install MP Admin app</div>
+                <div className="text-xs font-semibold">
+                  Install {hostBrand.brand_name || "MP Admin"} app
+                </div>
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   One-tap home-screen launcher. Stays signed in like a native app.
                 </p>

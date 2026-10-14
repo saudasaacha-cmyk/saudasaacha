@@ -65,9 +65,30 @@ export function platformUserAppOrigin(): string {
 /** The origin THIS actor's client-facing links should use — their own
  *  white-labelled domain when one is live, else the platform's. */
 export function userAppOrigin(actor: BrandedActor): string {
+  const domain = tenantDomain(actor);
+  return domain ? `https://${domain}` : platformUserAppOrigin();
+}
+
+/**
+ * The ADMIN-panel origin for links this actor hands to their own staff —
+ * the employee-login link, specifically.
+ *
+ * The panel rides on `admin.<domain>`, so a white-labelled admin's
+ * employees sign in at `admin.risingbull.live`, not on the platform host
+ * the admin happens to be using right now. Falls back to the current
+ * origin, which IS an admin host, so an un-branded admin keeps today's
+ * behaviour exactly.
+ */
+export function adminPanelOrigin(actor: BrandedActor): string {
+  const domain = tenantDomain(actor);
+  if (domain) return `https://admin.${domain}`;
+  if (typeof window !== "undefined") return normalize(window.location.origin);
+  return "https://admin.sachchasauda.com";
+}
+
+/** The actor's own domain, bare, only once SSL is live. */
+function tenantDomain(actor: BrandedActor): string | null {
   const domain = (actor?.custom_domain || "").trim();
-  if (domain && actor?.custom_domain_status === "READY") {
-    return `https://${domain.replace(/^https?:\/\//, "").replace(/\/+$/, "")}`;
-  }
-  return platformUserAppOrigin();
+  if (!domain || actor?.custom_domain_status !== "READY") return null;
+  return domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }

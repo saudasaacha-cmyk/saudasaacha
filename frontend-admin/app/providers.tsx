@@ -9,11 +9,11 @@ import { Toaster } from "sonner";
 import { AdminBrandingChrome } from "@/components/branding/AdminBrandingChrome";
 import { SessionKeepAlive } from "@/components/auth/SessionKeepAlive";
 
-// localStorage key for the persisted React Query cache. Exported so the admin
-// logout flow can wipe it — a shared admin device must not leak the previous
-// admin's cached user lists / financials. Bump the version to bust all caches
-// after a breaking schema change.
-export const ADMIN_RQ_CACHE_KEY = "mp-admin-rq-cache-v1";
+// The cache key now lives in lib/constants so the auth store can wipe it
+// without importing this module (which would be a cycle). Re-exported
+// because existing call sites import it from here.
+export { ADMIN_RQ_CACHE_KEY } from "@/lib/constants";
+import { ADMIN_RQ_CACHE_KEY } from "@/lib/constants";
 
 function ThemedToaster() {
   const { resolvedTheme } = useTheme();

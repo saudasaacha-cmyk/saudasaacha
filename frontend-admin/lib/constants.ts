@@ -20,6 +20,20 @@ export const STORAGE_KEYS = {
   user: "nb.admin.user",
 } as const;
 
+/**
+ * localStorage key for the persisted React Query cache (see
+ * `app/providers.tsx`). Lives here rather than next to the provider so
+ * the auth store can wipe it without importing a component module —
+ * that import would close a cycle (providers → AdminBrandingChrome →
+ * authStore). Bump the version to bust every client's cache after a
+ * breaking schema change.
+ *
+ * Anything identity-scoped must be cleared from it when the signed-in
+ * admin changes: it survives a browser close, so otherwise one admin's
+ * cached lists get rehydrated into the next admin's panel.
+ */
+export const ADMIN_RQ_CACHE_KEY = "mp-admin-rq-cache-v1";
+
 export const ADMIN_ROUTES = {
   login: "/login",
   dashboard: "/dashboard",

@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { AdminAuthAPI, clearTokens, setTokens } from "@/lib/api";
-import { STORAGE_KEYS } from "@/lib/constants";
+import { ADMIN_RQ_CACHE_KEY, STORAGE_KEYS } from "@/lib/constants";
 import { clearDashboardSnapshot } from "@/lib/dashboardSnapshot";
 import type { AdminTokenPair, AdminUser } from "@/types";
 
@@ -33,6 +33,29 @@ export const useAdminAuthStore = create<AdminAuthState>()(
       loading: false,
       setHydrated: (v) => set({ hydrated: v }),
       setSession: (pair) => {
+        // Signing in as a DIFFERENT admin must not inherit the previous
+        // one's data. The whole query cache is persisted to localStorage
+        // (ADMIN_RQ_CACHE_KEY, 12 h) and rehydrates on load, so without
+        // this a sub-admin who signed in after the super admin — on the
+        // same browser, without logging out — had the super admin's
+        // cached lists painted into their panel until each refetch
+        // landed. That is how the super admin's Employees row showed up
+        // in a sub-admin's Employee Management.
+        //
+        // The in-memory cache of THIS tab is cleared by the caller
+        // (`qc.clear()` in the login pages), the same way the four
+        // "Login as" flows already do it.
+        const prevId = get().admin?.id;
+        if (prevId && prevId !== pair.admin.id) {
+          clearDashboardSnapshot();
+          try {
+            if (typeof window !== "undefined") {
+              window.localStorage.removeItem(ADMIN_RQ_CACHE_KEY);
+            }
+          } catch {
+            // ignore — best-effort cleanup
+          }
+        }
         setTokens(pair.access_token, pair.refresh_token);
         set({ admin: pair.admin });
       },
@@ -101,12 +124,12 @@ export const useAdminAuthStore = create<AdminAuthState>()(
             : undefined;
         clearTokens();
         clearDashboardSnapshot();
-        // Wipe the persisted React Query cache (key = ADMIN_RQ_CACHE_KEY in
-        // app/providers.tsx) so the next admin on this device doesn't see the
-        // previous admin's cached user lists / financials restored on load.
+        // Wipe the persisted React Query cache so the next admin on this
+        // device doesn't see the previous admin's cached user lists /
+        // financials restored on load.
         try {
           if (typeof window !== "undefined")
-            window.localStorage.removeItem("mp-admin-rq-cache-v1");
+            window.localStorage.removeItem(ADMIN_RQ_CACHE_KEY);
         } catch {
           // ignore — best-effort cleanup
         }

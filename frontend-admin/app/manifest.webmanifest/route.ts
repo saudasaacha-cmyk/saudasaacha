@@ -54,11 +54,11 @@ type Branding = {
   logo_url: string | null;
 };
 
-async function fetchBranding(userCode: string): Promise<Branding | null> {
-  if (!API_BASE || !userCode) return null;
+async function fetchBranding(path: string): Promise<Branding | null> {
+  if (!API_BASE) return null;
   try {
-    const res = await fetch(`${API_BASE}/api/v1/branding/by-code/${encodeURIComponent(userCode)}`, {
-      // Manifest fetch is unauthenticated; use the public endpoint.
+    const res = await fetch(`${API_BASE}/api/v1/branding/${path}`, {
+      // Manifest fetch is unauthenticated; use the public endpoints.
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
@@ -74,10 +74,21 @@ async function fetchBranding(userCode: string): Promise<Branding | null> {
 
 export async function GET(req: NextRequest) {
   const userCode = (req.nextUrl.searchParams.get("u") || "").trim().toUpperCase();
+  // Pre-login there is no user code to key off — an install from a
+  // tenant's own admin host would land on the home screen named
+  // "MP Admin". The host itself identifies the tenant, so fall back to
+  // it; `?u=` still wins once auth hydrates.
+  const domain = (req.nextUrl.searchParams.get("d") || "").trim().toLowerCase();
   let manifest: Record<string, unknown> = { ...PLATFORM_DEFAULT };
 
-  if (userCode) {
-    const brand = await fetchBranding(userCode);
+  const lookup = userCode
+    ? `by-code/${encodeURIComponent(userCode)}`
+    : domain
+      ? `by-domain?domain=${encodeURIComponent(domain)}`
+      : null;
+
+  if (lookup) {
+    const brand = await fetchBranding(lookup);
     if (brand?.brand_name || brand?.logo_url) {
       const name = brand.brand_name?.trim() || PLATFORM_DEFAULT.name;
       const shortName = (brand.brand_name?.trim() || PLATFORM_DEFAULT.short_name).slice(0, 12);
