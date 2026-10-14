@@ -23,6 +23,7 @@ from app.schemas.admin.auth import AdminLoginRequest, AdminTokenPair, AdminUserO
 from app.schemas.auth import LogoutRequest, RefreshRequest, TokenPair
 from app.schemas.common import APIResponse, OkResponse
 from app.services import auth_service
+from app.services.audit_service import log_event
 
 
 async def _branding_fields_for(admin_user: User) -> dict:
@@ -98,12 +99,13 @@ def _client_ip(request: Request) -> str:
     dependencies=[rate_limit("auth")],
 )
 async def admin_login(payload: AdminLoginRequest, request: Request):
+    ip = _client_ip(request)
     pair: TokenPair = await auth_service.authenticate(
         identifier=payload.identifier,
         password=payload.password,
         two_fa_code=payload.two_fa_code,
         audience="admin",
-        ip=_client_ip(request),
+        ip=ip,
         user_agent=request.headers.get("user-agent"),
     )
     if pair.user.role not in {
@@ -116,6 +118,20 @@ async def admin_login(payload: AdminLoginRequest, request: Request):
     admin_user = await User.get(pair.user.id)
     if admin_user is None:
         raise InvalidCredentialsError()
+
+    # Logged only after the role check, so a client's credentials on the
+    # admin portal never mint an admin-tier LOGIN row. The `ip_address` is
+    # what the Audit logs page renders and what the admin-login-IP purge
+    # keys off — without it the admin tier's sign-ins existed only in
+    # User.last_login_ip, which nothing in the panel shows.
+    await log_event(
+        action=AuditAction.LOGIN,
+        entity_type="User",
+        entity_id=admin_user.id,
+        actor_id=admin_user.id,
+        ip_address=ip,
+        user_agent=request.headers.get("user-agent"),
+    )
 
     return APIResponse(
         data=AdminTokenPair(
@@ -158,12 +174,13 @@ async def employee_login(payload: AdminLoginRequest, request: Request):
     machinery, but accepts ONLY role == EMPLOYEE — so admins can't use the
     employee portal and employees can't use the admin /login. After login the
     employee lands in the admin app showing only their granted sections."""
+    ip = _client_ip(request)
     pair: TokenPair = await auth_service.authenticate(
         identifier=payload.identifier,
         password=payload.password,
         two_fa_code=payload.two_fa_code,
         audience="admin",
-        ip=_client_ip(request),
+        ip=ip,
         user_agent=request.headers.get("user-agent"),
     )
     if pair.user.role != UserRole.EMPLOYEE.value:
@@ -172,6 +189,15 @@ async def employee_login(payload: AdminLoginRequest, request: Request):
     emp = await User.get(pair.user.id)
     if emp is None:
         raise InvalidCredentialsError()
+
+    await log_event(
+        action=AuditAction.LOGIN,
+        entity_type="User",
+        entity_id=emp.id,
+        actor_id=emp.id,
+        ip_address=ip,
+        user_agent=request.headers.get("user-agent"),
+    )
 
     return APIResponse(
         data=AdminTokenPair(
@@ -238,11 +264,15 @@ async def admin_refresh(payload: RefreshRequest):
 
 
 @router.post("/logout", response_model=APIResponse[OkResponse])
-async def admin_logout(payload: LogoutRequest, admin: CurrentAdmin):
-    from app.services.audit_service import log_event
-
+async def admin_logout(payload: LogoutRequest, admin: CurrentAdmin, request: Request):
     await auth_service.logout(refresh_token=payload.refresh_token, user_id=str(admin.id))
-    await log_event(action=AuditAction.LOGOUT, entity_type="User", entity_id=admin.id, actor_id=admin.id)
+    await log_event(
+        action=AuditAction.LOGOUT,
+        entity_type="User",
+        entity_id=admin.id,
+        actor_id=admin.id,
+        ip_address=_client_ip(request),
+    )
     return APIResponse(data=OkResponse(message="Admin logged out"))
 
 
@@ -284,7 +314,6 @@ async def admin_change_password(payload: AdminChangePasswordRequest, admin: Curr
     changes their OWN password: verify the current one, then set the new hash.
     The current session stays valid — no forced re-login."""
     from app.core.security import hash_password, verify_password
-    from app.services.audit_service import log_event
 
     if not verify_password(payload.current_password, admin.password_hash):
         raise InvalidCredentialsError("Current password is incorrect")
@@ -324,7 +353,6 @@ async def admin_change_email(payload: AdminChangeEmailRequest, admin: CurrentAdm
     a self-service change is just friction.
     """
     from app.core.security import verify_password
-    from app.services.audit_service import log_event
 
     if not verify_password(payload.current_password, admin.password_hash):
         raise InvalidCredentialsError("Password is incorrect")

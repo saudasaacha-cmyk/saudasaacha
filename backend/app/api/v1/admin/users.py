@@ -503,7 +503,7 @@ async def _resolve_active_users_access(admin: User) -> dict[str, Any]:
 async def list_active_users(
     admin: CurrentAdmin,
     q: str | None = None,
-    role: str | None = None,
+    role: UserRole | None = None,
     online_only: bool = Query(default=False),
     include_demo: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
@@ -541,6 +541,18 @@ async def list_active_users(
                 "total_pages": max(1, (total + page_size - 1) // page_size),
                 "online": sum(1 for r in rows if r["online"]),
                 "ttl_sec": presence_service.TTL_SEC,
+                # Which roster this is. The page labels itself off this
+                # rather than off the caller's role, because a super
+                # admin's EMPLOYEE resolves to the platform pool here and
+                # nothing in their /me payload reveals whose staff they are.
+                "platform_wide": access["scope"] is None,
+                # Whether the rows actually carry real contacts. The page
+                # must not derive this from its own `/me` permissions:
+                # `can_read_contacts` ALSO requires the parent admin to
+                # still hold the grant, so an employee whose own flag
+                # survived their admin's revocation would be told the
+                # column is readable while every row came back masked.
+                "contacts_revealed": bool(access["reveal_contacts"]),
             },
         }
     )
@@ -550,7 +562,7 @@ async def list_active_users(
 async def export_active_users(
     admin: CurrentAdmin,
     q: str | None = None,
-    role: str | None = None,
+    role: UserRole | None = None,
     online_only: bool = Query(default=False),
     include_demo: bool = Query(default=False),
     format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),

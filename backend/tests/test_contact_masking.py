@@ -10,6 +10,7 @@ already knows a number can still find the account.
 
 from __future__ import annotations
 
+from app.models.user import UserRole, UserStatus
 from app.services.user_service import (
     CONTACT_MASK,
     is_placeholder_contact,
@@ -39,12 +40,55 @@ def test_a_placeholder_reads_as_absent():
 
 def test_the_admin_serializer_masks_both_columns():
     """The one serializer behind the users list, the user detail page and
-    every mutation response."""
+    every mutation response.
+
+    Asserted on BEHAVIOUR, not on the source containing a function name.
+    The earlier version grepped for `masked_contact(u.email)` and went red
+    the moment that call became `contact_out(u.email, reveal=...)` — a
+    rename, not a regression. A test that cannot tell those apart costs
+    more than it protects.
+    """
+    import types
+
+    from app.api.v1.admin import users as admin_users
+
+    # Every attribute `_ser` reads. A stand-in rather than a real User so
+    # the test needs no Beanie init or Mongo.
+    u = types.SimpleNamespace(
+        id="507f1f77bcf86cd799439011",
+        user_code="ABC123",
+        full_name="Test",
+        email="real@example.com",
+        mobile="9876543210",
+        role=UserRole.CLIENT,
+        status=UserStatus.ACTIVE,
+        parent_id=None,
+        assigned_admin_id=None,
+        assigned_broker_id=None,
+        last_transferred_at=None,
+        last_transferred_by=None,
+        last_login_at=None,
+        created_at=None,
+        two_fa_enabled=False,
+        is_demo=False,
+    )
+
+    masked = admin_users._ser(u)
+    assert masked["email"] == CONTACT_MASK
+    assert masked["mobile"] == CONTACT_MASK
+
+    revealed = admin_users._ser(u, reveal=True)
+    assert revealed["email"] == "real@example.com"
+    assert revealed["mobile"] == "9876543210"
+
+
+def test_the_serializer_hides_contacts_unless_asked():
+    """`reveal` defaults to False, so a caller that forgets the kwarg
+    masks rather than leaks — the same rule the active-users service
+    follows."""
     import inspect
 
     from app.api.v1.admin import users as admin_users
 
-    src = inspect.getsource(admin_users._ser)
-    assert "masked_contact(u.email)" in src
-    assert "masked_contact(u.mobile)" in src
-    assert "u.email," not in src.replace("masked_contact(u.email),", "")
+    sig = inspect.signature(admin_users._ser)
+    assert sig.parameters["reveal"].default is False

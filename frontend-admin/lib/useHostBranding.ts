@@ -24,7 +24,16 @@ export function useHostBranding(): HostBranding {
   // Seeded by the auth layout from the Host header, so the login screens
   // never paint the platform brand before correcting themselves. Absent
   // in the authed shell, which falls through to the fetch below.
-  const seeded = useSeededHostBrand();
+  //
+  // An EMPTY seed counts as absent. The server hands one back for the
+  // platform's own host but ALSO for every failure — no
+  // NEXT_PUBLIC_API_URL, a Next server that cannot reach the public API
+  // (split-horizon DNS, NAT, self-signed cert), a 503 from
+  // BRANDING_ENABLED=false. Trusting it would pin a tenant to the
+  // platform wordmark forever instead of for one paint; the extra 404
+  // on the platform's own host is the cheaper half of that trade.
+  const seed = useSeededHostBrand();
+  const seeded = seed?.brand_name || seed?.logo_url ? seed : null;
   const [brand, setBrand] = useState<HostBranding>({ brand_name: null, logo_url: null });
 
   useEffect(() => {

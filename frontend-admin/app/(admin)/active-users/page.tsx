@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { FileSpreadsheet, FileText, Search } from "lucide-react";
-import { UsersAPI, type ActiveUser } from "@/lib/api";
+import { UsersAPI, type ActiveUser, type ActiveUsersMeta } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -76,9 +76,6 @@ export default function ActiveUsersPage() {
   // SUPER_ADMIN on any key and reads the granted sections otherwise; a
   // BROKER has no such key, so it returns false for them.
   const allowed = canSee(me, "active_users");
-  // Platform-wide for the super admin (and their staff, who inherit it);
-  // own-pool for a granted admin. Drives the copy and the role filter.
-  const platformWide = me?.role === "SUPER_ADMIN";
 
   const [q, setQ] = useState("");
   const [role, setRole] = useState("");
@@ -140,15 +137,32 @@ export default function ActiveUsersPage() {
     );
   }
 
-  const meta = data?.meta;
+  // `platform_wide` is the server's own answer, read loosely because the
+  // shared ActiveUsersMeta type doesn't carry it yet.
+  const meta = data?.meta as ActiveUsersMeta | undefined;
+  // Which roster this is, as decided by `_resolve_active_users_access` —
+  // never re-derived here: the super admin's EMPLOYEES inherit the
+  // platform-wide pool, and nothing in their /me payload says whose staff
+  // they are, so a role check labelled their platform view "your pool" and
+  // hid the role filter for rows they could see. Falls back to the role
+  // until the first response lands, which is only ever the super admin's
+  // own case.
+  const platformWide = meta?.platform_wide ?? me?.role === "SUPER_ADMIN";
   const total = meta?.total ?? 0;
   const online = meta?.online ?? 0;
   const totalPages = meta?.total_pages ?? 1;
-  // Read off the rows rather than re-deriving the permission: whatever the
-  // server decided to send is what the note should describe.
-  const contactsHidden = (data?.items ?? []).some(
-    (r) => r.email?.includes("•") || r.mobile?.includes("•"),
-  );
+  // The permission, not the rendered rows: a placeholder contact comes back
+  // as "—" BEFORE masking, so a page of admin-created accounts (or an empty
+  // one) carried no bullets and the note promised readable contacts to an
+  // admin who has none.
+  // From the response, not from `/me`: the backend also requires the
+  // parent admin to still hold the grant, so an employee whose own flag
+  // outlived their admin's would otherwise read "contacts are readable"
+  // over masked rows. Falls back to the local permission only before the
+  // first response lands.
+  const contactsHidden = meta?.contacts_revealed !== undefined
+    ? !meta.contacts_revealed
+    : !canSee(me, "user_contacts");
 
   const columns: Column<ActiveUser>[] = [
     {

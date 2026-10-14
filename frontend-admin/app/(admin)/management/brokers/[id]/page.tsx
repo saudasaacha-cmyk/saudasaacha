@@ -15,7 +15,7 @@ import {
   ClipboardList,
 } from "lucide-react";
 
-import { BrokerMgmtAPI, setTokens } from "@/lib/api";
+import { BrokerMgmtAPI } from "@/lib/api";
 import { useAdminAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -84,7 +84,6 @@ export default function BrokerDetailPage() {
       } catch {
         /* ignore */
       }
-      setTokens(r.access_token, r.refresh_token);
       const next: AdminUser = {
         id: r.admin.id,
         user_code: r.admin.user_code,
@@ -96,11 +95,10 @@ export default function BrokerDetailPage() {
         broker_permissions: r.admin.broker_permissions ?? null,
         pnl_share_pct: r.admin.pnl_share_pct ?? null,
       };
-      useAdminAuthStore.setState({ admin: next });
-      window.localStorage.setItem(
-        "nb.admin.auth",
-        JSON.stringify({ state: { admin: next }, version: 0 }),
-      );
+      // setSession, not setState: the one path that also drops the previous
+      // admin's dashboard snapshot and persisted query cache, so their
+      // tiles and lists can't paint into this session.
+      useAdminAuthStore.getState().setSession({ ...r, admin: next });
       qc.clear();
       toast.success(`Logged in as ${r.admin.user_code}`);
       router.push("/dashboard");

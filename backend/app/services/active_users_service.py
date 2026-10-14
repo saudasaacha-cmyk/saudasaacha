@@ -32,6 +32,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any
 
+from beanie import PydanticObjectId
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -111,10 +112,20 @@ def _elapsed(seconds: int) -> str:
 
 
 async def _owner_names() -> dict[str, str]:
-    rows = await User.find(
-        {"role": {"$in": [UserRole.ADMIN.value, UserRole.BROKER.value]}}
-    ).to_list()
-    return {str(r.id): (r.full_name or r.user_code or str(r.id)) for r in rows}
+    """Owner labels for every admin and broker — a projection, on purpose.
+
+    This runs on every 20 s poll of the page and every export, and all it
+    produces is a label, so hydrating full User documents to build one is
+    the expensive half of a request that has no business being expensive.
+    """
+    cursor = User.get_motor_collection().find(
+        {"role": {"$in": [UserRole.ADMIN.value, UserRole.BROKER.value]}},
+        {"full_name": 1, "user_code": 1},
+    )
+    return {
+        str(d["_id"]): (d.get("full_name") or d.get("user_code") or str(d["_id"]))
+        async for d in cursor
+    }
 
 
 def _query(
@@ -124,15 +135,27 @@ def _query(
     include_demo: bool,
     scope: dict[str, Any] | None,
     clients_only: bool,
+    online_ids: list[PydanticObjectId] | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {"status": UserStatus.ACTIVE.value}
-    if role:
-        out["role"] = role
-    elif clients_only:
+    # Both clauses land on `role`, where Mongo ANDs them: a caller-supplied
+    # role NARROWS this roster and can never widen it. Letting it replace
+    # the exclusion handed a granted ADMIN asking `?role=BROKER` exactly
+    # the broker and employee logins the exclusion exists to keep out.
+    role_clause: dict[str, Any] = {}
+    if clients_only:
         # A granted ADMIN's roster is their CLIENTS. Their own pool clause
         # also matches the broker and employee login accounts they created,
         # and those are managed on their own pages.
-        out["role"] = {"$nin": _ADMIN_TIER_ROLES}
+        role_clause["$nin"] = _ADMIN_TIER_ROLES
+    if role:
+        role_clause["$eq"] = role
+    if role_clause:
+        out["role"] = role_clause
+    if online_ids is not None:
+        # Presence lives in Redis, so an online-only view can only avoid
+        # reading the whole collection by handing Mongo the ids it found.
+        out["_id"] = {"$in": online_ids}
     if not include_demo:
         out["is_demo"] = {"$ne": True}
         out["email"] = {"$not": re.compile(r"@demo\.local$", re.IGNORECASE)}
@@ -169,7 +192,7 @@ async def collect_rows(
     include_demo: bool = False,
     scope: dict[str, Any] | None = None,
     clients_only: bool = False,
-    reveal_contacts: bool = True,
+    reveal_contacts: bool = False,
 ) -> list[dict[str, Any]]:
     """One row per ACTIVE account, online sessions first.
 
@@ -181,9 +204,20 @@ async def collect_rows(
     `scope` is a Mongo clause limiting which accounts are visible — `None`
     for the super admin's platform-wide view, the caller's owned pool for a
     granted ADMIN. `reveal_contacts` decides whether email / mobile come
-    back real or masked (`user_contacts` permission).
+    back real or masked (`user_contacts` permission) — it defaults to
+    masked, so a caller that forgets the kwarg under-shares instead of
+    printing every contact on the platform.
     """
     presence = await presence_service.online_user_ids()
+    online_ids: list[PydanticObjectId] | None = None
+    if online_only:
+        # Checked rather than cast: a junk presence key is Redis' problem,
+        # not a 500 on the page.
+        online_ids = [
+            PydanticObjectId(uid) for uid in presence if PydanticObjectId.is_valid(uid)
+        ]
+        if not online_ids:
+            return []
     users = await User.find(
         _query(
             q=q,
@@ -191,6 +225,7 @@ async def collect_rows(
             include_demo=include_demo,
             scope=scope,
             clients_only=clients_only,
+            online_ids=online_ids,
         )
     ).to_list()
     if not users:
@@ -208,8 +243,6 @@ async def collect_rows(
     rows: list[dict[str, Any]] = []
     for u in users:
         since = presence.get(str(u.id))
-        if online_only and since is None:
-            continue
         rows.append(
             {
                 "id": str(u.id),

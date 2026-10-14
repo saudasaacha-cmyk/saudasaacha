@@ -43,9 +43,11 @@ export const useAdminAuthStore = create<AdminAuthState>()(
         // landed. That is how the super admin's Employees row showed up
         // in a sub-admin's Employee Management.
         //
-        // The in-memory cache of THIS tab is cleared by the caller
-        // (`qc.clear()` in the login pages), the same way the four
-        // "Login as" flows already do it.
+        // Every identity swap routes through here — the login pages and
+        // the four "Login as" flows alike — so this clearing happens once
+        // instead of in each caller. The in-memory cache of THIS tab is
+        // still the caller's job (`qc.clear()`), since the store has no
+        // QueryClient.
         const prevId = get().admin?.id;
         if (prevId && prevId !== pair.admin.id) {
           clearDashboardSnapshot();

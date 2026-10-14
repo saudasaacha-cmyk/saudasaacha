@@ -8,11 +8,8 @@ import { ThemeProvider, useTheme } from "next-themes";
 import { Toaster } from "sonner";
 import { AdminBrandingChrome } from "@/components/branding/AdminBrandingChrome";
 import { SessionKeepAlive } from "@/components/auth/SessionKeepAlive";
-
-// The cache key now lives in lib/constants so the auth store can wipe it
-// without importing this module (which would be a cycle). Re-exported
-// because existing call sites import it from here.
-export { ADMIN_RQ_CACHE_KEY } from "@/lib/constants";
+// The cache key lives in lib/constants so the auth store can wipe it
+// without importing this module (which would be a cycle).
 import { ADMIN_RQ_CACHE_KEY } from "@/lib/constants";
 
 function ThemedToaster() {

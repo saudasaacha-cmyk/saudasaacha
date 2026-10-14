@@ -6,12 +6,12 @@ import { useHostBranding } from "@/lib/useHostBranding";
 import { API_URL, APP_NAME } from "@/lib/constants";
 
 // Applies tenant white-label chrome (browser tab title + favicon) on
-// the admin panel for ADMIN / BROKER users whose authStore carries
-// `brand_name` / `logo_url`. Super-admins always see the platform
-// default. The favicon swap rewrites every existing
-// <link rel="icon"> the SSR HTML shipped with — appending a new node
-// alone doesn't visibly change the tab icon because the browser has
-// already committed the SSR-supplied icon. We stash the original href
+// the admin panel for every tenant-side role (ADMIN / BROKER /
+// EMPLOYEE) whose authStore carries `brand_name` / `logo_url`.
+// Super-admins always see the platform default. The favicon swap
+// rewrites every existing <link rel="icon"> the SSR HTML shipped with —
+// appending a new node alone doesn't visibly change the tab icon
+// because the browser has already committed the SSR-supplied icon. We stash the original href
 // once on a data-attribute so that signing out / SUPER_ADMIN sessions
 // cleanly restore the platform sprout.
 //
@@ -28,10 +28,13 @@ export function AdminBrandingChrome() {
 
   // SUPER_ADMIN never gets tenant chrome — always platform default, even
   // when they are working on a tenant's host.
-  const isTenant = role === "ADMIN" || role === "BROKER";
+  const isTenant = role === "ADMIN" || role === "BROKER" || role === "EMPLOYEE";
   const isSuper = role === "SUPER_ADMIN";
-  // Signed-in brand wins over the host's; the host covers pre-login and
-  // the employee screens (an EMPLOYEE's auth payload carries no brand).
+  // Signed-in brand wins over the host's; the host covers pre-login.
+  // EMPLOYEE belongs in `isTenant` because the backend resolves their
+  // employer's brand into these same payload fields — while it didn't,
+  // an employee of a white-labelled admin read "ACME" in the sidebar
+  // and the platform's name in the tab, favicon and installed app.
   const brandName = (
     (isTenant ? admin?.brand_name : null) ??
     (isSuper ? null : hostBrand.brand_name) ??
@@ -136,8 +139,11 @@ export function AdminBrandingChrome() {
       // before that, so an install from the login screen is still named
       // and iconed for the tenant rather than "MP Admin".
       const host = window.location.hostname.toLowerCase();
+      // `?u=` keys off `/branding/by-code`, which resolves ADMIN rows
+      // only — a broker's or employee's own code 404s there and would
+      // cost them the working `?d=` they get on their employer's host.
       const desired =
-        isTenant && userCode
+        role === "ADMIN" && userCode
           ? `/manifest.webmanifest?u=${encodeURIComponent(userCode)}`
           : !isSuper && (hostBrand.brand_name || hostBrand.logo_url) && host
             ? `/manifest.webmanifest?d=${encodeURIComponent(host)}`
@@ -161,7 +167,7 @@ export function AdminBrandingChrome() {
   }, [
     tenantName,
     tenantLogo,
-    isTenant,
+    role,
     isSuper,
     userCode,
     hostBrand.brand_name,

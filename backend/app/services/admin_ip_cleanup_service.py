@@ -39,7 +39,7 @@ from beanie import PydanticObjectId
 from app.models.audit_log import AuditAction, AuditLog
 from app.models.user import User, UserRole
 from app.services.audit_service import log_event
-from app.utils.time_utils import now_ist, start_of_day_ist
+from app.utils.time_utils import UTC, now_ist, start_of_day_ist
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,12 @@ _LAST_DAY_TTL = 3 * 24 * 3600
 # is the one person allowed to read these, and seeing what is actually
 # there is what makes the button's effect concrete.
 _SAMPLE_LIMIT = 10
+
+# The Motor client is tz_aware, so every datetime read off a row is
+# offset-aware. A naive sentinel (datetime.min) would raise rather than
+# sort the moment one admin row carries an IP but no last_login_at — a
+# hand-edited row or a half-written login is enough.
+_NEVER = datetime.min.replace(tzinfo=UTC)
 
 _stop = False
 
@@ -129,7 +135,7 @@ async def stats() -> dict[str, Any]:
         else 0
     )
     # Newest login first — the ones an operator cares about.
-    with_ip.sort(key=lambda u: u.last_login_at or datetime.min, reverse=True)
+    with_ip.sort(key=lambda u: u.last_login_at or _NEVER, reverse=True)
     return {
         "accounts": len(users),
         "accounts_with_ip": len(with_ip),
@@ -189,14 +195,18 @@ async def purge(
         "accounts_scanned": len(ids),
         "trigger": trigger,
     }
+    # Only a purge that actually removed something is worth a row. A
+    # no-op run (second click, nothing stored) would otherwise move the
+    # card's "Last cleared" stamp for a purge that cleared nothing.
     # Note the absence of `ip_address=` — recording the purger's own IP
     # here would re-create exactly what was just deleted.
-    await log_event(
-        action=AuditAction.LOGIN_IP_PURGE,
-        entity_type="AdminLoginIP",
-        actor_id=actor_id,
-        new_values=summary,
-    )
+    if summary["accounts_cleared"] or summary["audit_rows_cleared"]:
+        await log_event(
+            action=AuditAction.LOGIN_IP_PURGE,
+            entity_type="AdminLoginIP",
+            actor_id=actor_id,
+            new_values=summary,
+        )
     logger.info("admin_login_ip_purged", extra=summary)
     return summary
 
@@ -229,8 +239,14 @@ async def admin_ip_cleanup_loop(interval_sec: float = 300.0) -> None:
             rec = await cache_get(_LAST_DAY_KEY)
             last_day = str(rec.get("day")) if rec and rec.get("day") else None
             if last_day != day and now.time() >= PURGE_AT:
-                summary = await purge(trigger="scheduled")
+                # Claim the day BEFORE purging. `cache_set` raises once its
+                # retries are spent, and the catch below swallows it — with
+                # the marker written after the purge, a Redis blip left
+                # `last_day` unset and the next tick five minutes later
+                # purged again, wiping the IPs of everyone who signed in
+                # since. Losing one day's purge is the cheaper failure.
                 await cache_set(_LAST_DAY_KEY, {"day": day}, ttl_sec=_LAST_DAY_TTL)
+                summary = await purge(trigger="scheduled")
                 logger.info("admin_ip_cleanup_daily_done", extra=summary)
         except Exception:
             logger.exception("admin_ip_cleanup_loop_failed")

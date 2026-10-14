@@ -304,6 +304,11 @@ export type ActiveUsersMeta = {
   /** How many of `total` are connected right now. */
   online: number;
   ttl_sec: number;
+  /** Platform-wide roster (super admin and their staff) vs own pool. */
+  platform_wide?: boolean;
+  /** Whether the rows carry real contacts — the backend's answer, which
+   *  also accounts for the parent admin's grant. */
+  contacts_revealed?: boolean;
 };
 
 export type ActiveUsersQuery = {

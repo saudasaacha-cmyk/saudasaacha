@@ -13,7 +13,8 @@ Run from the backend folder:
     source .venv/bin/activate
     python -m scripts.grant_all_sections_to_existing_admins
 
-Idempotent — re-running just re-asserts all-True on every existing sub-admin.
+Idempotent — re-running just re-asserts all-True on every existing sub-admin
+(the SUPER_ADMIN_ONLY sections below keep whatever the row already has).
 Only role == ADMIN rows are touched (super-admin ignores admin_permissions;
 brokers use broker_permissions; employees are configured per-employee).
 """
@@ -40,10 +41,21 @@ logger = logging.getLogger("grant_all_sections")
 SUPER_ADMIN_ONLY = {"active_users", "user_contacts"}
 
 
-def _all_true() -> AdminPermissions:
+def _merged(existing: AdminPermissions | None) -> AdminPermissions:
+    """All sections True, with the SUPER_ADMIN_ONLY ones left exactly as the
+    row already has them.
+
+    Writing False there would make a re-run a REVOKE, not the re-assert the
+    docstring promises: a super admin's explicit `user_contacts` grant would
+    vanish, and with it contact access for that admin's whole downline (see
+    ``user_service.can_read_contacts`` — a broker's grant only counts while
+    the parent admin holds it). A row with no permissions yet has nothing to
+    preserve, so those keys stay False — deny by default.
+    """
+    current = existing.model_dump() if existing else {}
     return AdminPermissions(
         **{
-            f: f not in SUPER_ADMIN_ONLY
+            f: current.get(f, False) if f in SUPER_ADMIN_ONLY else True
             for f in AdminPermissions.model_fields
         }
     )
@@ -52,16 +64,15 @@ def _all_true() -> AdminPermissions:
 async def main() -> None:
     await init_database()
     try:
-        full = _all_true()
         admins = await User.find(User.role == UserRole.ADMIN).to_list()
         logger.info("found %d existing sub-admins", len(admins))
         changed = 0
         for a in admins:
             before = a.admin_permissions.model_dump() if a.admin_permissions else None
-            after = full.model_dump()
-            if before == after:
+            target = _merged(a.admin_permissions)
+            if before == target.model_dump():
                 continue
-            a.admin_permissions = _all_true()
+            a.admin_permissions = target
             await a.save()
             changed += 1
             logger.info("granted all sections -> %s (%s)", a.user_code, a.email)

@@ -9,7 +9,7 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException
 
 from app.core.database import healthcheck as db_health
-from app.core.dependencies import CurrentAdmin, scoped_user_ids
+from app.core.dependencies import CurrentAdmin, effective_scope_actor, scoped_user_ids
 from app.core.redis_client import healthcheck as redis_health
 from app.models.holding import Holding
 from app.models.order import Order, OrderStatus
@@ -61,17 +61,30 @@ class _RegistrationToggle(BaseModel):
 @router.get("/registration-status", response_model=APIResponse[dict])
 async def get_registration_status(admin: CurrentAdmin):
     _assert_dashboard_access(admin)
-    return APIResponse(data={"enabled": bool(getattr(admin, "registration_enabled", True))})
+    # The switch lives on the row that OWNS the /register flow, which for an
+    # employee is its parent admin — the same actor the rest of this file
+    # scopes to. Reading the employee's own row reported the default True
+    # whatever the admin had actually set.
+    actor = await effective_scope_actor(admin)
+    return APIResponse(data={"enabled": bool(getattr(actor, "registration_enabled", True))})
 
 
 @router.put("/registration-status", response_model=APIResponse[dict])
 async def set_registration_status(payload: _RegistrationToggle, admin: CurrentAdmin):
     _assert_dashboard_access(admin)
-    admin.registration_enabled = bool(payload.enabled)
-    await admin.save()
+    # Must write the row `user/auth` reads on signup: saving on the employee
+    # itself persisted a dead flag and left the admin's /register open while
+    # the UI reported success.
+    actor = await effective_scope_actor(admin)
+    actor.registration_enabled = bool(payload.enabled)
+    await actor.save()
     return APIResponse(
-        data={"enabled": admin.registration_enabled},
-        message=("Website registration enabled." if admin.registration_enabled else "Website registration disabled."),
+        data={"enabled": actor.registration_enabled},
+        message=(
+            "Website registration enabled."
+            if actor.registration_enabled
+            else "Website registration disabled."
+        ),
     )
 
 
