@@ -10,6 +10,7 @@ import {
 } from "@/components/layout/adminNav";
 import { ensureFreshAccessToken, isExpiringSoon } from "@/lib/api";
 import { STORAGE_KEYS } from "@/lib/constants";
+import { signInPath } from "@/lib/signin-path";
 import { AdminSidebar } from "@/components/layout/AdminSidebar";
 import { AdminTopBar } from "@/components/layout/AdminTopBar";
 import { AdminPrefetcher } from "@/components/layout/AdminPrefetcher";
@@ -27,7 +28,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const refreshMe = useAdminAuthStore((s) => s.refreshMe);
 
   useEffect(() => {
-    if (hydrated && !admin) router.replace("/login");
+    // Back to whichever portal this browser signed in through — an
+    // employee bounced to the Admin Login form can't get back in, the
+    // backend rejects their role there.
+    if (hydrated && !admin) router.replace(signInPath());
   }, [hydrated, admin, router]);
 
   // Everyone is sent to /dashboard after sign-in, but an employee without

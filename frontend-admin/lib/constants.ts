@@ -18,6 +18,10 @@ export const STORAGE_KEYS = {
   accessToken: "nb.admin.accessToken",
   refreshToken: "nb.admin.refreshToken",
   user: "nb.admin.user",
+  // Which of the two sign-in screens this browser last used — see
+  // lib/signin-path.ts. Survives logout on purpose: it is what sends a
+  // signed-out employee back to /employee-login instead of /login.
+  lastPortal: "nb.admin.lastPortal",
 } as const;
 
 /**

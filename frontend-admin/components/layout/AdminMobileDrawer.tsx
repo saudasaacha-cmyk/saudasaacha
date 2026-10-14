@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { BrandLogo } from "@/components/layout/BrandLogo";
 import { useAdminNav, resolveNavLabel } from "@/components/layout/adminNav";
 import { useAdminAuthStore } from "@/stores/authStore";
+import { signInPath } from "@/lib/signin-path";
 import { useMobileNav } from "@/components/layout/MobileNavContext";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +88,7 @@ export function AdminMobileDrawer() {
           </div>
           <button
             type="button"
-            onClick={() => logout().then(() => (window.location.href = "/login"))}
+            onClick={() => logout().then(() => (window.location.href = signInPath()))}
             className="tap-target flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground/80 hover:bg-accent hover:text-foreground"
           >
             <LogOut className="size-4" />

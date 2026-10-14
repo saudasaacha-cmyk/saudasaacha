@@ -2,6 +2,7 @@
 
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from "axios";
 import { ADMIN_API_KEY, API_URL, STORAGE_KEYS } from "./constants";
+import { isSignInPath, signInPath } from "./signin-path";
 import type { AdminTokenPair, ApiResponse } from "@/types";
 
 export const api = axios.create({
@@ -166,9 +167,11 @@ api.interceptors.response.use(
       if (
         !stillHaveRefresh &&
         typeof window !== "undefined" &&
-        !window.location.pathname.startsWith("/login")
+        // `isSignInPath` covers BOTH portals, so a 401 raised by the
+        // login form itself never bounces the page to itself.
+        !isSignInPath(window.location.pathname)
       ) {
-        window.location.href = "/login";
+        window.location.href = signInPath();
       }
     }
     return Promise.reject(error);

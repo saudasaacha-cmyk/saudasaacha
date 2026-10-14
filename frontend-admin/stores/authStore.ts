@@ -5,6 +5,7 @@ import { persist } from "zustand/middleware";
 import { AdminAuthAPI, clearTokens, setTokens } from "@/lib/api";
 import { ADMIN_RQ_CACHE_KEY, STORAGE_KEYS } from "@/lib/constants";
 import { clearDashboardSnapshot } from "@/lib/dashboardSnapshot";
+import { rememberPortal } from "@/lib/signin-path";
 import type { AdminTokenPair, AdminUser } from "@/types";
 
 interface AdminAuthState {
@@ -57,6 +58,10 @@ export const useAdminAuthStore = create<AdminAuthState>()(
           }
         }
         setTokens(pair.access_token, pair.refresh_token);
+        // Remember which portal this browser belongs to so a sign-out or
+        // an expired session sends them back to the form their
+        // credentials actually work on.
+        rememberPortal(pair.admin.role === "EMPLOYEE" ? "employee" : "admin");
         set({ admin: pair.admin });
       },
       login: async (identifier, password, two_fa_code) => {

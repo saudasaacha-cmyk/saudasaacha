@@ -3,6 +3,7 @@
 import { LogOut, Menu, ShieldAlert, RefreshCw } from "lucide-react";
 import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { useAdminAuthStore } from "@/stores/authStore";
+import { signInPath } from "@/lib/signin-path";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { NotificationBell } from "@/components/layout/NotificationBell";
@@ -76,7 +77,7 @@ export function AdminTopBar() {
         size="icon"
         aria-label="Sign out"
         className="hidden md:inline-flex"
-        onClick={() => logout().then(() => (window.location.href = "/login"))}
+        onClick={() => logout().then(() => (window.location.href = signInPath()))}
       >
         <LogOut className="size-4" />
       </Button>
