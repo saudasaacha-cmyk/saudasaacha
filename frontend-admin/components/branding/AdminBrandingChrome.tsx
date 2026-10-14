@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAdminAuthStore } from "@/stores/authStore";
 import { useHostBranding } from "@/lib/useHostBranding";
 import { API_URL, APP_NAME } from "@/lib/constants";
@@ -48,13 +48,28 @@ export function AdminBrandingChrome() {
       ? logoPath
       : `${API_URL}${logoPath}`
     : null;
+  // Whether this component has ever written a tenant title — see the
+  // title block below for why it matters.
+  const appliedTenantTitle = useRef(false);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
 
     // ── Title ───────────────────────────────────────────────────────
-    const title = tenantName || APP_NAME;
-    if (document.title !== title) document.title = title;
+    // Only ever WRITE a tenant name. The platform default is already in
+    // the server-rendered <title>, and this effect runs before the host
+    // fetch resolves — writing APP_NAME here would stomp the correct
+    // title the auth layout just rendered on a tenant host, producing
+    // the very flash this is meant to remove. The platform name is
+    // restored only when we had previously applied a tenant one (sign
+    // out, or a super admin taking over the tab).
+    if (tenantName) {
+      appliedTenantTitle.current = true;
+      if (document.title !== tenantName) document.title = tenantName;
+    } else if (appliedTenantTitle.current) {
+      appliedTenantTitle.current = false;
+      if (document.title !== APP_NAME) document.title = APP_NAME;
+    }
 
     // ── Favicon ────────────────────────────────────────────────────
     const head = document.head;

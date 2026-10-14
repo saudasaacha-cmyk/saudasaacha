@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_URL } from "@/lib/constants";
+import { useSeededHostBrand } from "@/components/branding/HostBrandProvider";
 
 export type HostBranding = { brand_name: string | null; logo_url: string | null };
 
@@ -20,10 +21,15 @@ export type HostBranding = { brand_name: string | null; logo_url: string | null 
  * Same on any failure: nothing here can break the login form.
  */
 export function useHostBranding(): HostBranding {
+  // Seeded by the auth layout from the Host header, so the login screens
+  // never paint the platform brand before correcting themselves. Absent
+  // in the authed shell, which falls through to the fetch below.
+  const seeded = useSeededHostBrand();
   const [brand, setBrand] = useState<HostBranding>({ brand_name: null, logo_url: null });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (seeded) return;
     const host = window.location.hostname.toLowerCase();
     if (!host || host === "localhost" || host === "127.0.0.1") return;
 
@@ -41,7 +47,7 @@ export function useHostBranding(): HostBranding {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [seeded]);
 
-  return brand;
+  return seeded ?? brand;
 }
