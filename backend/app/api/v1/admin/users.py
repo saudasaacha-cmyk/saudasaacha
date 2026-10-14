@@ -16,6 +16,7 @@ from app.core.dependencies import (
     assert_role_aware_perm,
     assert_user_in_scope,
     effective_scope_actor,
+    merge_scope,
     require_perm,
     scoped_user_filter,
 )
@@ -194,8 +195,7 @@ async def list_users(
     # under a transferred broker — whose assigned_admin_id was never
     # propagated — still appear here, matching the dashboard count.
     # The scope may itself be an $or, and the search box is also an $or,
-    # so AND them together; merging two $or keys into one dict silently
-    # drops the first.
+    # so they go through merge_scope rather than into one dict.
     if mode == "demo":
         # Demo-tab: show ONLY demo users so the admin can manage them.
         query["is_demo"] = True
@@ -205,25 +205,18 @@ async def list_users(
         query["email"] = {"$not": re.compile(r"@demo\.local$", re.IGNORECASE)}
 
     scope = await scoped_user_filter(admin)
-    and_clauses: list[dict] = []
+    search: dict | None = None
     if q:
         regex = re.compile(re.escape(q.strip()), re.IGNORECASE)
-        and_clauses.append(
-            {
-                "$or": [
-                    {"email": regex},
-                    {"mobile": regex},
-                    {"user_code": regex},
-                    {"full_name": regex},
-                ]
-            }
-        )
-    if "$or" in scope:
-        and_clauses.append(scope)
-    else:
-        query.update(scope)
-    if and_clauses:
-        query["$and"] = and_clauses
+        search = {
+            "$or": [
+                {"email": regex},
+                {"mobile": regex},
+                {"user_code": regex},
+                {"full_name": regex},
+            ]
+        }
+    merge_scope(query, scope, search)
 
     total = await User.find(query).count()
     rows = (
@@ -356,12 +349,7 @@ async def list_online_users(
             continue
 
     scope = await scoped_user_filter(admin)
-    query: dict[str, Any] = {"_id": {"$in": oids}}
-    and_clauses = [scope] if "$or" in scope else []
-    if and_clauses:
-        query["$and"] = and_clauses
-    else:
-        query.update(scope)
+    query: dict[str, Any] = merge_scope({"_id": {"$in": oids}}, scope)
 
     rows = await User.find(query).to_list()
     out = []
@@ -685,8 +673,9 @@ async def users_live_stats(
                 continue
         if not target_oids:
             return APIResponse(data={"items": []})
-        scope_query: dict[str, Any] = {"_id": {"$in": target_oids}}
-        scope_query.update(await scoped_user_filter(admin))
+        scope_query: dict[str, Any] = merge_scope(
+            {"_id": {"$in": target_oids}}, await scoped_user_filter(admin)
+        )
         users = await User.find(scope_query).to_list()
     else:
         scope_query = {
@@ -699,7 +688,7 @@ async def users_live_stats(
             },
             "status": {"$ne": UserStatus.CLOSED.value},
         }
-        scope_query.update(await scoped_user_filter(admin))
+        merge_scope(scope_query, await scoped_user_filter(admin))
         users = await User.find(scope_query).limit(200).to_list()
 
     if not users:

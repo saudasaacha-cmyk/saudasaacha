@@ -307,10 +307,37 @@ async def scoped_user_filter(admin: User) -> dict:
 
     Does NOT add a role filter — callers that want client-tier-only rows
     keep their own ``role`` condition (every current caller already does).
-    Combine with other ``$or`` conditions (e.g. a search box) via
-    ``$and`` so the scope ``$or`` isn't clobbered.
+    Combine with other ``$or`` conditions (e.g. a search box) through
+    :func:`merge_scope` so the scope ``$or`` isn't clobbered.
     """
     return await _pool_clause(admin)
+
+
+def merge_scope(query: dict, scope: dict | None, *extra: dict | None) -> dict:
+    """AND ``scope`` — and any ``extra`` clauses, e.g. a search box — into
+    ``query`` in place, and return it.
+
+    WHY one function instead of a copy per endpoint: a dict can hold ``$or``
+    once, and :func:`scoped_user_filter` sometimes IS an ``$or``. So
+    ``query.update(scope)`` next to a search box's own ``$or`` drops one of
+    the two, and a dropped SCOPE clause raises nothing — the endpoint simply
+    returns MORE rows than the actor is allowed to see. Same hazard for any
+    key the pool clause grows later (``role``, ``assigned_broker_id``)
+    landing on a key the caller already pinned. It lives beside the filter
+    it merges because the two have to change together.
+
+    Clauses that cannot collide are merged flat, so the common single-key
+    scope still reaches Mongo as a plain indexed equality rather than a
+    one-element ``$and``.
+    """
+    for clause in (*extra, scope):
+        if not clause:
+            continue
+        if {"$or", "$and"} & clause.keys() or any(k in query for k in clause):
+            query.setdefault("$and", []).append(clause)
+        else:
+            query.update(clause)
+    return query
 
 
 async def scoped_user_ids(

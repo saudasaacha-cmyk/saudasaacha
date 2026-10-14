@@ -199,7 +199,10 @@ async def collect_rows(
         return "Super admin"
 
     def _contact(v: str | None) -> str:
-        return "—" if user_service.is_placeholder_contact(v) or not v else str(v)
+        # Shared formatter, not a local copy of the rule. `reveal=True` is
+        # stated rather than assumed: this export is SUPER_ADMIN-only, and
+        # the day that gate widens this is the line that has to move.
+        return user_service.contact_display(v, reveal=True)
 
     def _money(v: Any) -> float:
         try:

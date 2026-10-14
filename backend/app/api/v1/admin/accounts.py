@@ -22,7 +22,13 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Query
 from starlette.responses import StreamingResponse
 
-from app.core.dependencies import CurrentAdmin, require_perm, scoped_user_filter, scoped_user_ids
+from app.core.dependencies import (
+    CurrentAdmin,
+    merge_scope,
+    require_perm,
+    scoped_user_filter,
+    scoped_user_ids,
+)
 from app.models.position import Position, PositionStatus
 from app.models.trade import Trade
 from app.models.transaction import TransactionType, WalletTransaction
@@ -322,7 +328,7 @@ async def accounts_summary(
             "status": {"$ne": UserStatus.CLOSED.value},
         }
         if admin.role != UserRole.SUPER_ADMIN:
-            broker_query.update(admin_scope)
+            merge_scope(broker_query, admin_scope)
         brokers = await User.find(broker_query).to_list()
 
         # Direct users (no broker)
@@ -346,7 +352,7 @@ async def accounts_summary(
             "assigned_broker_id": {"$ne": None},
         }
         if admin.role != UserRole.SUPER_ADMIN:
-            sub_query.update(admin_scope)
+            merge_scope(sub_query, admin_scope)
         sub_brokers = await User.find(sub_query).to_list()
 
         async def _do_sub(sb: User) -> dict[str, Any]:

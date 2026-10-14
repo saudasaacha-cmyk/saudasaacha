@@ -37,6 +37,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.core.dependencies import merge_scope
 from app.models.user import User, UserRole, UserStatus
 from app.services import presence_service, user_service
 from app.utils.time_utils import UTC, to_ist
@@ -86,15 +87,6 @@ def _role_label(u: User) -> str:
     if role == UserRole.BROKER.value and u.assigned_broker_id:
         return "Sub-broker"
     return role.replace("_", " ").capitalize()
-
-
-def _contact(value: str | None, reveal: bool) -> str:
-    """Dash for an absence, the real value when granted, else the mask.
-
-    A dash rather than `None` because this string also lands in a sheet and
-    a PDF cell, where an empty column reads as a data error.
-    """
-    return user_service.contact_out(value, reveal=reveal) or "—"
 
 
 def _stamp(dt: datetime | None) -> str:
@@ -159,29 +151,20 @@ def _query(
     if not include_demo:
         out["is_demo"] = {"$ne": True}
         out["email"] = {"$not": re.compile(r"@demo\.local$", re.IGNORECASE)}
-    # Scope and search can BOTH be `$or`s, so they are ANDed rather than
-    # merged — merging two `$or` keys into one dict silently drops the first.
-    and_clauses: list[dict[str, Any]] = []
+    # Scope and search can BOTH be `$or`s, so merge_scope ANDs them instead
+    # of letting one dict key hold only the second.
+    search: dict[str, Any] | None = None
     if q:
         regex = re.compile(re.escape(q.strip()), re.IGNORECASE)
-        and_clauses.append(
-            {
-                "$or": [
-                    {"email": regex},
-                    {"mobile": regex},
-                    {"user_code": regex},
-                    {"full_name": regex},
-                ]
-            }
-        )
-    if scope:
-        if "$or" in scope:
-            and_clauses.append(scope)
-        else:
-            out.update(scope)
-    if and_clauses:
-        out["$and"] = and_clauses
-    return out
+        search = {
+            "$or": [
+                {"email": regex},
+                {"mobile": regex},
+                {"user_code": regex},
+                {"full_name": regex},
+            ]
+        }
+    return merge_scope(out, scope, search)
 
 
 async def collect_rows(
@@ -254,8 +237,8 @@ async def collect_rows(
                 # Real or masked, per the actor's `user_contacts` grant —
                 # the same rule the All Users page applies, so a page and
                 # its download can never disagree with each other.
-                "email": _contact(u.email, reveal_contacts),
-                "mobile": _contact(u.mobile, reveal_contacts),
+                "email": user_service.contact_display(u.email, reveal=reveal_contacts),
+                "mobile": user_service.contact_display(u.mobile, reveal=reveal_contacts),
                 "status": str(u.status.value if hasattr(u.status, "value") else u.status),
                 "is_demo": bool(getattr(u, "is_demo", False)),
                 "online": since is not None,

@@ -116,6 +116,19 @@ def contact_out(value: str | None, *, reveal: bool) -> str | None:
     return str(value) if reveal else CONTACT_MASK
 
 
+def contact_display(value: str | None, *, reveal: bool) -> str:
+    """:func:`contact_out` for a cell that cannot be blank — a sheet column,
+    a PDF cell, a table row — where an empty string reads as a broken export
+    rather than as "this account has no email".
+
+    The dash lives HERE, next to the rule it belongs to: deciding whether a
+    generated stand-in (`…@noemail…`, `NOMOB…`) shows as an absence or as the
+    fake string it is, is privacy logic. A copy of it in an export is a copy
+    that stops hearing about a new placeholder family.
+    """
+    return contact_out(value, reveal=reveal) or "—"
+
+
 def is_placeholder_contact(value: str | None) -> bool:
     """True for a generated stand-in — the UI shows a dash instead.
 
