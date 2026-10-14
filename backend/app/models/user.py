@@ -159,6 +159,11 @@ class AdminPermissions(BaseModel):
     # only honoured while their parent admin still holds this, so revoking
     # it here closes the admin's whole downline at once.
     user_contacts: bool = False
+    # Overview → Dashboard. Only meaningful for an EMPLOYEE: admin-tier
+    # actors always have their own dashboard. An employee lands on the
+    # first section they DO hold when this is off, so staff hired for one
+    # job (say KYC) never see the pool's money and volume figures.
+    dashboard: bool = False
 
 
 # Tri-state permissions granted by an admin to a broker (or by a broker to

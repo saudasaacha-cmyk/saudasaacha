@@ -8,18 +8,20 @@ otherwise no one could log in. We rely on rate-limiting + correct credentials
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, status
-from pydantic import BaseModel, Field
+import re
 
+from fastapi import APIRouter, Request, status
+from pydantic import BaseModel, EmailStr, Field
+
+from app.core.config import settings
 from app.core.dependencies import CurrentAdmin
-from app.core.exceptions import InvalidCredentialsError
+from app.core.exceptions import ConflictError, InvalidCredentialsError
 from app.core.rate_limit import rate_limit
 from app.models.audit_log import AuditAction
 from app.models.user import User, UserRole
 from app.schemas.admin.auth import AdminLoginRequest, AdminTokenPair, AdminUserOut
 from app.schemas.auth import LogoutRequest, RefreshRequest, TokenPair
 from app.schemas.common import APIResponse, OkResponse
-from app.core.config import settings
 from app.services import auth_service
 
 
@@ -31,7 +33,8 @@ async def _branding_fields_for(admin_user: User) -> dict:
                       Super-admin runs the whole system and is not part
                       of any tenant.
       - ADMIN       → their OWN brand_name / logo_url.
-      - BROKER      → branding INHERITED from their parent ADMIN
+      - BROKER /
+        EMPLOYEE    → branding INHERITED from their parent ADMIN
                       (resolved via `assigned_admin_id`). Sub-brokers
                       have the same `assigned_admin_id` populated by
                       the broker-management service when they're
@@ -55,7 +58,14 @@ async def _branding_fields_for(admin_user: User) -> dict:
             "custom_domain_status": admin_user.custom_domain_status,
         }
 
-    if admin_user.role == UserRole.BROKER and admin_user.assigned_admin_id is not None:
+    # An EMPLOYEE is staff OF an admin, so they wear that admin's brand —
+    # same single `assigned_admin_id` hop a broker takes. Without this a
+    # white-labelled admin's employee saw the platform wordmark in the
+    # sidebar of their own employer's panel.
+    if (
+        admin_user.role in (UserRole.BROKER, UserRole.EMPLOYEE)
+        and admin_user.assigned_admin_id is not None
+    ):
         parent_admin = await User.get(admin_user.assigned_admin_id)
         if (
             parent_admin is not None
@@ -292,3 +302,62 @@ async def admin_change_password(payload: AdminChangePasswordRequest, admin: Curr
         metadata={"self": True},
     )
     return APIResponse(data=OkResponse(message="Password changed successfully"))
+
+
+class AdminChangeEmailRequest(BaseModel):
+    current_password: str
+    new_email: EmailStr
+
+
+@router.post(
+    "/change-email",
+    response_model=APIResponse[dict],
+    dependencies=[rate_limit("auth")],
+)
+async def admin_change_email(payload: AdminChangeEmailRequest, admin: CurrentAdmin):
+    """Any admin-tier user changes their OWN login email.
+
+    The password is required because the email IS the login identifier:
+    without it, anyone who got hold of an open session could move the
+    account to an address they control. Sessions are deliberately left
+    alone — the token keys off the user id, and forcing a re-login after
+    a self-service change is just friction.
+    """
+    from app.core.security import verify_password
+    from app.services.audit_service import log_event
+
+    if not verify_password(payload.current_password, admin.password_hash):
+        raise InvalidCredentialsError("Password is incorrect")
+
+    new_email = str(payload.new_email).strip().lower()
+    old_email = (admin.email or "").strip()
+    if new_email == old_email.lower():
+        raise ConflictError("That is already your email address.")
+    # Case-insensitive uniqueness: the login lookup is case-insensitive, so
+    # two rows differing only in case would make "which account?" ambiguous.
+    clash = await User.find_one(
+        {
+            "_id": {"$ne": admin.id},
+            "email": re.compile(f"^{re.escape(new_email)}$", re.IGNORECASE),
+        }
+    )
+    if clash is not None:
+        raise ConflictError("Another account already uses that email.")
+
+    admin.email = new_email
+    await admin.save()
+    await log_event(
+        action=AuditAction.UPDATE,
+        entity_type="User",
+        entity_id=admin.id,
+        actor_id=admin.id,
+        target_user_id=admin.id,
+        # The old address is the useful half — it says which login stopped
+        # working. Recorded on the actor's own row, nobody else's.
+        old_values={"email": old_email},
+        new_values={"email": new_email},
+        metadata={"self": True, "kind": "EMAIL_CHANGE"},
+    )
+    return APIResponse(
+        data={"email": new_email}, message="Email updated. Use it to sign in next time."
+    )

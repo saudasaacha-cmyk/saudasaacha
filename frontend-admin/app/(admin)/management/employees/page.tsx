@@ -41,6 +41,9 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 import { adminPanelOrigin } from "@/lib/user-app-url";
 
 const PERMISSION_LABELS: Array<{ key: keyof AdminPermissions; label: string }> = [
+  // Off by default: an employee without it lands on the first section they
+  // do hold instead of the pool's money and volume figures.
+  { key: "dashboard", label: "Dashboard" },
   { key: "users", label: "Users" },
   // Scoped to whoever grants it: the super admin's employee sees the whole
   // platform, a sub-admin's employee sees that sub-admin's pool.
@@ -77,7 +80,7 @@ const ALL_OFF: AdminPermissions = {
   orders: false, positions: false, marketwatch: false,
   money_transactions: false, broker_deposits: false, download_app: false,
   bonuses: false, transfer_users: false, active_users: false,
-  user_contacts: false,
+  user_contacts: false, dashboard: false,
 };
 
 export default function EmployeesPage() {
@@ -90,10 +93,16 @@ export default function EmployeesPage() {
 
   const isSuper = admin?.role === "SUPER_ADMIN";
   // Sections THIS admin may grant (the ceiling). Super-admin → all.
+  // `dashboard` is always grantable: it only gates employees, so an admin
+  // holds it implicitly and the backend caps it the same way (see
+  // employee_service._ALWAYS_HELD_BY_ADMIN).
   const grantable = useMemo(
     () =>
       PERMISSION_LABELS.filter(
-        (p) => isSuper || Boolean((admin?.admin_permissions as any)?.[p.key]),
+        (p) =>
+          isSuper ||
+          p.key === "dashboard" ||
+          Boolean((admin?.admin_permissions as any)?.[p.key]),
       ),
     [admin, isSuper],
   );

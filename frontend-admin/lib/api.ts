@@ -217,6 +217,12 @@ export const AdminAuthAPI = {
   me: () => unwrap<any>(api.get("/admin/auth/me")),
   changePassword: (current_password: string, new_password: string) =>
     unwrap<any>(api.post("/admin/auth/change-password", { current_password, new_password })),
+  /** Change your OWN login email. The password is required because the
+   *  email IS the login identifier. */
+  changeEmail: (current_password: string, new_email: string) =>
+    unwrap<{ email: string }>(
+      api.post("/admin/auth/change-email", { current_password, new_email }),
+    ),
 };
 
 // Employee (staff) management — available to every admin (super + sub) for

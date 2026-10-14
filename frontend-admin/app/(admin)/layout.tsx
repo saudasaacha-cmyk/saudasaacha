@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAdminAuthStore } from "@/stores/authStore";
+import {
+  ADMIN_NAV_GROUPS,
+  firstVisibleHref,
+  useAdminNav,
+} from "@/components/layout/adminNav";
 import { ensureFreshAccessToken, isExpiringSoon } from "@/lib/api";
 import { STORAGE_KEYS } from "@/lib/constants";
 import { AdminSidebar } from "@/components/layout/AdminSidebar";
@@ -15,6 +20,8 @@ import { MobileNavProvider } from "@/components/layout/MobileNavContext";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const nav = useAdminNav();
   const admin = useAdminAuthStore((s) => s.admin);
   const hydrated = useAdminAuthStore((s) => s.hydrated);
   const refreshMe = useAdminAuthStore((s) => s.refreshMe);
@@ -22,6 +29,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (hydrated && !admin) router.replace("/login");
   }, [hydrated, admin, router]);
+
+  // Everyone is sent to /dashboard after sign-in, but an employee without
+  // the Dashboard section has nothing to see there (its endpoints 403) —
+  // so bounce them to the first section they DO hold. Also covers a typed
+  // URL or an old bookmark.
+  //
+  // Deliberately narrow: EMPLOYEE only, and only for a path that IS a nav
+  // destination. Plenty of real pages aren't in the nav (/users/<id>,
+  // /holdings, /reports/compliance …) and an admin-tier actor must never
+  // be redirected off one.
+  useEffect(() => {
+    if (!hydrated || !admin || !pathname) return;
+    if (admin.role !== "EMPLOYEE") return;
+    const hit = (href: string) =>
+      pathname === href || pathname.startsWith(href + "/");
+    const isNavDestination = ADMIN_NAV_GROUPS.some((g) => g.items.some((it) => hit(it.href)));
+    if (!isNavDestination) return;
+    if (nav.some((g) => g.items.some((it) => hit(it.href)))) return;
+    const target = firstVisibleHref(nav);
+    if (target && target !== pathname) router.replace(target);
+  }, [hydrated, admin, pathname, nav, router]);
 
   // Refresh the cached admin object once on mount so any permissions
   // granted server-side after the last login (e.g. super-admin ticked

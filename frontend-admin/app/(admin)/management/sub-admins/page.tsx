@@ -104,6 +104,9 @@ const ALL_OFF: AdminPermissions = {
   transfer_users: false,
   active_users: false,
   user_contacts: false,
+  // Admin-tier actors always have a dashboard; the flag exists so they can
+  // pass it to an employee, which is why it isn't in the grid above.
+  dashboard: true,
 };
 
 export default function SubAdminsPage() {

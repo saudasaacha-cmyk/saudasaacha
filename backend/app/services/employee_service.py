@@ -27,6 +27,14 @@ from app.services import user_service
 from app.services.audit_service import log_event
 
 
+# Sections an ADMIN holds by virtue of being an admin, whatever their
+# permission row says. `dashboard` only ever gates EMPLOYEEs — every
+# admin-tier actor has their own dashboard — so capping an employee's
+# grant against a flag that was never set on the admin would make the
+# toggle impossible to use on any pre-existing admin row.
+_ALWAYS_HELD_BY_ADMIN = {"dashboard"}
+
+
 def cap_permissions(actor: User, requested: AdminPermissions) -> AdminPermissions:
     """Clamp requested sections to what the creating admin actually holds.
 
@@ -39,9 +47,8 @@ def cap_permissions(actor: User, requested: AdminPermissions) -> AdminPermission
     ceiling = actor.admin_permissions or AdminPermissions()
     capped: dict[str, Any] = {}
     for field in AdminPermissions.model_fields:
-        capped[field] = bool(
-            getattr(requested, field, False) and getattr(ceiling, field, False)
-        )
+        held = field in _ALWAYS_HELD_BY_ADMIN or getattr(ceiling, field, False)
+        capped[field] = bool(getattr(requested, field, False) and held)
     return AdminPermissions(**capped)
 
 

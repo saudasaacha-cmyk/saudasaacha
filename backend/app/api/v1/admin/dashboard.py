@@ -6,7 +6,7 @@ import logging
 import re
 from datetime import timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core.database import healthcheck as db_health
 from app.core.dependencies import CurrentAdmin, scoped_user_ids
@@ -31,6 +31,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["admin-dashboard"])
 
 
+def _assert_dashboard_access(admin) -> None:
+    """Admin-tier actors always have a dashboard; an EMPLOYEE needs the
+    `dashboard` section granted.
+
+    Hiding the nav item is not the boundary — without this an employee
+    could still read their admin's pool totals straight off the endpoint.
+    """
+    if admin.role != UserRole.EMPLOYEE:
+        return
+    perms = getattr(admin, "admin_permissions", None)
+    if not (perms and getattr(perms, "dashboard", False)):
+        raise HTTPException(
+            status_code=403, detail="The Dashboard section is not granted."
+        )
+
+
 # ── Public-registration toggle (per-admin / super-admin) ─────────────
 # Each admin (and the super-admin, for the platform pool) can turn their OWN
 # website /register flow ON/OFF. Not gated by BRANDING_ENABLED — registration
@@ -44,11 +60,13 @@ class _RegistrationToggle(BaseModel):
 
 @router.get("/registration-status", response_model=APIResponse[dict])
 async def get_registration_status(admin: CurrentAdmin):
+    _assert_dashboard_access(admin)
     return APIResponse(data={"enabled": bool(getattr(admin, "registration_enabled", True))})
 
 
 @router.put("/registration-status", response_model=APIResponse[dict])
 async def set_registration_status(payload: _RegistrationToggle, admin: CurrentAdmin):
+    _assert_dashboard_access(admin)
     admin.registration_enabled = bool(payload.enabled)
     await admin.save()
     return APIResponse(
@@ -69,6 +87,7 @@ async def _safe(coro, default):
 
 @router.get("/stats", response_model=APIResponse[dict])
 async def stats(admin: CurrentAdmin):
+    _assert_dashboard_access(admin)
     today_start = now_utc() - timedelta(hours=24)
 
     # Both admins are scoped to their own pool (super-admin → unassigned users,
@@ -206,6 +225,7 @@ async def stats(admin: CurrentAdmin):
 @router.get("/risk-alerts", response_model=APIResponse[list])
 async def risk_alerts(admin: CurrentAdmin):
     """High-MTM-loss users + heavy concentration."""
+    _assert_dashboard_access(admin)
     rows = []
     scope = await scoped_user_ids(admin)
     if not scope:

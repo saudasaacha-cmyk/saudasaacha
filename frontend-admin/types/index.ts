@@ -43,6 +43,9 @@ export interface AdminPermissions {
   // from `active_users` on purpose — seeing who is active and reading their
   // phone number are two different grants.
   user_contacts: boolean;
+  // Overview → Dashboard. Only gates EMPLOYEEs — admin-tier actors always
+  // have their own dashboard.
+  dashboard: boolean;
 }
 
 // Tri-state permission level (admin → broker grant, or broker → sub-broker).

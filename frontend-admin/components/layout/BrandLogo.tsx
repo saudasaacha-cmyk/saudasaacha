@@ -32,8 +32,11 @@ export function BrandLogo({ href = "/dashboard", size = "md", showAdminBadge = t
   // Top-level brokers under super-admin pool have no parent admin, so
   // brand_name/logo_url come back null → platform default — same as
   // super-admin.
+  // EMPLOYEE included: the backend resolves their employer's brand into
+  // the same fields, so an admin's staff see the panel they were hired
+  // into rather than the platform's wordmark.
   const useTenantBrand =
-    (role === "ADMIN" || role === "BROKER") &&
+    (role === "ADMIN" || role === "BROKER" || role === "EMPLOYEE") &&
     (!!admin?.brand_name || !!admin?.logo_url);
   const tenantName = useTenantBrand ? admin?.brand_name?.trim() : null;
   const tenantLogo = useTenantBrand && admin?.logo_url
@@ -61,7 +64,11 @@ export function BrandLogo({ href = "/dashboard", size = "md", showAdminBadge = t
             label: isSubBroker ? "Sub-broker" : "Broker",
             cls: "bg-brand-500/15 font-bold text-brand-500",
           }
-        : { label: "Admin", cls: "bg-destructive/15 text-destructive" };
+        : role === "EMPLOYEE"
+          ? // Staff, not an admin — the chip said "Admin" to every
+            // employee, which is misleading on a shared screen.
+            { label: "Employee", cls: "bg-info/15 font-bold text-info" }
+          : { label: "Admin", cls: "bg-destructive/15 text-destructive" };
 
   // Logo block — tenant logo (img) when present, else the platform
   // sprout icon in a tinted tile.

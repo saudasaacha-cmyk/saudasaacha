@@ -30,6 +30,7 @@ import {
   Plug,
   Ruler,
   ShieldCheck,
+  User,
   UserCheck,
   Users,
   Crown,
@@ -58,6 +59,9 @@ export type AdminNavItem = {
   // (they stay visible to those roles) but must be grantable per-section to
   // employees. e.g. Accounts, Audit, Support, P&L Sharing.
   empPerm?: PermissionKey;
+  // Visible to EMPLOYEE only, with no permission needed — their own
+  // account page. Admin-tier actors manage theirs in Platform settings.
+  employeeOnly?: boolean;
 };
 
 export type AdminNavGroup = { title: string; items: AdminNavItem[] };
@@ -66,7 +70,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     title: "Overview",
     items: [
-      { href: "/dashboard", label: "Dashboard", icon: Home },
+      // Un-gated for admin-tier actors; an EMPLOYEE needs it granted, so
+      // staff hired for one job don't land on the pool's money figures.
+      { href: "/dashboard", label: "Dashboard", icon: Home, empPerm: "dashboard" },
       { href: "/accounts-dashboard", label: "Accounts", icon: BarChart3, empPerm: "accounts" },
     ],
   },
@@ -167,6 +173,11 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/support", label: "Support", icon: MessageCircle, empPerm: "support", brokerPerm: "support" },
       { href: "/audit", label: "Audit logs", icon: History, empPerm: "audit" },
       { href: "/admin-actions", label: "Admin Actions", icon: History, empPerm: "audit" },
+      // Employees can't reach Platform settings (it has no empPerm), so
+      // this is where they change their own email and password. Always
+      // visible to them — it is also the landing page for an employee
+      // granted nothing else yet.
+      { href: "/my-account", label: "My account", icon: User, employeeOnly: true },
     ],
   },
 ];
@@ -182,7 +193,9 @@ export function filterAdminNav(
       // un-gated admin convenience (Platform settings, Audit, P&L Sharing, etc.)
       // and every super/admin-tier item stays hidden.
       if (admin?.role === "EMPLOYEE") {
-        if (it.href === "/dashboard") return true;
+        // Their own account page needs no grant; everything else does,
+        // Dashboard included (it used to be force-shown here).
+        if (it.employeeOnly) return true;
         // Employees are gated at the GRANULAR level: prefer the item's
         // employee perm (empPerm — e.g. "positions") over the shared umbrella
         // perm (perm — e.g. "trading_view") so one nav page can be granted
@@ -198,6 +211,8 @@ export function filterAdminNav(
       if (admin?.role === "BROKER" && it.brokerPerm && !it.perm) {
         return canSee(admin, it.brokerPerm);
       }
+      // Employee-only items are hidden from every other role.
+      if (it.employeeOnly) return false;
       if (it.hideForSuperAdmin && isSuperAdmin(admin)) return false;
       if (it.superOrAdmin) return isSuperAdmin(admin) || admin?.role === "ADMIN";
       if (it.adminTierOnly) return admin?.role === "ADMIN";
@@ -216,6 +231,22 @@ export function filterAdminNav(
 export function useAdminNav(): AdminNavGroup[] {
   const admin = useAdminAuthStore((s) => s.admin);
   return filterAdminNav(admin);
+}
+
+/**
+ * Where to send an actor who landed on a page they can't see.
+ *
+ * The app sends everyone to /dashboard after sign-in, but an employee
+ * without the Dashboard section has no business there — they go to the
+ * first section they DO hold instead. Returns null only if the nav came
+ * back empty, which can't happen for an employee (their account page is
+ * always listed).
+ */
+export function firstVisibleHref(groups: AdminNavGroup[]): string | null {
+  for (const g of groups) {
+    if (g.items.length) return g.items[0].href;
+  }
+  return null;
 }
 
 /** Resolve label for an item given the current admin role. */
