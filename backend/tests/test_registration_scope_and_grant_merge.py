@@ -72,3 +72,37 @@ def test_the_registration_write_targets_the_pool_owner():
     assert "await effective_scope_actor(admin)" in src
     assert "admin.registration_enabled" not in src
     assert "await admin.save()" not in src
+
+
+def test_a_broker_is_refused_the_registration_switch():
+    """Signup resolves the owner from `assigned_admin_id`, which is an
+    ADMIN or the super admin — never a broker. The switch used to accept
+    a broker's click and report success while signups stayed open."""
+    import types
+
+    import pytest
+
+    from app.api.v1.admin.dashboard import _assert_owns_registration
+    from app.models.user import UserRole
+
+    with pytest.raises(Exception) as exc:
+        _assert_owns_registration(types.SimpleNamespace(role=UserRole.BROKER))
+    assert getattr(exc.value, "status_code", None) == 403
+
+    # The roles that DO own a /register flow pass straight through.
+    for role in (UserRole.ADMIN, UserRole.SUPER_ADMIN):
+        _assert_owns_registration(types.SimpleNamespace(role=role))
+
+
+def test_the_broker_check_runs_on_the_resolved_actor():
+    """An EMPLOYEE of a broker must be refused too — the check has to sit
+    after `effective_scope_actor`, not on the caller."""
+    import inspect
+
+    from app.api.v1.admin import dashboard
+
+    for fn in (dashboard.get_registration_status, dashboard.set_registration_status):
+        src = inspect.getsource(fn)
+        i_resolve = src.index("effective_scope_actor(admin)")
+        i_check = src.index("_assert_owns_registration(actor)")
+        assert i_resolve < i_check, fn.__name__

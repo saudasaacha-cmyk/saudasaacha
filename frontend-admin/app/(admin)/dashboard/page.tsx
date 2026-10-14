@@ -241,8 +241,17 @@ export default function AdminDashboardPage() {
       )}
 
       {/* Website-registration toggle — the admin (their ?ref= link) or the
-          super-admin (the platform pool) turns their own signups on/off. */}
-      <RegistrationToggleCard isSuper={admin?.role === "SUPER_ADMIN"} />
+          super-admin (the platform pool) turns their own signups on/off.
+          Hidden from BROKERs: signup resolves the switch from the
+          registering user's `assigned_admin_id`, so a broker's row is
+          never read. The card used to accept the click and report
+          success while signups stayed open. A broker's clients register
+          through their admin's link; closing that is the admin's call,
+          not theirs. (An EMPLOYEE is fine — the backend resolves them to
+          the admin whose row this actually is.) */}
+      {admin?.role !== "BROKER" && (
+        <RegistrationToggleCard isSuper={admin?.role === "SUPER_ADMIN"} />
+      )}
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

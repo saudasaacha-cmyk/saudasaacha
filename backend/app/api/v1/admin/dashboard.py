@@ -58,6 +58,26 @@ class _RegistrationToggle(BaseModel):
     enabled: bool
 
 
+def _assert_owns_registration(actor) -> None:
+    """A BROKER owns no /register flow, so the switch has nothing to act on.
+
+    Signup resolves the owner from the registering user's
+    `assigned_admin_id` (`app/api/v1/user/auth.py`), which is an ADMIN or
+    the super admin — never a broker. Writing a broker's row persisted a
+    flag nothing reads while the UI reported success, so refuse plainly
+    rather than accept and do nothing. The UI hides the card too; this is
+    the half that holds when someone calls the API directly.
+    """
+    if actor.role == UserRole.BROKER:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Registration is controlled by the admin whose link your "
+                "clients sign up through, not per broker."
+            ),
+        )
+
+
 @router.get("/registration-status", response_model=APIResponse[dict])
 async def get_registration_status(admin: CurrentAdmin):
     _assert_dashboard_access(admin)
@@ -66,6 +86,7 @@ async def get_registration_status(admin: CurrentAdmin):
     # scopes to. Reading the employee's own row reported the default True
     # whatever the admin had actually set.
     actor = await effective_scope_actor(admin)
+    _assert_owns_registration(actor)
     return APIResponse(data={"enabled": bool(getattr(actor, "registration_enabled", True))})
 
 
@@ -76,6 +97,7 @@ async def set_registration_status(payload: _RegistrationToggle, admin: CurrentAd
     # itself persisted a dead flag and left the admin's /register open while
     # the UI reported success.
     actor = await effective_scope_actor(admin)
+    _assert_owns_registration(actor)
     actor.registration_enabled = bool(payload.enabled)
     await actor.save()
     return APIResponse(

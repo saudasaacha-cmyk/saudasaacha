@@ -25,6 +25,9 @@ export function AdminBrandingChrome() {
   const hostBrand = useHostBranding();
   const role = admin?.role;
   const userCode = (admin?.user_code ?? "").trim();
+  // For a BROKER or EMPLOYEE this is their EMPLOYER's domain — the
+  // backend resolves it through the same parent hop as the brand name.
+  const tenantDomain = (admin?.custom_domain ?? "").trim().toLowerCase();
 
   // SUPER_ADMIN never gets tenant chrome — always platform default, even
   // when they are working on a tenant's host.
@@ -140,13 +143,23 @@ export function AdminBrandingChrome() {
       // and iconed for the tenant rather than "MP Admin".
       const host = window.location.hostname.toLowerCase();
       // `?u=` keys off `/branding/by-code`, which resolves ADMIN rows
-      // only — a broker's or employee's own code 404s there and would
-      // cost them the working `?d=` they get on their employer's host.
+      // only — a broker's or employee's own code 404s there.
+      //
+      // For them the auth payload already carries their EMPLOYER's
+      // `custom_domain`, so `?d=` works on any host, including the
+      // platform's own. Without this a broker or employee signing in at
+      // admin.sachchasauda.com installed a home-screen app named for the
+      // platform while their sidebar, tab and favicon all said the
+      // tenant — the one surface that stayed wrong after the rest was
+      // fixed. Falls through to the browser's host only when the payload
+      // has no domain (an admin who never connected one).
+      const brandedHost =
+        tenantDomain || (hostBrand.brand_name || hostBrand.logo_url ? host : "");
       const desired =
         role === "ADMIN" && userCode
           ? `/manifest.webmanifest?u=${encodeURIComponent(userCode)}`
-          : !isSuper && (hostBrand.brand_name || hostBrand.logo_url) && host
-            ? `/manifest.webmanifest?d=${encodeURIComponent(host)}`
+          : !isSuper && brandedHost
+            ? `/manifest.webmanifest?d=${encodeURIComponent(brandedHost)}`
             : "/manifest.webmanifest";
       if (manifestEl.getAttribute("href") !== desired) {
         manifestEl.setAttribute("href", desired);
@@ -170,6 +183,7 @@ export function AdminBrandingChrome() {
     role,
     isSuper,
     userCode,
+    tenantDomain,
     hostBrand.brand_name,
     hostBrand.logo_url,
   ]);
