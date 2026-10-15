@@ -11,17 +11,28 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-# Everything below runs as the app user, whoever typed the command.
-# Deploying as root wrote 388 root-owned files into frontend-user/.next
-# and then died on `pm2 reload` — root's PM2 daemon has no processes, so
-# the reload reported "Process or Namespace not found", `set -e` killed
-# the script, and the whole admin section silently never ran. The same
-# trap as the root-owned .git objects: build artefacts must belong to the
-# user that serves them.
+# This script is run by root (GitHub Actions over SSH) but the app is
+# served by `sauda`, and the two halves of the work need different
+# accounts:
+#
+#   • systemctl / nginx need root, which root already has — `sauda` has
+#     no sudo rights for them on this host, only for the two branding
+#     scripts.
+#   • npm build and PM2 need `sauda`. A root deploy wrote 388 root-owned
+#     files into frontend-user/.next and then died on `pm2 reload`: root's
+#     PM2 daemon owns no processes, so it answered "Process or Namespace
+#     not found", `set -e` took the script down, and the entire admin
+#     frontend section silently never ran — a deploy that printed a
+#     successful build and shipped nothing.
+#
+# So: `as_app` for anything that writes into this tree or touches PM2.
+# Same trap as the root-owned .git objects — whatever root writes here is
+# something `sauda` can no longer rewrite.
 APP_USER="sauda"
-if [ "$(id -un)" != "$APP_USER" ]; then
-  echo "  re-executing as $APP_USER (was $(id -un))…"
-  exec sudo -u "$APP_USER" -H FORCE_FULL="${FORCE_FULL:-}" bash "$0" "$@"
+if [ "$(id -un)" = "$APP_USER" ]; then
+  as_app() { "$@"; }
+else
+  as_app() { sudo -u "$APP_USER" -H "$@"; }
 fi
 
 REPO_DIR="/opt/saudasaacha"
@@ -38,7 +49,7 @@ echo "════════════════════════�
 
 # ── 1) Pull latest ─────────────────────────────────────────────────
 PREV_SHA=$(git rev-parse HEAD)
-git fetch --quiet origin main
+as_app git fetch --quiet origin main
 NEW_SHA=$(git rev-parse origin/main)
 
 if [ "$PREV_SHA" = "$NEW_SHA" ] && [ "${FORCE_FULL:-0}" != "1" ]; then
@@ -48,7 +59,7 @@ fi
 
 # Hard reset to origin/main. .env and other gitignored files survive
 # because they're not tracked.
-git reset --hard origin/main
+as_app git reset --hard origin/main
 echo "✓ Pulled $PREV_SHA → $NEW_SHA"
 
 # Detect what changed (forced full rebuild if FORCE_FULL=1)
@@ -94,10 +105,10 @@ if [ "$backend_changed" = "1" ]; then
     # $VENV/bin/pip does not exist and neither does `python -m pip`. Use uv
     # when it is there, and fall back to pip for a venv made the old way.
     if command -v uv >/dev/null 2>&1; then
-      uv pip install --python "$VENV/bin/python" -q -r "$BACKEND_DIR/requirements.txt"
+      as_app uv pip install --python "$VENV/bin/python" -q -r "$BACKEND_DIR/requirements.txt"
     else
-      "$VENV/bin/python" -m pip install --quiet --upgrade pip
-      "$VENV/bin/python" -m pip install --quiet -r "$BACKEND_DIR/requirements.txt"
+      as_app "$VENV/bin/python" -m pip install --quiet --upgrade pip
+      as_app "$VENV/bin/python" -m pip install --quiet -r "$BACKEND_DIR/requirements.txt"
     fi
     # Deps (or the systemd unit / env) changed → full restart so the new
     # packages + ExecStart/Environment are actually loaded. A reload won't
@@ -123,19 +134,19 @@ if [ "$user_changed" = "1" ]; then
   cd "$USER_DIR"
   if [ "$user_deps_changed" = "1" ]; then
     echo "  npm ci…"
-    npm ci --no-audit --no-fund
+    as_app npm ci --no-audit --no-fund
   fi
   echo "  building…"
   # Build beside the live .next, then swap. Deleting .next first left the
   # running server serving a folder that no longer existed for the whole
   # build — every asset 404'd and the site rendered unstyled.
-  rm -rf .next-build .next-old
-  NEXT_DIST_DIR=.next-build npm run build
-  mv .next .next-old 2>/dev/null || true
-  mv .next-build .next
+  as_app rm -rf .next-build .next-old
+  as_app env NEXT_DIST_DIR=.next-build npm run build
+  as_app mv .next .next-old 2>/dev/null || true
+  as_app mv .next-build .next
   echo "  reloading PM2 saudasaacha-user…"
-  pm2 reload saudasaacha-user --update-env
-  rm -rf .next-old
+  as_app pm2 reload saudasaacha-user --update-env
+  as_app rm -rf .next-old
 fi
 
 # ── 4) Frontend admin ──────────────────────────────────────────────
@@ -144,19 +155,19 @@ if [ "$admin_changed" = "1" ]; then
   cd "$ADMIN_DIR"
   if [ "$admin_deps_changed" = "1" ]; then
     echo "  npm ci…"
-    npm ci --no-audit --no-fund
+    as_app npm ci --no-audit --no-fund
   fi
   echo "  building…"
   # Build beside the live .next, then swap. Deleting .next first left the
   # running server serving a folder that no longer existed for the whole
   # build — every asset 404'd and the site rendered unstyled.
-  rm -rf .next-build .next-old
-  NEXT_DIST_DIR=.next-build npm run build
-  mv .next .next-old 2>/dev/null || true
-  mv .next-build .next
+  as_app rm -rf .next-build .next-old
+  as_app env NEXT_DIST_DIR=.next-build npm run build
+  as_app mv .next .next-old 2>/dev/null || true
+  as_app mv .next-build .next
   echo "  reloading PM2 saudasaacha-admin…"
-  pm2 reload saudasaacha-admin --update-env
-  rm -rf .next-old
+  as_app pm2 reload saudasaacha-admin --update-env
+  as_app rm -rf .next-old
 fi
 
 # ── 5) Nginx config sync (if tracked nginx config changed) ─────────
