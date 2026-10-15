@@ -11,6 +11,19 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Everything below runs as the app user, whoever typed the command.
+# Deploying as root wrote 388 root-owned files into frontend-user/.next
+# and then died on `pm2 reload` — root's PM2 daemon has no processes, so
+# the reload reported "Process or Namespace not found", `set -e` killed
+# the script, and the whole admin section silently never ran. The same
+# trap as the root-owned .git objects: build artefacts must belong to the
+# user that serves them.
+APP_USER="sauda"
+if [ "$(id -un)" != "$APP_USER" ]; then
+  echo "  re-executing as $APP_USER (was $(id -un))…"
+  exec sudo -u "$APP_USER" -H FORCE_FULL="${FORCE_FULL:-}" bash "$0" "$@"
+fi
+
 REPO_DIR="/opt/saudasaacha"
 BACKEND_DIR="$REPO_DIR/backend"
 USER_DIR="$REPO_DIR/frontend-user"
