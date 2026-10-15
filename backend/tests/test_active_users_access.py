@@ -18,13 +18,16 @@ the leak is in a default argument — neither needs a database to prove.
 from __future__ import annotations
 
 import inspect
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.v1.admin import users as admin_users
+from app.api.v1.admin.users import list_active_users
 from app.models.user import UserRole
 from app.services.active_users_service import _ADMIN_TIER_ROLES, _query, collect_rows
+from app.utils.time_utils import UTC
 
 _Q = {"q": None, "include_demo": True, "scope": None}
 
@@ -47,9 +50,7 @@ def test_every_call_site_still_decides_contacts_for_itself():
     """A masking default is not a licence to stop resolving the grant: the
     page and its download must agree with `user_contacts`, not with the
     default."""
-    assert "reveal_contacts" in inspect.getsource(
-        admin_users._resolve_active_users_access
-    )
+    assert "reveal_contacts" in inspect.getsource(admin_users._resolve_active_users_access)
     for fn in (admin_users.list_active_users, admin_users.export_active_users):
         assert "**access" in inspect.getsource(fn)
 
@@ -63,9 +64,7 @@ def test_a_role_filter_cannot_widen_a_scoped_admins_roster():
 
 
 def test_the_exclusion_holds_with_no_role_asked_for():
-    assert _query(**_Q, role=None, clients_only=True)["role"] == {
-        "$nin": _ADMIN_TIER_ROLES
-    }
+    assert _query(**_Q, role=None, clients_only=True)["role"] == {"$nin": _ADMIN_TIER_ROLES}
 
 
 def test_the_platform_view_filters_on_exactly_what_was_asked():
@@ -79,10 +78,7 @@ def test_an_unknown_role_is_a_422_not_an_empty_page():
     """Typed as the enum so FastAPI rejects `?role=garbage` at the door —
     a free-form string returned zero rows and looked like an answer."""
     for fn in (admin_users.list_active_users, admin_users.export_active_users):
-        assert (
-            str(inspect.signature(fn).parameters["role"].annotation)
-            == "UserRole | None"
-        )
+        assert str(inspect.signature(fn).parameters["role"].annotation) == "UserRole | None"
 
     # And that annotation really does mean 422 rather than a coerced value.
     app = FastAPI()
@@ -107,11 +103,54 @@ def test_the_page_is_told_whether_contacts_are_real():
     also requires the PARENT admin to still hold the grant, so an
     employee whose own flag outlived their admin's revocation would
     otherwise be told the column is readable over masked rows."""
-    import inspect
-
-    from app.api.v1.admin.users import list_active_users
-
     src = inspect.getsource(list_active_users)
     assert '"contacts_revealed": bool(access["reveal_contacts"])' in src
     # Same source of truth the rows themselves are masked from.
     assert "reveal_contacts" in src
+
+
+def test_the_24h_filter_is_about_login_not_activity():
+    """Worth pinning because the column is easy to misread: this filters
+    on `last_login_at`, so a trader who signed in on Monday and kept the
+    tab open is active today and NOT in this list. The UI label says
+    "Logged in" for that reason."""
+    cutoff = datetime(2026, 10, 15, 0, 0, tzinfo=UTC)
+    out = _query(
+        q=None,
+        role=None,
+        include_demo=False,
+        scope=None,
+        clients_only=False,
+        logged_in_since=cutoff,
+    )
+    assert out["last_login_at"] == {"$gte": cutoff}
+    # Never-logged-in rows carry no `last_login_at`, and `$gte` drops
+    # them — "never signed in" is not "signed in recently".
+    assert "$exists" not in out["last_login_at"]
+
+    # Off by default: the roster is every ACTIVE account unless asked.
+    plain = _query(
+        q=None,
+        role=None,
+        include_demo=False,
+        scope=None,
+        clients_only=False,
+    )
+    assert "last_login_at" not in plain
+
+
+def test_the_recency_clause_survives_a_scope_that_is_an_or():
+    """It is a plain key, so it must sit beside the scope rather than
+    inside the `$and` — and the scope's `$or` must still be there. This
+    is the merge the whole dedupe exists for."""
+    scope = {"$or": [{"assigned_admin_id": "A1"}, {"broker_ancestry": "B1"}]}
+    out = _query(
+        q=None,
+        role=None,
+        include_demo=False,
+        scope=scope,
+        clients_only=True,
+        logged_in_since=datetime(2026, 10, 15, tzinfo=UTC),
+    )
+    assert "last_login_at" in out
+    assert any("$or" in c for c in out.get("$and", [])), out

@@ -494,6 +494,12 @@ async def list_active_users(
     role: UserRole | None = None,
     online_only: bool = Query(default=False),
     include_demo: bool = Query(default=False),
+    logged_in_hours: int | None = Query(
+        default=None,
+        ge=1,
+        le=720,
+        description="Only accounts whose LAST LOGIN is within this many hours.",
+    ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
 ):
@@ -513,7 +519,12 @@ async def list_active_users(
     from app.services import active_users_service, presence_service
 
     rows = await active_users_service.collect_rows(
-        q=q, role=role, online_only=online_only, include_demo=include_demo, **access
+        q=q,
+        role=role,
+        online_only=online_only,
+        include_demo=include_demo,
+        logged_in_hours=logged_in_hours,
+        **access,
     )
     total = len(rows)
     # Sliced in Python, not Mongo: the sort key is presence, which lives in
@@ -553,6 +564,12 @@ async def export_active_users(
     role: UserRole | None = None,
     online_only: bool = Query(default=False),
     include_demo: bool = Query(default=False),
+    logged_in_hours: int | None = Query(
+        default=None,
+        ge=1,
+        le=720,
+        description="Only accounts whose LAST LOGIN is within this many hours.",
+    ),
     format: str = Query(default="xlsx", pattern="^(xlsx|pdf)$"),
 ):
     """The same roster as a file. Carries the filters the page was showing
@@ -563,7 +580,12 @@ async def export_active_users(
     from app.services import active_users_service
 
     rows = await active_users_service.collect_rows(
-        q=q, role=role, online_only=online_only, include_demo=include_demo, **access
+        q=q,
+        role=role,
+        online_only=online_only,
+        include_demo=include_demo,
+        logged_in_hours=logged_in_hours,
+        **access,
     )
     if format == "pdf":
         data = active_users_service.to_pdf(rows)

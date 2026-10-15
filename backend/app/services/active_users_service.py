@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 from typing import Any
 
@@ -40,7 +40,7 @@ from openpyxl.utils import get_column_letter
 from app.core.dependencies import merge_scope
 from app.models.user import User, UserRole, UserStatus
 from app.services import presence_service, user_service
-from app.utils.time_utils import UTC, to_ist
+from app.utils.time_utils import UTC, now_utc, to_ist
 
 COLUMNS: list[tuple[str, str]] = [
     ("user_code", "Code"),
@@ -128,8 +128,18 @@ def _query(
     scope: dict[str, Any] | None,
     clients_only: bool,
     online_ids: list[PydanticObjectId] | None = None,
+    logged_in_since: datetime | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {"status": UserStatus.ACTIVE.value}
+    if logged_in_since is not None:
+        # Recent LOGIN, which is not the same question as recent activity:
+        # someone who signed in on Monday and has kept the tab open since
+        # is trading today and will not appear here. The column header says
+        # "logged in" rather than "active" so the row list cannot be read
+        # as the stronger claim. `$gte` also drops rows with no
+        # `last_login_at` at all, which is what we want — never signed in
+        # is not recently signed in.
+        out["last_login_at"] = {"$gte": logged_in_since}
     # Both clauses land on `role`, where Mongo ANDs them: a caller-supplied
     # role NARROWS this roster and can never widen it. Letting it replace
     # the exclusion handed a granted ADMIN asking `?role=BROKER` exactly
@@ -176,6 +186,7 @@ async def collect_rows(
     scope: dict[str, Any] | None = None,
     clients_only: bool = False,
     reveal_contacts: bool = False,
+    logged_in_hours: int | None = None,
 ) -> list[dict[str, Any]]:
     """One row per ACTIVE account, online sessions first.
 
@@ -209,6 +220,11 @@ async def collect_rows(
             scope=scope,
             clients_only=clients_only,
             online_ids=online_ids,
+            logged_in_since=(
+                now_utc() - timedelta(hours=logged_in_hours)
+                if logged_in_hours
+                else None
+            ),
         )
     ).to_list()
     if not users:

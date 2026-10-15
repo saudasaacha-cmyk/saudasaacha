@@ -81,6 +81,10 @@ export default function ActiveUsersPage() {
   const [role, setRole] = useState("");
   const [onlineOnly, setOnlineOnly] = useState(false);
   const [includeDemo, setIncludeDemo] = useState(false);
+  // Hours, not a boolean: the number belongs next to the label that
+  // states it, so changing "24h" to "48h" is a one-word edit here and
+  // not a new API flag.
+  const [loggedInHours, setLoggedInHours] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState<"xlsx" | "pdf" | null>(null);
   const pageSize = 50;
@@ -90,10 +94,15 @@ export default function ActiveUsersPage() {
     role: role || undefined,
     online_only: onlineOnly,
     include_demo: includeDemo,
+    ...(loggedInHours ? { logged_in_hours: loggedInHours } : {}),
   };
 
   const { data, isFetching } = useQuery({
-    queryKey: ["admin", "active-users", { q, role, onlineOnly, includeDemo, page }],
+    queryKey: [
+      "admin",
+      "active-users",
+      { q, role, onlineOnly, includeDemo, loggedInHours, page },
+    ],
     queryFn: () => UsersAPI.active({ ...filters, page, page_size: pageSize }),
     enabled: allowed,
     // The online column is the live half of this page; the roster half
@@ -350,6 +359,21 @@ export default function ActiveUsersPage() {
             }}
           />
           Online only
+        </label>
+        {/* "Logged in", not "active": someone who signed in on Monday and
+            kept the tab open is trading today and is NOT in this filter.
+            The label has to say which question it answers. */}
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={loggedInHours === 24}
+            onChange={(e) => {
+              setPage(1);
+              setLoggedInHours(e.target.checked ? 24 : null);
+            }}
+          />
+          Logged in · last 24h
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input

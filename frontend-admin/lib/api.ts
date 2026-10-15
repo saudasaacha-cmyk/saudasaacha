@@ -316,6 +316,8 @@ export type ActiveUsersQuery = {
   role?: string;
   online_only?: boolean;
   include_demo?: boolean;
+  /** Only accounts whose LAST LOGIN is within this many hours. */
+  logged_in_hours?: number;
 };
 
 export const UsersAPI = {
@@ -350,6 +352,7 @@ export const UsersAPI = {
     owner: string;
     format: "xlsx" | "pdf";
     include_demo?: boolean;
+    logged_in_hours?: number;
     include_closed?: boolean;
   }) => {
     const res = await api.get("/admin/users/export", { params, responseType: "blob" });
