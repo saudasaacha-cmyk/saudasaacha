@@ -38,6 +38,7 @@ from typing import Any
 
 from beanie import PydanticObjectId
 
+from app.core.dependencies import _pool_clause, merge_scope
 from app.core.redis_client import publish_batch
 from app.models.notification import (
     AdminNotification,
@@ -215,27 +216,67 @@ async def create_for_admins(
 
 # ── Payment details changed ──────────────────────────────────────────
 async def notify_payment_details_changed(actor, what: str) -> int:
-    """Tell the actor's OWN users that their deposit details changed.
+    """Tell everyone who could be shown the actor's deposit details that
+    they changed.
 
-    Scoped the same way the bank rows themselves are owned
-    (`payin_out._owner_filter`): a sub-admin's change reaches that
-    sub-admin's clients, a broker's reaches theirs, and the super
-    admin's reaches the direct pool. Deliberately NOT the whole subtree
-    — a broker's client deposits into the broker's account, so the
-    admin above them changing theirs is not news the client can act on,
-    and money alerts that don't apply are how people learn to ignore
-    them.
+    Scoped to the actor's POOL, because that is the set the resolver can
+    reach. `user/wallet.py::company_banks` (and `crypto_config_service.
+    resolve_for_user`) picks the FIRST owner with rows while walking
+    immediate broker → every parent broker in `broker_ancestry`, tip to
+    root → assigned admin → platform default. So "whose bank does this
+    user see" is an UPWARD walk, and the notice has to be the mirror of
+    it: every user BELOW the actor is a candidate.
+
+    The old version used `assigned_broker_id == actor.id` for BROKER and
+    argued the subtree was deliberately excluded — "a broker's client
+    deposits into the broker's account". That holds only for a broker's
+    DIRECT clients. A sub-broker who never authored a bank row inherits
+    this broker's, so its clients deposit into THIS account and were
+    never told it changed. Same hole one tier up: a broker chain with no
+    rows anywhere falls through to the admin, so the ADMIN arm needs the
+    transferred-broker subtree too — which is exactly `_pool_clause`.
+
+    The narrow behaviour was right about one thing: alerts that don't
+    apply train people to ignore them. The trade is not symmetric here,
+    though. Over-notifying costs a shrug; under-notifying means someone
+    wires money to a closed account, so the superset wins.
+
+    EMPLOYEE is the one role where `_pool_clause` is NOT a superset, so it
+    gets BOTH arms. `_pool_clause` resolves an employee to its parent admin,
+    which is right for the parent's clients — but `POST /admin/users` picks
+    the ownership chain with `if SUPER_ADMIN / elif BROKER / else: # ADMIN`,
+    and an employee actor lands in that else, stamping
+    `assigned_admin_id = <employee>.id` (users.py:941). Those orphan clients
+    really do read the employee's own rows: `crypto_config_service` has no
+    EMPLOYEE arm either, so an employee's crypto-config write is stored
+    under `owner_admin_id = <employee>.id` and `resolve_for_user` matches it
+    by that exact id. Resolving to the parent alone would have left them
+    looking at a stale deposit address with nobody told — the precise
+    failure this function exists to prevent, for the one role that cannot
+    see it coming.
 
     Returns how many users were notified. Best-effort throughout: a
     failure here must never fail the bank edit that triggered it.
     """
-    query: dict = {"role": UserRole.CLIENT.value, "status": UserStatus.ACTIVE.value}
-    if actor.role == UserRole.SUPER_ADMIN:
-        query["assigned_admin_id"] = None
-    elif actor.role == UserRole.BROKER:
-        query["assigned_broker_id"] = actor.id
-    else:
-        query["assigned_admin_id"] = actor.id
+    # ponytail: pool-wide superset, not the exact resolver result. Pinning
+    # it would mean replaying the per-user cascade (one query per user per
+    # tier) to find whose first-owner-with-rows is actually the actor. If
+    # the noise ever becomes the complaint, the cheap 90% is to drop any
+    # sub-broker subtree that owns its own CompanyBankAccount rows.
+    #
+    # merge_scope, not query.update: the ADMIN clause is an `$or` and so is
+    # nothing else here today — but a dropped scope clause raises nothing,
+    # it just widens the blast radius of a money alert.
+    pool = await _pool_clause(actor)
+    if actor.role == UserRole.EMPLOYEE:
+        # Union, not replace: the parent's clients AND the employee's own
+        # orphans. See the EMPLOYEE paragraph above — dropping either half
+        # means someone sends money to an address nobody told them changed.
+        pool = {"$or": [pool, {"assigned_admin_id": actor.id}]}
+    query: dict = merge_scope(
+        {"role": UserRole.CLIENT.value, "status": UserStatus.ACTIVE.value},
+        pool,
+    )
 
     recipients = [u.id for u in await User.find(query).to_list()]
     if not recipients:

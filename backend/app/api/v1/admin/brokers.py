@@ -140,7 +140,16 @@ async def list_brokers(
 ):
     # Permission gate inline. Super-admin always passes; admin needs
     # admin_permissions.brokers; broker needs broker_permissions.sub_brokers >= VIEW.
-    if actor.role == UserRole.ADMIN:
+    #
+    # EMPLOYEE belongs on the ADMIN arm, exactly as `require_perm` treats it
+    # (`dependencies.py:_admin_bool_perm`). It was missing here, and until
+    # `list_brokers_for` learned `effective_scope_actor` an employee fell
+    # through this gate UNGATED and was saved only by the service returning
+    # `[], 0`. Teaching the service to resolve the parent admin removed that
+    # accidental backstop, which would have let any employee read their
+    # admin's brokers — email, mobile, permissions and P&L/brokerage share
+    # percentages — without holding the `brokers` grant at all.
+    if actor.role in {UserRole.ADMIN, UserRole.EMPLOYEE}:
         if not (actor.admin_permissions and actor.admin_permissions.brokers):
             raise HTTPException(status_code=403, detail="Brokers permission not granted")
     elif actor.role == UserRole.BROKER:

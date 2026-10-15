@@ -224,26 +224,6 @@ async def effective_scope_actor(admin: User) -> User:
     return parent if parent is not None else admin
 
 
-def scoped_admin_filter(admin: User) -> dict:
-    """Mongo filter to scope a User-collection query to the actor's own pool.
-
-    Behavior per role:
-      - SUPER_ADMIN: users in platform-default pool (no assigned admin)
-      - ADMIN: users they own directly (admin's pool — automatically
-        includes broker descendants since broker creation propagates
-        ``assigned_admin_id = creating_admin.id`` down the chain)
-      - BROKER: every user with this broker's id anywhere in
-        ``broker_ancestry`` — covers the whole subtree (sub-brokers and
-        their clients) via a single multikey-index lookup.
-    """
-    if admin.role == UserRole.SUPER_ADMIN:
-        return {"assigned_admin_id": None}
-    if admin.role == UserRole.BROKER:
-        return {"broker_ancestry": admin.id}
-    # ADMIN (and any other admin-tier role added later) defaults here.
-    return {"assigned_admin_id": admin.id}
-
-
 async def _admin_pool_clause(admin_id: PydanticObjectId) -> dict:
     """The ASSIGNMENT half of an ADMIN-role actor's owned-user filter
     (no role / status conditions — callers add their own).
@@ -299,11 +279,13 @@ async def scoped_user_filter(admin: User) -> dict:
     """Async Mongo filter scoping a User query to the actor's owned pool,
     INCLUDING the broker subtree for ADMIN.
 
-    Differs from the synchronous :func:`scoped_admin_filter` (which, for
-    ADMIN, returns only the flat ``{assigned_admin_id: admin.id}`` and so
-    MISSES transferred-broker subtree clients). Use this in list / count
-    endpoints so the rows shown match the dashboard count produced by
-    :func:`scoped_user_ids`.
+    Do NOT hand-roll a flat ``{assigned_admin_id: admin.id}`` instead: a
+    BROKER transferred between admins keeps its descendants' old
+    ``assigned_admin_id``, so the flat form MISSES the whole subtree. That
+    was a real cross-tenant bug class; a sync helper that did exactly this
+    used to live above and was deleted because one `import` away it would
+    come back. Use this in list / count endpoints so the rows shown match
+    the dashboard count produced by :func:`scoped_user_ids`.
 
     Does NOT add a role filter — callers that want client-tier-only rows
     keep their own ``role`` condition (every current caller already does).
@@ -359,14 +341,16 @@ async def scoped_user_ids(
     for audit — the money moved is real and doesn't disappear with the user.
     """
     coll = User.get_motor_collection()
-    base = await _pool_clause(admin)
+    # Our own conditions go in FIRST, then the pool clause is merged on top:
+    # a `{**base, "role": ...}` spread lets the trailing literal win, so the
+    # day _pool_clause grows a `role`/`status` key the pool WIDENS silently.
     q: dict = {
-        **base,
         "role": {"$nin": _NON_CLIENT_ROLES},
         "is_demo": {"$ne": True},
     }
     if not include_closed:
         q["status"] = {"$ne": UserStatus.CLOSED.value}
+    merge_scope(q, await _pool_clause(admin))
     cursor = coll.find(q, {"_id": 1})
     return [doc["_id"] async for doc in cursor]
 
@@ -407,13 +391,14 @@ async def count_admin_pool_clients(admin_id: PydanticObjectId) -> int:
     clients, inflating the figure further.
     """
     coll = User.get_motor_collection()
-    clause = await _admin_pool_clause(admin_id)
     return await coll.count_documents(
-        {
-            **clause,
-            "role": {"$nin": _NON_CLIENT_ROLES},
-            "status": {"$ne": UserStatus.CLOSED.value},
-        }
+        merge_scope(
+            {
+                "role": {"$nin": _NON_CLIENT_ROLES},
+                "status": {"$ne": UserStatus.CLOSED.value},
+            },
+            await _admin_pool_clause(admin_id),
+        )
     )
 
 
@@ -427,13 +412,14 @@ async def count_admin_pool_brokers(admin_id: PydanticObjectId) -> int:
     them into one inflated number.
     """
     coll = User.get_motor_collection()
-    clause = await _admin_pool_clause(admin_id)
     return await coll.count_documents(
-        {
-            **clause,
-            "role": UserRole.BROKER.value,
-            "status": {"$ne": UserStatus.CLOSED.value},
-        }
+        merge_scope(
+            {
+                "role": UserRole.BROKER.value,
+                "status": {"$ne": UserStatus.CLOSED.value},
+            },
+            await _admin_pool_clause(admin_id),
+        )
     )
 
 
@@ -479,8 +465,19 @@ async def assert_user_in_scope(
         if admin.id not in (target.broker_ancestry or []):
             raise InsufficientPermissionsError("User not in your scope")
         return target
-    # ADMIN
-    if target.assigned_admin_id != admin.id:
+    # ADMIN — the same three-arm definition the LIST endpoints use.
+    #
+    # This was the last flat `assigned_admin_id` gate in the tree, and it
+    # made writes narrower than reads: a client reachable only through the
+    # broker arms — exactly the rows those arms exist for — appeared in the
+    # admin's own lists and then 403'd on every write. The bonus screen
+    # showed the grant and refused to cancel it; `reassign_user_to_broker`
+    # refused to move the user. Membership has to be asked the way the pool
+    # is defined, so it is asked HERE rather than copied a fifth time.
+    clause = await _admin_pool_clause(admin.id)
+    if not await User.get_motor_collection().count_documents(
+        merge_scope({"_id": target.id}, clause), limit=1
+    ):
         raise InsufficientPermissionsError("User not in your scope")
     return target
 

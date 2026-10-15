@@ -11,12 +11,17 @@ channel:
                      (position close, order fill, deposit submit/approve,
                      withdrawal submit/approve, KYC submit, etc.)
 
-Any message published on that channel is forwarded as-is to the browser,
+A message published on that channel is forwarded as-is to the browser,
 which then invalidates the right React Query cache and re-renders the
 affected admin page without anyone hitting F5.
 
-A single shared channel (rather than per-admin) keeps the publish path
-cheap — emitters fire one message no matter how many admins are watching.
+One shared channel keeps the publish path cheap — emitters fire one
+message no matter how many admins are watching — but it is NOT one
+audience. ``publish_admin_event`` stamps each payload with
+``recipient_admin_ids`` and the hub routes on it, so this socket only
+receives events for users this viewer actually owns. It used to receive
+every tenant's, including client names, user codes and deposit amounts,
+with the filtering left to the browser.
 """
 
 from __future__ import annotations
@@ -40,11 +45,62 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Roles that are allowed to attach to the admin WS. Mirrors the
-# `ADMIN_ROLES` set used by `get_current_admin`. Kept local so a future
-# scoped-broker view (only sees their users' events) can be added without
-# touching the HTTP dependency.
+# Roles that are allowed to attach to the admin WS. Narrower than the
+# `ADMIN_ROLES` set used by `get_current_admin`, which also admits
+# EMPLOYEE — an employee's admin pages therefore get no realtime at all
+# and fall back to polling. Pre-existing; left as-is because widening it
+# is a product call, and `_scope_keys` would need `effective_scope_actor`
+# to resolve an employee onto its parent admin's key.
 _ADMIN_ROLES = {UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.BROKER}
+
+
+async def _scope_keys(user: User) -> list[str]:
+    """Hub keys whose events this viewer is allowed to see.
+
+    The values must match what `publish_admin_event` writes into
+    `recipient_admin_ids`, i.e. what `push_service._compute_recipient_admin_ids`
+    returns — attach under anything else and the socket sits on a key
+    nothing is ever routed to, which looks like "the page stopped
+    refreshing" rather than like an error.
+
+      SUPER_ADMIN — its own id is only ever a recipient for
+                    platform-direct users, so it takes the hub's
+                    platform key and receives every scoped event too.
+      BROKER      — its own id, which appears in every descendant's
+                    `broker_ancestry`, so one key covers the whole
+                    subtree (sub-brokers and their clients).
+      ADMIN       — its own id PLUS the ids of the brokers in its pool.
+                    The second half is not redundant. `reassign_user` does
+                    re-stamp a transferred subtree's `assigned_admin_id`,
+                    but in a bare `try` with no transaction and only for
+                    rows that existed when that propagation was added — so
+                    a partially-failed or pre-dating subtree sits on the
+                    old owner's id. The REST scope reaches those rows
+                    through the broker arm; without the same arm here this
+                    socket would go quiet for a subtree the Users page
+                    still lists, and a quiet socket reads as "the page
+                    just stopped refreshing".
+    """
+    if user.role == UserRole.SUPER_ADMIN:
+        return [admin_event_hub.SUPER_KEY]
+    if user.role == UserRole.BROKER:
+        return [str(user.id)]
+    # Same query as `dependencies._admin_pool_clause` — that function
+    # returns a Mongo clause, and we need the ids themselves.
+    # ponytail: resolved once at connect, so a broker created or
+    # transferred mid-session reaches this admin only after the browser
+    # reconnects. Re-resolve on a `broker` admin event if that bites.
+    keys = [str(user.id)]
+    try:
+        coll = User.get_motor_collection()
+        async for doc in coll.find({"role": UserRole.BROKER.value, "assigned_admin_id": user.id}, {"_id": 1}):
+            keys.append(str(doc["_id"]))
+    except Exception as e:  # pragma: no cover
+        # Degrade to the admin's own id rather than refusing the socket:
+        # a thinner feed is recoverable by F5, a dropped connection isn't,
+        # and widening on error would hand over another tenant's events.
+        logger.warning("admin_ws_broker_keys_failed", extra={"error": str(e)})
+    return keys
 
 
 @router.websocket("/ws/admin")
@@ -117,7 +173,7 @@ async def admin_ws(
         await ws.close(code=4500)
         return
 
-    admin_event_hub.attach(ws)
+    admin_event_hub.attach(ws, await _scope_keys(user))
 
     async def heartbeat():
         try:

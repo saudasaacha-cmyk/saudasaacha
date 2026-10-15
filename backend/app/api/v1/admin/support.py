@@ -253,11 +253,13 @@ async def set_my_terms(
                 # Who RESOLVES their terms from the row we just saved? That
                 # is the actor's book, and `scoped_user_filter` is the one
                 # definition of it. The hand-rolled branch this replaced
-                # matched ADMIN on `assigned_admin_id` alone: moving a broker
-                # between admins rewrites ONLY the broker row, so that
-                # subtree's clients keep a stale `assigned_admin_id` and were
-                # skipped — still trading on terms never shown to them, with
-                # an accept marker on file saying they had agreed. Not a
+                # matched ADMIN on `assigned_admin_id` alone. The transfer
+                # does re-stamp that field down the subtree — it is there —
+                # but in a bare `try` with no transaction, and not at all for
+                # rows that predate it; and a sub-broker's clients are
+                # reachable only via `broker_ancestry`, the arm this lacked.
+                # Those clients kept trading on terms never shown to them,
+                # with an accept marker on file saying they had agreed. Not a
                 # defence you want in a dispute. The helper carries that arm.
                 #
                 # SUPER_ADMIN is deliberately narrower than the old sweep over

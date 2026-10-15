@@ -6,6 +6,7 @@ in [app.api.v1.admin.management](../api/v1/admin/management.py).
 
 from __future__ import annotations
 
+import logging
 import re
 from decimal import Decimal
 from typing import Any
@@ -23,6 +24,33 @@ from app.models.user import (
 from app.services import user_service
 from app.services.audit_service import log_event
 from app.utils.decimal_utils import to_decimal, to_decimal128
+
+logger = logging.getLogger(__name__)
+
+
+def _subtree_transfer_update(
+    new_admin_id: PydanticObjectId | None,
+    old_ancestry: list[PydanticObjectId],
+) -> dict[str, Any]:
+    """The ONE update document that re-homes a transferred broker's whole
+    subtree: new owner in, the brokers that used to sit ABOVE it out.
+
+    `old_ancestry` is the moved broker's ancestry as it was BEFORE the move
+    (root-first, excluding self). Those ids are a strict PREFIX of every
+    descendant's chain, so `$pull`-ing all of them at once leaves
+    `[moved_broker.id, ...deeper...]` — the moved broker is still their
+    ancestor, only its old parents are not. (A cycle is the only way one of
+    those ids could ALSO sit below the moved broker; the chain is a tree, and
+    scripts/backfill_broker_ancestry.py is what detects it when it isn't.)
+
+    `$set` and `$pull` name different fields, so Mongo takes them in one
+    update document and each descendant flips atomically — no window where a
+    client has the new owner but still the old ancestry.
+    """
+    update: dict[str, Any] = {"$set": {"assigned_admin_id": new_admin_id}}
+    if old_ancestry:
+        update["$pull"] = {"broker_ancestry": {"$in": list(old_ancestry)}}
+    return update
 
 
 async def _get_sub_admin_or_404(sub_admin_id: str | PydanticObjectId) -> User:
@@ -363,6 +391,9 @@ async def reassign_user(
     # source admin and shows cleanly under the new one. (A BROKER being moved
     # likewise becomes a top-level broker of the new admin; its own downline is
     # re-stamped below.)
+    # Captured BEFORE the clear: the descendants still carry these ids and
+    # they are what has to come out of them (see below).
+    old_ancestry = list(target.broker_ancestry or [])
     target.assigned_broker_id = None
     target.broker_ancestry = []
     # Stamp transfer telemetry so the destination dashboard can render
@@ -379,15 +410,39 @@ async def reassign_user(
     # Without this the destination admin's dashboard kept showing the
     # broker but none of its downline — operator-reported "super-admin
     # se transfer kiye gaye users admin ke cards me count nahi ho rahe".
+    #
+    # Re-stamping the owner is only HALF the move. The subtree also keeps the
+    # ids of the brokers that used to sit above `target`, and those brokers
+    # still belong to the OLD admin — so `_admin_pool_clause` arm 3
+    # (`broker_ancestry` in that admin's brokers) and the old parent broker's
+    # own `{"broker_ancestry": parent.id}` clause BOTH keep matching the whole
+    # subtree. Result before this `$pull`: every client under a transferred
+    # sub-broker showed up in two tenants at once — lists, dashboards, P&L,
+    # money transactions, exports — permanently, with nothing to expire it.
+    # Same primitive broker_management_service.delete_broker uses when it
+    # splices a broker out of the chain.
+    #
+    # No transaction is open here (`target.save()` has already committed on its
+    # own), so a failure mid-`update_many` leaves part of the subtree moved and
+    # part not. That is recoverable — re-running the transfer, or
+    # `python -m scripts.backfill_broker_ancestry`, converges — but it must be
+    # visible, which the old bare `except: pass` made impossible.
     if target.role == UserRole.BROKER:
         try:
             coll = User.get_motor_collection()
             await coll.update_many(
                 {"broker_ancestry": target.id},
-                {"$set": {"assigned_admin_id": new_oid}},
+                _subtree_transfer_update(new_oid, old_ancestry),
             )
         except Exception:
-            pass
+            logger.exception(
+                "broker %s transferred to admin %s but re-homing its subtree failed "
+                "(old ancestry %s); the subtree may be split across both tenants until "
+                "this is re-run or scripts.backfill_broker_ancestry repairs it",
+                target.id,
+                new_oid,
+                [str(x) for x in old_ancestry],
+            )
 
     # Cache-bust the per-user netting + risk caches — the resolver reads
     # `assigned_admin_id` LIVE to pick the right sub-admin / super-admin

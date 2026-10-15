@@ -26,6 +26,7 @@ from typing import Any
 
 from beanie import PydanticObjectId
 
+from app.core.dependencies import scoped_user_ids
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -77,10 +78,36 @@ def _realised_inr(p: Position, fallback_usd_inr: Decimal) -> Decimal:
     return raw * rate
 
 
-async def _sub_admin_user_ids(sub_admin_id: PydanticObjectId) -> list[PydanticObjectId]:
-    coll = User.get_motor_collection()
-    cursor = coll.find({"assigned_admin_id": sub_admin_id}, {"_id": 1})
-    return [doc["_id"] async for doc in cursor]
+async def _sub_admin_user_ids(sa: User) -> list[PydanticObjectId]:
+    """The clients whose realized P&L this sub-admin gets paid on.
+
+    This was a flat ``{assigned_admin_id: sa.id}`` find() — a private, strictly
+    narrower definition of an admin's book than the ``_admin_pool_clause`` that
+    every other money view resolves through (that stamp, OR under a broker of
+    theirs via ``assigned_broker_id`` / ``broker_ancestry``). A settlement that
+    disagrees with the dashboard about whose clients these are is wrong
+    whichever way it leans, and this one leaned short on the payout.
+
+    The two diverge whenever a BROKER changes admins and the subtree re-stamp
+    in ``admin_management_service._subtree_transfer_update`` didn't fully land:
+    it runs with no transaction open, so a mid-``update_many`` failure leaves
+    part of the subtree on the old owner, and it only reaches rows that
+    actually carry the broker in ``broker_ancestry`` — the drift
+    ``scripts/backfill_broker_ancestry.py`` exists to repair. Those clients go
+    on trading under this admin's broker while their realized P&L lands in no
+    one's settlement. Nothing raises; the number is just short.
+
+    The flat query also carried none of the ``_NON_CLIENT_ROLES`` / ``is_demo``
+    / ``status`` conditions every other money view has, so the admin's own
+    BROKER and EMPLOYEE logins and its demo accounts counted as settled users
+    (``user_count`` on the row). Zero P&L today — a wrong payout the day
+    anyone trades a demo.
+
+    ``include_closed=True``: a user deleted on Friday still traded Mon-Thu and
+    the house kept that money. A settlement is the record of a past period,
+    not a snapshot of who still exists.
+    """
+    return await scoped_user_ids(sa, include_closed=True)
 
 
 async def compute_settlement(
@@ -112,7 +139,7 @@ async def compute_settlement(
     if existing is not None and existing.is_frozen():
         return existing, True
 
-    user_ids = await _sub_admin_user_ids(sa_oid)
+    user_ids = await _sub_admin_user_ids(sa)
     fallback_usd_inr = to_decimal(market_data_service.get_usd_inr_rate())
 
     gross_loss = Decimal("0")

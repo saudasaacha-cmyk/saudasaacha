@@ -17,7 +17,12 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.dependencies import SuperAdmin, require_perm
+from app.core.dependencies import (
+    SuperAdmin,
+    _pool_clause,
+    merge_scope,
+    require_perm,
+)
 from app.models.user import User, UserRole
 from app.schemas.admin.management import (
     AssignUserRequest,
@@ -311,24 +316,69 @@ class TransferBulkRequest(BaseModel):
     target_admin_id: str
 
 
-async def _assert_owns(admin: User, target: User) -> bool:
+async def _assert_owns(
+    admin: User, target: User, clause: dict | None = None
+) -> bool:
+    """Is ``target`` in the caller's pool? Asks the canonical pool clause.
+
+    This used to be two hand-written arms: ``assigned_admin_id == admin.id``
+    OR ``admin.id in target.broker_ancestry``. Ancestry holds BROKER ids only
+    (see ``User.broker_ancestry``), so for an ADMIN caller the second arm
+    could never match and the gate collapsed to the flat first arm.
+
+    That arm is not reliable on its own. ``reassign_user`` DOES re-stamp the
+    subtree's ``assigned_admin_id`` — do not go looking for a missing
+    re-stamp, it is there — but it does so in a bare ``try`` with no
+    transaction, after the broker row has already been saved, so a partial
+    failure leaves part of the subtree on the old owner; and rows created
+    before that propagation existed were never stamped at all. Net effect:
+    an admin who had a broker handed to them got "This user isn't in your
+    pool" on rows their own Users page was listing. There was no EMPLOYEE
+    resolution either, so an employee holding ``transfer_users`` was refused
+    on every row.
+
+    ``_pool_clause`` carries all three arms and resolves EMPLOYEE to its
+    parent admin, so the gate now agrees with the list the caller sees.
+    """
     if admin.role == UserRole.SUPER_ADMIN:
+        # The platform owner transfers OUT of any pool. `_pool_clause` would
+        # narrow them to `assigned_admin_id: None` — their own book — and
+        # that is not the reach this endpoint has ever had.
         return True
-    return target.assigned_admin_id == admin.id or admin.id in (
-        getattr(target, "broker_ancestry", None) or []
+    # The clause depends on the ACTOR, not the target, so the bulk endpoint
+    # resolves it once and passes it in — otherwise a 200-row transfer pays
+    # for 200 broker-id lookups to rebuild the identical clause.
+    if clause is None:
+        clause = await _pool_clause(admin)
+    # merge_scope, not `{**clause}`: the clause IS an `$or` for an admin with
+    # brokers, and `_id` must AND with it rather than replace a key of it.
+    return bool(
+        await User.get_motor_collection().count_documents(
+            merge_scope({"_id": target.id}, clause), limit=1
+        )
     )
 
 
 @router.get("/transfer/admins", response_model=APIResponse[dict])
 async def transfer_admin_targets(admin: TransferAdmin):
-    """Every admin on the platform (except the caller) as a transfer target."""
+    """Every admin on the platform (except the caller) as a transfer target.
+
+    The picker needs a name and a code to point at. The email goes through
+    `user_contacts` like every other contact on this platform: `transfer_users`
+    is a grant to MOVE a client, not to read the address book of every peer
+    admin, and this endpoint is not super-admin-only. Masked rather than
+    dropped because the dialog reads `.email` in both its subtitle and its
+    search haystack, and `contact_out` returns None for a generated
+    placeholder, which that subtitle's `filter(Boolean)` already handles.
+    """
+    reveal = await user_service.can_read_contacts(admin)
     rows = await User.find(User.role == UserRole.ADMIN).to_list()
     items = [
         {
             "id": str(a.id),
             "user_code": a.user_code,
             "full_name": a.full_name,
-            "email": a.email,
+            "email": user_service.contact_out(a.email, reveal=reveal),
         }
         for a in rows
         if a.id != admin.id
@@ -365,10 +415,15 @@ async def transfer_users_to_admin_bulk(body: TransferBulkRequest, admin: Transfe
         raise HTTPException(status_code=400, detail="Pick a different admin")
     moved = 0
     skipped = 0
+    # Resolved once: the pool clause is a property of the caller, and
+    # rebuilding it per row cost one extra broker-id lookup per user.
+    bulk_clause = (
+        None if admin.role == UserRole.SUPER_ADMIN else await _pool_clause(admin)
+    )
     for uid in body.user_ids:
         try:
             target = await user_service.get_user_or_404(uid)
-            if not await _assert_owns(admin, target):
+            if not await _assert_owns(admin, target, bulk_clause):
                 skipped += 1
                 continue
             await mgmt.reassign_user(uid, body.target_admin_id, admin.id)
@@ -521,8 +576,13 @@ async def sub_admin_report(sub_admin_id: str, admin: SuperAdmin):
     # closed users' history; the counts below split active vs non-closed.
     coll = User.get_motor_collection()
     clause = await _admin_pool_clause(sa.id)
+    # merge_scope rather than `{**clause, ...}`: a trailing literal wins a key
+    # collision, so the day `_admin_pool_clause` grows a `role` or `status` of
+    # its own, the spread would drop it and this pool would quietly WIDEN with
+    # nothing raised. Single-key clauses still merge flat, so the indexed
+    # `assigned_admin_id` equality reaches Mongo unchanged.
     cursor = coll.find(
-        {**clause, "role": {"$nin": _NON_CLIENT_ROLES}},
+        merge_scope({"role": {"$nin": _NON_CLIENT_ROLES}}, clause),
         {"_id": 1, "status": 1},
     )
     pool: list[PydanticObjectId] = []
@@ -538,7 +598,10 @@ async def sub_admin_report(sub_admin_id: str, admin: SuperAdmin):
     # Broker / sub-broker login accounts under this admin, shown separately
     # from the client count (CLOSED excluded).
     broker_count = await coll.count_documents(
-        {**clause, "role": _UR.BROKER.value, "status": {"$ne": UserStatus.CLOSED.value}}
+        merge_scope(
+            {"role": _UR.BROKER.value, "status": {"$ne": UserStatus.CLOSED.value}},
+            clause,
+        )
     )
 
     if not pool:

@@ -25,6 +25,7 @@ from beanie import PydanticObjectId
 
 from app.core.dependencies import (
     assert_broker_in_scope,
+    effective_scope_actor,
     max_grantable_perms,
 )
 from app.core.exceptions import (
@@ -494,6 +495,8 @@ async def list_brokers_for(
       - ADMIN       → brokers in their pool (assigned_admin_id == admin.id)
         and NO parent broker (top brokers under the admin). `admin_id` arg ignored.
       - BROKER      → their direct sub-brokers (assigned_broker_id == self.id)
+      - EMPLOYEE    → resolved to its parent admin first, so it sees that
+        admin's brokers (an employee owns no brokers of its own).
 
     When ``include_sub=True`` the assigned_broker_id filter is dropped
     so the result includes the full subtree (top brokers + every
@@ -501,6 +504,14 @@ async def list_brokers_for(
     can place a new client directly under any broker / sub-broker in
     their pool, and brokers can pick any descendant.
     """
+    # Without this an EMPLOYEE hits the `else` below and gets ([], 0): the
+    # brokers page renders empty AND the create-user "place under broker"
+    # dropdown has no options, so an employee with the grant cannot put a
+    # client under a broker at all. effective_scope_actor also fails safe —
+    # if the parent row won't load it returns the employee, which still
+    # falls to the `else`.
+    actor = await effective_scope_actor(actor)
+
     query: dict[str, Any] = {"role": UserRole.BROKER.value}
 
     if actor.role == UserRole.SUPER_ADMIN:

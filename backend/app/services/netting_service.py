@@ -441,15 +441,7 @@ async def upsert_sub_admin_risk(
                 existing, k, _coerce_risk_value(k, v) if v is not None else None
             )
     await existing.save()
-    # Invalidate effective-risk cache for every user assigned to this sub-admin.
-    await _invalidate_pool_risk_cache(sid)
-    # Safety net: also wipe the whole risk:* namespace. The per-pool
-    # walk above only catches users whose `assigned_admin_id` exactly
-    # matches — users whose pool was just changed, or any indirection
-    # bugs, would otherwise carry a stale snapshot for up to
-    # RISK_CACHE_TTL seconds. The wildcard sweep is cheap (the cache
-    # is small and rebuilds per-user on the next enforcer tick).
-    await cache_delete_pattern("risk:*")
+    await _wipe_pool_risk_cache()
     return existing
 
 
@@ -458,17 +450,35 @@ async def delete_sub_admin_risk(sub_admin_id: str | PydanticObjectId) -> None:
     await SubAdminRiskSettings.find(
         SubAdminRiskSettings.sub_admin_id == sid
     ).delete()
-    await _invalidate_pool_risk_cache(sid)
+    await _wipe_pool_risk_cache()
 
 
-async def _invalidate_pool_risk_cache(sub_admin_id: PydanticObjectId) -> None:
-    """Wipes the per-user `risk:<uid>` cache for every user assigned to
-    this sub-admin. Cheaper than wiping the whole `risk:*` pattern when
-    only one pool changed."""
-    coll = User.get_motor_collection()
-    cursor = coll.find({"assigned_admin_id": sub_admin_id}, {"_id": 1})
-    async for doc in cursor:
-        await cache_delete_pattern(f"risk:{doc['_id']}")
+async def _wipe_pool_risk_cache() -> None:
+    """Drop every `risk:<uid>` snapshot after a pool-tier risk change.
+
+    This replaced three per-pool walks (sub-admin / super-admin / broker)
+    that each deleted one key per user in a flat clause. They were wrong
+    AND slower, so there is nothing left to keep:
+
+      * Wrong: `{assigned_broker_id: bid}` misses a sub-broker's clients
+        entirely — they carry the parent broker only in `broker_ancestry`,
+        never in `assigned_broker_id`. That half is sufficient on its own.
+        `{assigned_admin_id: sid}` is the weaker of the two: `reassign_user`
+        DOES re-stamp a transferred subtree (do not go hunting for a
+        missing re-stamp), but in a bare `try` with no transaction and
+        after the broker row is already saved, so a partial failure — or a
+        row predating that propagation — leaves the old id behind. The
+        three upserts hid
+        that behind this same wildcard sweep; the three deletes did not,
+        so deleting an override left exactly those users on a stale
+        margin-call / stop-out snapshot for up to RISK_CACHE_TTL.
+      * Slower: `cache_delete_pattern` is a full keyspace SCAN per call,
+        so a 106-user pool cost 106 scans plus the sweep's one.
+
+    One sweep is one scan and has no pool clause to get wrong. The cache
+    is small and rebuilds per-user on the next enforcer tick.
+    """
+    await cache_delete_pattern("risk:*")
 
 
 # ── Super-admin risk default (super-admin's own pool) ────────────────
@@ -495,8 +505,7 @@ async def upsert_super_admin_risk(
                 existing, k, _coerce_risk_value(k, v) if v is not None else None
             )
     await existing.save()
-    await _invalidate_super_admin_pool_risk_cache()
-    await cache_delete_pattern("risk:*")
+    await _wipe_pool_risk_cache()
     return existing
 
 
@@ -505,17 +514,7 @@ async def delete_super_admin_risk(super_admin_id: str | PydanticObjectId) -> Non
     await SuperAdminRiskSettings.find(
         SuperAdminRiskSettings.super_admin_id == sid
     ).delete()
-    await _invalidate_super_admin_pool_risk_cache()
-
-
-async def _invalidate_super_admin_pool_risk_cache() -> None:
-    coll = User.get_motor_collection()
-    cursor = coll.find(
-        {"assigned_admin_id": None, "assigned_broker_id": None},
-        {"_id": 1},
-    )
-    async for doc in cursor:
-        await cache_delete_pattern(f"risk:{doc['_id']}")
+    await _wipe_pool_risk_cache()
 
 
 # ── Broker risk default (broker's own pool) ──────────────────────────
@@ -542,22 +541,14 @@ async def upsert_broker_risk(
                 existing, k, _coerce_risk_value(k, v) if v is not None else None
             )
     await existing.save()
-    await _invalidate_broker_pool_risk_cache(bid)
-    await cache_delete_pattern("risk:*")
+    await _wipe_pool_risk_cache()
     return existing
 
 
 async def delete_broker_risk(broker_id: str | PydanticObjectId) -> None:
     bid = PydanticObjectId(broker_id)
     await BrokerRiskSettings.find(BrokerRiskSettings.broker_id == bid).delete()
-    await _invalidate_broker_pool_risk_cache(bid)
-
-
-async def _invalidate_broker_pool_risk_cache(broker_id: PydanticObjectId) -> None:
-    coll = User.get_motor_collection()
-    cursor = coll.find({"assigned_broker_id": broker_id}, {"_id": 1})
-    async for doc in cursor:
-        await cache_delete_pattern(f"risk:{doc['_id']}")
+    await _wipe_pool_risk_cache()
 
 
 async def get_effective_risk(user_id: str | PydanticObjectId) -> dict[str, Any]:

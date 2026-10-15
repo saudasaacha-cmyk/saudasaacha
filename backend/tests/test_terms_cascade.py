@@ -8,10 +8,13 @@ block, and none of them raised anything a human would see:
     it — so every save with changed text raised ImportError OUTSIDE the
     task's try, 500'd after the text was already persisted, and nobody
     downstream was ever reset;
-  • the ADMIN arm matched `assigned_admin_id` only, so clients under a
-    broker that had been moved between admins (stale `assigned_admin_id`,
-    the case `_admin_pool_clause`'s third arm exists for) kept trading on
-    terms they were never shown, with an accept marker saying otherwise;
+  • the ADMIN arm matched `assigned_admin_id` only. The transfer does
+    re-stamp that field across the subtree, but best-effort (bare `try`,
+    no transaction) and not for rows predating it — and the deeper
+    descendants are reachable only through `broker_ancestry`, which is
+    the arm `_admin_pool_clause` carries and this did not. Those clients
+    kept trading on terms they were never shown, with an accept marker
+    on file saying otherwise;
   • EMPLOYEE and SUPER_ADMIN fell through to a sweep over EVERY client,
     which erased acceptance markers for text those clients cannot even
     resolve.

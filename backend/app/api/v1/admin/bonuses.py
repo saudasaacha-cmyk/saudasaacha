@@ -11,7 +11,13 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.config import settings
-from app.core.dependencies import CurrentAdmin, require_perm
+from app.core.dependencies import (
+    CurrentAdmin,
+    assert_user_in_scope,
+    merge_scope,
+    require_perm,
+    scoped_user_ids,
+)
 from app.models.bonus_transaction import BonusTransaction
 from app.models.user import User, UserRole
 from app.models.user_bonus import UserBonus, UserBonusStatus
@@ -132,22 +138,30 @@ async def delete_template(
 
 
 # ── Grants ───────────────────────────────────────────────────────────
-def _scope(admin: User) -> dict:
+async def _scope(admin: User) -> dict:
+    """Scope grants by the USER, not by `UserBonus.admin_id`.
+
+    That stamp is the client's `assigned_admin_id` copied at grant time, so
+    comparing it to the actor's id is wrong twice: a BROKER's or EMPLOYEE's id
+    never appears in it (both roles saw an empty list and 404'd every grant),
+    and it goes stale the moment a broker is transferred between admins — the
+    losing admin kept seeing the subtree's grants, the new one never did.
+    `scoped_user_ids` is the pool resolver every other admin list already uses,
+    so this view can't drift from them. `include_closed` because a bonus is a
+    money record: it stays auditable after the user is soft-deleted. Demo
+    accounts drop out with it, as they do from every other money view.
+    """
     if admin.role == UserRole.SUPER_ADMIN:
         return {}
-    return {"admin_id": admin.id}
+    return {"user_id": {"$in": await scoped_user_ids(admin, include_closed=True)}}
 
 
 async def _load_scoped_bonus(bonus_id: str, admin: User) -> UserBonus | None:
     try:
-        b = await UserBonus.get(PydanticObjectId(bonus_id))
+        oid = PydanticObjectId(bonus_id)
     except Exception:
         return None
-    if b is None:
-        return None
-    if admin.role != UserRole.SUPER_ADMIN and b.admin_id != admin.id:
-        return None
-    return b
+    return await UserBonus.find_one(merge_scope({"_id": oid}, await _scope(admin)))
 
 
 @router.get("", response_model=APIResponse[dict])
@@ -161,7 +175,7 @@ async def list_grants(
     limit: int = Query(50, ge=1, le=200),
 ):
     _gate()
-    q: dict[str, Any] = _scope(admin)
+    q: dict[str, Any] = {}
     if user_id:
         try:
             q["user_id"] = PydanticObjectId(user_id)
@@ -171,6 +185,10 @@ async def list_grants(
         q["status"] = status
     if type:
         q["type"] = type
+    # `?user_id=` pins the same key the scope clause uses and a dict holds a
+    # key once, so update()-ing the scope in here would drop one of the two —
+    # silently, and the one that goes is the scope.
+    merge_scope(q, await _scope(admin))
     total = await UserBonus.find(q).count()
     rows = (
         await UserBonus.find(q).sort("-granted_at").skip((page - 1) * limit).limit(limit).to_list()
@@ -192,14 +210,12 @@ async def grant(
     _: None = Depends(require_perm("bonuses", "write")),
 ):
     _gate()
-    try:
-        user = await User.get(PydanticObjectId(payload.user_id))
-    except Exception:
-        user = None
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    if admin.role != UserRole.SUPER_ADMIN and getattr(user, "assigned_admin_id", None) != admin.id:
-        raise HTTPException(status_code=403, detail="User is not in your pool")
+    # The canonical pool gate, same as wallet-adjust. The hand-rolled compare
+    # it replaces had no broker arm and no EMPLOYEE resolution — and a BROKER's
+    # id never appears in a client's `assigned_admin_id`, so granting was
+    # permanently closed to every broker and every employee. 404/403 envelope
+    # unchanged; a write stays strict for super-admin (reassign first).
+    user = await assert_user_in_scope(admin, payload.user_id)
 
     try:
         if payload.template_id:
@@ -229,14 +245,7 @@ async def deduct(
     """Manually claw back bonus credit from a user (Add/Deduct-Fund-style
     quick action). Deducts up to `amount` from the user's active bonuses."""
     _gate()
-    try:
-        user = await User.get(PydanticObjectId(payload.user_id))
-    except Exception:
-        user = None
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    if admin.role != UserRole.SUPER_ADMIN and getattr(user, "assigned_admin_id", None) != admin.id:
-        raise HTTPException(status_code=403, detail="User is not in your pool")
+    user = await assert_user_in_scope(admin, payload.user_id)  # same gate as grant()
     try:
         deducted = await bonus_service.deduct_custom(
             user.id, payload.amount, by=admin.id, reason=payload.reason,

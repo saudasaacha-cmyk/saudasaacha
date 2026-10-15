@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from fastapi import WebSocket
@@ -446,11 +447,38 @@ class UserChannelHub(_BaseHub):
 
 # ── Admin events hub ───────────────────────────────────────────────────
 class AdminEventHub(_BaseHub):
-    """Routes the single ``admin:events`` channel to every admin WS."""
+    """Routes the single ``admin:events`` channel to the sockets that OWN
+    each event.
+
+    Subscriber key = an operator id (an ADMIN's or BROKER's ``user.id``),
+    matched against the ``recipient_admin_ids`` that
+    ``publish_admin_event`` stamps on every payload. One Redis channel
+    still, fanned out in-process — the publish path stays one message no
+    matter how many admins are watching.
+
+    It used to key on a single constant, i.e. every attached socket got
+    every tenant's events. The payloads are not scope-free (deposit
+    submit carries ``user_name``, ``user_code`` and ``amount``), the
+    filtering lived in the browser, and so any sub-admin or broker with
+    DevTools open could watch the whole platform's client names and
+    deposit amounts go past — bypassing every REST scope check in the
+    process next door.
+    """
 
     name = "admin_event_hub"
-    _SINGLE_KEY = "_all"
     _CHANNEL = "admin:events"
+
+    # A SUPER_ADMIN sees the platform, so its sockets sit on their own key
+    # and every scoped event is routed there too. They cannot just use
+    # their own id: `_compute_recipient_admin_ids` names the super-admins
+    # ONLY for platform-direct users, so keying on it would hide every
+    # event belonging to an admin's or broker's tree.
+    SUPER_KEY = "_super"
+
+    # Fallback key every admin socket also joins. Only reached by an event
+    # whose audience could not be resolved at publish time; see
+    # `_route_keys`.
+    BROADCAST_KEY = "_all"
 
     async def _do_subscribe(self, ps: Any) -> None:
         await ps.subscribe(self._CHANNEL)
@@ -464,7 +492,17 @@ class AdminEventHub(_BaseHub):
     def _route_keys(self, channel: str | None, payload: Any) -> list[str]:
         if channel != self._CHANNEL:
             return []
-        return [self._SINGLE_KEY]
+        ids = payload.get("recipient_admin_ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list):
+            # Publisher could not name an audience (platform-level event,
+            # or the resolver threw). Broadcasting is the deliberate
+            # choice: an event that reaches one admin too many costs a
+            # wasted refetch, while one that reaches nobody looks exactly
+            # like the stale-dashboard bug this channel exists to fix.
+            # `publish_admin_event` logs `admin_event_unscoped` when it
+            # takes this path, so it is visible rather than silent.
+            return [self.BROADCAST_KEY]
+        return [self.SUPER_KEY, *(str(i) for i in ids)]
 
     def _frame(self, channel: str | None, payload: Any) -> str | None:
         if payload is None:
@@ -474,13 +512,24 @@ class AdminEventHub(_BaseHub):
         except (TypeError, ValueError):  # pragma: no cover
             return None
 
-    # Convenience wrappers so the WS handler can stay agnostic of the
-    # hub's internal "_all" key.
-    def attach(self, ws: WebSocket) -> None:
-        self.add(self._SINGLE_KEY, ws)
+    def attach(self, ws: WebSocket, keys: Iterable[str]) -> None:
+        """Register an admin socket under the identities it may hear about.
+
+        ``keys`` are the operator ids this viewer owns — the same values
+        ``publish_admin_event`` puts in ``recipient_admin_ids`` — or
+        ``SUPER_KEY`` for a super-admin. ``admin_ws`` derives them from
+        the authenticated user; the hub deliberately knows nothing about
+        roles so ``core`` keeps out of the User model.
+        """
+        self.add(self.BROADCAST_KEY, ws)
+        for k in keys:
+            self.add(k, ws)
 
     def detach(self, ws: WebSocket) -> None:
-        self.remove(self._SINGLE_KEY, ws)
+        # ``remove_ws``, not ``remove``: a socket now sits on several keys
+        # (broadcast + its own id + its brokers'), and leaving it on any
+        # one of them keeps sending to a closed connection.
+        self.remove_ws(ws)
 
 
 # ── Module-level singletons ────────────────────────────────────────────

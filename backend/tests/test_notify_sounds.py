@@ -44,14 +44,21 @@ def test_a_missing_or_blank_row_falls_back_rather_than_going_silent():
     assert 'or fallback' in src
 
 
-def test_payment_alerts_reach_only_the_actors_own_pool():
-    """A broker's client deposits into the BROKER's account, so an admin
-    above them changing theirs is not news that client can act on."""
+def test_payment_alerts_reach_the_actors_whole_pool():
+    """This used to assert the three hand-written arms, on the reasoning
+    that "a broker's client deposits into the BROKER's account, so an
+    admin above them changing theirs is not news". That is true of a
+    broker's DIRECT clients and false of everyone below them: the
+    deposit-bank resolver walks `broker_ancestry` UPWARD and stops at the
+    first owner with rows, so a sub-broker with no bank of its own hands
+    its clients the parent broker's account — and those clients were
+    never told when it changed. The arms are now `_pool_clause`, which is
+    that walk's mirror for every role. Why, in full:
+    tests/test_payment_notice_subtree.py."""
     src = inspect.getsource(notify_payment_details_changed)
-    assert 'query["assigned_admin_id"] = None' in src      # super admin's direct pool
-    assert 'query["assigned_broker_id"] = actor.id' in src  # broker's own clients
-    assert 'query["assigned_admin_id"] = actor.id' in src   # sub-admin's own clients
-    # Only active clients — not other admins, not closed accounts.
+    assert "_pool_clause" in src
+    assert "merge_scope" in src  # the ADMIN clause is an `$or`
+    # Only active clients — not other admins, not closed accounts. Unchanged.
     assert "UserRole.CLIENT" in src
     assert "UserStatus.ACTIVE" in src
 
