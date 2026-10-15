@@ -43,8 +43,15 @@ User=sauda
 Group=sauda
 WorkingDirectory=/opt/saudasaacha/backend
 
-# 8 vCPU box → 4 workers leaves headroom for the Next.js PM2 apps + nginx.
-# gunicorn reads WEB_CONCURRENCY automatically when --workers is omitted.
+# 4 vCPU box → 4 workers: one becomes the feed leader (the 0.1s tick fanout
+# pegs a whole core on its own) and the rest serve HTTP/WS. gunicorn reads
+# WEB_CONCURRENCY automatically when --workers is omitted.
+#
+# THIS IS ONLY A DEFAULT. systemd applies Environment= and EnvironmentFile= in
+# the order written, so a WEB_CONCURRENCY in .env below SILENTLY WINS over this
+# line — which is how production ended up running 2 workers on a 4-core box
+# while this file said 4 and nothing anywhere logged the disagreement. If the
+# worker count is not what you expect, read .env before you touch this.
 Environment=WEB_CONCURRENCY=4
 # Load the application secrets/config.
 EnvironmentFile=/opt/saudasaacha/backend/.env
