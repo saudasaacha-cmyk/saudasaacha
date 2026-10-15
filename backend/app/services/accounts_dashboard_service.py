@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -30,6 +31,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.core.dependencies import _admin_pool_clause, merge_scope
 from app.models.pnl_sharing import AgreementStatus, AgreementType, PnlSharingAgreement
 from app.models.position import Position, PositionStatus
 from app.models.trade import Trade
@@ -81,6 +83,56 @@ async def _broker_client_ids(broker_id: PydanticObjectId) -> list[PydanticObject
     return [doc["_id"] async for doc in cursor]
 
 
+async def _entity_scope_clause(
+    entity_id: PydanticObjectId,
+    entity_role: str,
+) -> dict[str, Any]:
+    """The ONE answer to "whose clients belong to this entity?" on this page.
+
+    Every number on /accounts-dashboard has to tie out with the user list the
+    rest of the app shows for the same actor, so the ADMIN answer is delegated
+    to the very `_admin_pool_clause` that `scoped_user_filter` uses. Two
+    hand-rolled copies lived in this module before and BOTH under-counted an
+    admin, differently: the pool-ids one had no broker arm at all (so the KPI
+    card, the exports and the Positions Net-P&L cards counted only clients
+    stamped `assigned_admin_id` — an admin's own brokers' clients read as 0),
+    and the per-user table had two of the three arms and silently dropped every
+    SUB-broker client. One definition, or they drift again.
+
+    Returns a clause to AND into a query — merge it with `merge_scope`, never
+    `query.update()` / `query["$or"] = `: for an admin WITH brokers this IS an
+    `$or`, and a dict holds `$or` once.
+    """
+    if entity_role in (UserRole.BROKER.value, "BROKER"):
+        # Whole subtree — every descendant client carries this broker's id in
+        # broker_ancestry, so this captures sub-brokers' clients too (not just
+        # the broker's DIRECT clients). Without it the broker's per-user list,
+        # exports and sharing dropped sub-broker users (operator: "broker ko
+        # uske andar ke sub-broker ke users bhi dikhe").
+        return {"broker_ancestry": entity_id}
+    if entity_role in (UserRole.ADMIN.value, "ADMIN"):
+        return await _admin_pool_clause(entity_id)
+    if entity_role in (UserRole.SUPER_ADMIN.value, "SUPER_ADMIN"):
+        # Platform-wide ON PURPOSE — NOT `_pool_clause`'s own-book-only
+        # `{assigned_admin_id: None}`. The only caller that ever passes a
+        # super-admin id is the "All Users" card (the dashboard sends the
+        # logged-in actor's own id), and it must match /accounts/summary's
+        # grand_total, which for a super-admin counts the whole platform. The
+        # one view that wants the super-admin's OWN book asks for it by name
+        # (`super_admin_direct_user_ids`, admin/trading.py), so widening here
+        # breaks nothing and narrowing here would make the card disagree with
+        # the summary above it.
+        return {}
+    # EMPLOYEE, or any future role that owns no pool. Fail CLOSED: "clients of
+    # this id" then matches nothing rather than everything. The per-user table
+    # used to add NO clause on this branch, so an employee with the `users`
+    # grant got the entire platform's client list while its own totals card
+    # read 0.
+    # ponytail: an employee's real book is its parent admin's — route it
+    # through `_pool_clause` (which resolves the parent) if operators ask.
+    return {"assigned_broker_id": entity_id}
+
+
 async def _entity_pool_ids(
     entity_id: PydanticObjectId,
     entity_role: str,
@@ -92,19 +144,7 @@ async def _entity_pool_ids(
         "status": {"$ne": UserStatus.CLOSED.value},
         "is_demo": {"$ne": True},
     }
-    if entity_role in (UserRole.BROKER.value, "BROKER"):
-        # Whole subtree — every descendant client carries this broker's id in
-        # broker_ancestry, so this captures sub-brokers' clients too (not just
-        # the broker's DIRECT clients). Without it the broker's per-user list,
-        # exports and sharing dropped sub-broker users (operator: "broker ko
-        # uske andar ke sub-broker ke users bhi dikhe").
-        query["broker_ancestry"] = entity_id
-    elif entity_role in (UserRole.ADMIN.value, "ADMIN"):
-        query["assigned_admin_id"] = entity_id
-    elif entity_role in (UserRole.SUPER_ADMIN.value, "SUPER_ADMIN"):
-        pass  # all users
-    else:
-        query["assigned_broker_id"] = entity_id
+    merge_scope(query, await _entity_scope_clause(entity_id, entity_role))
     cursor = coll.find(query, {"_id": 1})
     return [doc["_id"] async for doc in cursor]
 
@@ -496,34 +536,25 @@ async def get_entity_users(
         "status": UserStatus.ACTIVE.value,
         "is_demo": {"$ne": True},
     }
-    if entity_role in (UserRole.BROKER.value, "BROKER"):
-        # Whole subtree — sub-brokers' clients too (broker_ancestry holds
-        # this broker's id for every descendant), not just direct clients.
-        user_query["broker_ancestry"] = entity_id
-    elif entity_role in (UserRole.ADMIN.value, "ADMIN"):
-        # Include direct users + users under admin's brokers
-        broker_ids = [
-            b["_id"] async for b in User.get_motor_collection().find(
-                {"assigned_admin_id": entity_id, "role": UserRole.BROKER.value},
-                {"_id": 1},
-            )
-        ]
-        scope_filter = [{"assigned_admin_id": entity_id}]
-        if broker_ids:
-            scope_filter.append({"assigned_broker_id": {"$in": broker_ids}})
-        user_query["$or"] = scope_filter
-
+    search_clause: dict[str, Any] | None = None
     if search and search.strip():
-        import re
         escaped = re.escape(search.strip())
-        search_filter = [
-            {"user_code": {"$regex": escaped, "$options": "i"}},
-            {"full_name": {"$regex": escaped, "$options": "i"}},
-        ]
-        if "$or" in user_query:
-            user_query = {"$and": [user_query, {"$or": search_filter}]}
-        else:
-            user_query["$or"] = search_filter
+        search_clause = {
+            "$or": [
+                {"user_code": {"$regex": escaped, "$options": "i"}},
+                {"full_name": {"$regex": escaped, "$options": "i"}},
+            ]
+        }
+    # Same pool clause as the KPI card above (`_entity_pool_ids`), so the table
+    # can no longer list a different set of users than the totals it sits
+    # under. `merge_scope` ANDs the pool `$or` and the search box's `$or`
+    # instead of the hand-rolled `{"$and": [...]}` re-bind this used to do —
+    # one of the two `$or`s went missing whenever that dance was edited.
+    merge_scope(
+        user_query,
+        await _entity_scope_clause(entity_id, entity_role),
+        search_clause,
+    )
 
     # Scan ALL users matching the scope (no DB pagination) so the
     # post-filter "drop all-zero rows" step can yield a true paginated

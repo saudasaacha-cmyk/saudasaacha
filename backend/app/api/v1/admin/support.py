@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.core.dependencies import CurrentAdmin
+from app.core.dependencies import CurrentAdmin, merge_scope, scoped_user_filter
 from app.models._base import PermissionLevel
 from app.models.audit_log import AuditAction
 from app.models.user import User, UserRole
@@ -137,12 +137,11 @@ async def set_my_support(
         user_agent=request.headers.get("user-agent"),
     )
 
-    return APIResponse(
-        data={"whatsapp": new_value, "role": admin.role.value, "can_edit": True}
-    )
+    return APIResponse(data={"whatsapp": new_value, "role": admin.role.value, "can_edit": True})
 
 
 # ── Home-page notification ticker (per-admin, cascades to clients) ──
+
 
 class TickerPayload(BaseModel):
     messages: list[str] = Field(default_factory=list)
@@ -152,9 +151,7 @@ class TickerPayload(BaseModel):
 async def get_my_ticker(admin: CurrentAdmin):
     """This admin's home-page ticker lines. Empty ⇒ the ticker is hidden for
     their users (unless a parent admin has one — the app resolves that)."""
-    return APIResponse(
-        data={"messages": list(admin.ticker_messages or []), "role": admin.role.value}
-    )
+    return APIResponse(data={"messages": list(admin.ticker_messages or []), "role": admin.role.value})
 
 
 @router.put("/ticker", response_model=APIResponse[dict])
@@ -183,6 +180,7 @@ async def set_my_ticker(payload: TickerPayload, admin: CurrentAdmin):
 
 
 # ── Terms & Conditions (per-admin, cascades to downstream clients) ──
+
 
 class TermsPayload(BaseModel):
     text: str = Field(default="", max_length=20000)
@@ -239,34 +237,65 @@ async def set_my_terms(
         # — clients will see the new modal on their next page load
         # whenever the background reset finishes (typically a second
         # or two later).
+        #
+        # This block had been dead the whole time: it imported UserRole
+        # from `app.models._base`, which does not export it, so every
+        # save with changed text raised ImportError HERE — outside the
+        # task's try — and returned 500 after the text had already been
+        # persisted. Nobody downstream was ever reset. The only import
+        # left out here is stdlib `asyncio` (needed to make the task);
+        # anything app-level goes inside the try, where it can't 500 a
+        # save that already succeeded.
         import asyncio
-
-        from app.models._base import UserRole as _UR
 
         async def _cascade_reset() -> None:
             try:
-                coll = User.get_motor_collection()
-                if admin.role.value == _UR.BROKER.value:
-                    await coll.update_many(
-                        {"broker_ancestry": admin.id, "role": _UR.CLIENT.value},
-                        {"$set": {"terms_accepted_at": None}},
-                    )
-                elif admin.role.value == _UR.ADMIN.value:
-                    await coll.update_many(
-                        {"assigned_admin_id": admin.id, "role": _UR.CLIENT.value},
-                        {"$set": {"terms_accepted_at": None}},
-                    )
-                else:
-                    await coll.update_many(
-                        {"role": _UR.CLIENT.value},
-                        {"$set": {"terms_accepted_at": None}},
-                    )
+                # Who RESOLVES their terms from the row we just saved? That
+                # is the actor's book, and `scoped_user_filter` is the one
+                # definition of it. The hand-rolled branch this replaced
+                # matched ADMIN on `assigned_admin_id` alone: moving a broker
+                # between admins rewrites ONLY the broker row, so that
+                # subtree's clients keep a stale `assigned_admin_id` and were
+                # skipped — still trading on terms never shown to them, with
+                # an accept marker on file saying they had agreed. Not a
+                # defence you want in a dispute. The helper carries that arm.
+                #
+                # SUPER_ADMIN is deliberately narrower than the old sweep over
+                # every CLIENT: `_resolve_terms_for_user` stops at the first
+                # ancestor with `assigned_admin_id = None`, so a sub-admin's
+                # clients never see super-admin text — resetting them erased
+                # their acceptance of THEIR admin's unchanged terms.
+                #
+                # EMPLOYEE is its own case, and NOT `scoped_user_filter`.
+                # `POST /admin/users` resolves the ownership chain with
+                # `if SUPER_ADMIN / elif BROKER / else: # ADMIN`, and an
+                # employee actor falls into that else — so the client it
+                # creates is stamped `assigned_admin_id = <employee>.id`
+                # (users.py:941-944, no `effective_scope_actor` on that
+                # path). `_resolve_terms_for_user` walks
+                # `assigned_broker_id or assigned_admin_id` and stops at the
+                # first row carrying terms, so those clients resolve the
+                # EMPLOYEE's text — they are exactly who this save affects.
+                #
+                # `scoped_user_filter` would be wrong here: it resolves an
+                # employee to the PARENT admin's pool, whose clients read the
+                # parent's unchanged terms, so it would erase acceptance
+                # marks for text nobody edited.
+                scope = (
+                    {"assigned_admin_id": admin.id}
+                    if admin.role == UserRole.EMPLOYEE
+                    else await scoped_user_filter(admin)
+                )
+                # merge_scope, not a dict literal: the ADMIN clause IS an
+                # `$or` and a dict holds `$or` once, so pasting the role in
+                # beside it drops one — and the one that goes silently is the
+                # role filter, blanking terms_accepted_at on admin rows too.
+                query = merge_scope({"role": UserRole.CLIENT.value}, scope)
+                await User.get_motor_collection().update_many(query, {"$set": {"terms_accepted_at": None}})
             except Exception:  # noqa: BLE001
                 import logging
 
-                logging.getLogger(__name__).exception(
-                    "terms_cascade_reset_failed admin_id=%s", admin.id
-                )
+                logging.getLogger(__name__).exception("terms_cascade_reset_failed admin_id=%s", admin.id)
 
         asyncio.create_task(_cascade_reset())
 
@@ -283,6 +312,4 @@ async def set_my_terms(
         user_agent=request.headers.get("user-agent"),
     )
 
-    return APIResponse(
-        data={"text": new_text, "enabled": new_enabled, "role": admin.role.value}
-    )
+    return APIResponse(data={"text": new_text, "enabled": new_enabled, "role": admin.role.value})

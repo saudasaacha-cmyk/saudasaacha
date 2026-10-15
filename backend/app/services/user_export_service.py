@@ -28,6 +28,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.core.dependencies import _pool_clause, merge_scope
 from app.models.position import Position, PositionStatus
 from app.models.transaction import TransactionType, WalletTransaction
 from app.models.user import User, UserRole, UserStatus
@@ -86,7 +87,7 @@ async def owner_options() -> list[dict[str, str]]:
     return out
 
 
-def _query(owner: str, *, include_demo: bool, include_closed: bool) -> dict[str, Any]:
+async def _query(owner: str, *, include_demo: bool, include_closed: bool) -> dict[str, Any]:
     q: dict[str, Any] = {"role": UserRole.CLIENT.value}
     if not include_closed:
         q["status"] = {"$ne": UserStatus.CLOSED.value}
@@ -94,17 +95,34 @@ def _query(owner: str, *, include_demo: bool, include_closed: bool) -> dict[str,
         q["is_demo"] = {"$ne": True}
         q["email"] = {"$not": re.compile(r"@demo\.local$", re.IGNORECASE)}
     if owner == OWNER_SELF:
+        # "Direct clients only", so the broker pin is not redundant: a
+        # top-level broker created by the super admin also carries
+        # `assigned_admin_id = None`, and so do that broker's clients.
         q["assigned_admin_id"] = None
         q["assigned_broker_id"] = None
     elif owner != OWNER_ALL:
-        oid = PydanticObjectId(owner)
-        # A broker's clients carry the broker id; an admin's carry theirs, and
-        # their brokers' clients carry the admin in `broker_ancestry`'s owner.
-        q["$or"] = [
-            {"assigned_admin_id": oid},
-            {"assigned_broker_id": oid},
-            {"broker_ancestry": oid},
-        ]
+        # This was an `$or` of assigned_admin_id / assigned_broker_id /
+        # broker_ancestry against the SAME id, which cannot be right for both
+        # roles at once: the last two fields only ever hold BROKER ids. So for
+        # an ADMIN owner two of the three arms matched literally nothing, and
+        # the sheet quietly dropped every client sitting under a broker that
+        # had been transferred INTO that admin's pool — the reassign endpoint
+        # mutates only the broker row, so those clients still carry the
+        # PREVIOUS admin's `assigned_admin_id`. Ask the shared resolver
+        # instead: it is the same clause the Users page and the dashboard
+        # counts use, so the export can be reconciled against them rather
+        # than disagreeing with both.
+        row = await User.get(PydanticObjectId(owner))
+        if row is None or row.role not in (UserRole.ADMIN, UserRole.BROKER):
+            # `owner_options` offers admins and brokers only. A hand-typed id
+            # for anything else exports nothing, rather than falling through
+            # to the whole platform under a "Selected owner" title that nobody
+            # would read as "all".
+            q["_id"] = {"$in": []}
+            return q
+        # merge_scope, not `q.update`: the admin clause IS an `$or` once that
+        # admin has brokers, and a dict holds `$or` only once.
+        merge_scope(q, await _pool_clause(row))
     return q
 
 
@@ -119,9 +137,8 @@ async def collect_rows(
     Everything is batched: wallets, the week's realised P&L and open
     positions each take one round trip for the whole book, not one per user.
     """
-    users = await User.find(_query(owner, include_demo=include_demo, include_closed=include_closed)).sort(
-        "-created_at"
-    ).to_list()
+    scoped = await _query(owner, include_demo=include_demo, include_closed=include_closed)
+    users = await User.find(scoped).sort("-created_at").to_list()
     if not users:
         return []
 

@@ -20,19 +20,30 @@ from app.models.audit_log import AuditAction
 from app.models.kyc import KycStatus, KycSubmission
 from app.models.user import User
 from app.schemas.common import APIResponse
+from app.services import user_service
 from app.services.audit_service import log_event
 from app.utils.time_utils import now_utc
 
 router = APIRouter(prefix="/kyc", tags=["admin-kyc"])
 
 
-def _serialise(s: KycSubmission, user: User | None = None) -> dict[str, Any]:
+def _serialise(s: KycSubmission, user: User | None = None, *, reveal: bool = False) -> dict[str, Any]:
+    """`reveal` is keyword-only and defaults to False for the same reason
+    `admin.users._ser` does: this queue used to hand every admin who could
+    open KYC the submitter's real email, which is exactly what the
+    `user_contacts` grant exists to withhold. A forgotten kwarg now masks
+    instead of leaking.
+
+    The ID / address PROOFS below stay raw on purpose — reading the document
+    against the typed details IS the review, and an admin who cannot see them
+    cannot approve anything. Only the account's own contact column is gated.
+    """
     return {
         "id": str(s.id),
         "user_id": str(s.user_id),
         "user_code": user.user_code if user else None,
         "user_name": user.full_name if user else None,
-        "user_email": user.email if user else None,
+        "user_email": user_service.contact_out(user.email, reveal=reveal) if user else None,
         "id_proof_type": s.id_proof_type.value,
         "id_proof_number": s.id_proof_number,
         "id_proof_url": s.id_proof_url,
@@ -108,9 +119,8 @@ async def list_kyc(
     users = await User.find({"_id": {"$in": user_ids}}).to_list() if user_ids else []
     user_map = {str(u.id): u for u in users}
 
-    return APIResponse(
-        data=[_serialise(r, user_map.get(str(r.user_id))) for r in rows]
-    )
+    reveal = await user_service.can_read_contacts(admin)
+    return APIResponse(data=[_serialise(r, user_map.get(str(r.user_id)), reveal=reveal) for r in rows])
 
 
 @router.get("/{submission_id}", response_model=APIResponse[dict])
@@ -124,7 +134,7 @@ async def get_kyc(
         raise HTTPException(status_code=404, detail="Submission not found")
     await assert_user_in_scope(admin, s.user_id)
     user = await User.get(s.user_id)
-    return APIResponse(data=_serialise(s, user))
+    return APIResponse(data=_serialise(s, user, reveal=await user_service.can_read_contacts(admin)))
 
 
 @router.post("/{submission_id}/approve", response_model=APIResponse[dict])
@@ -175,7 +185,7 @@ async def approve_kyc(
     )
     await _publish(s.user_id, "approved", s)
     user = target_user or await User.get(s.user_id)
-    return APIResponse(data=_serialise(s, user))
+    return APIResponse(data=_serialise(s, user, reveal=await user_service.can_read_contacts(admin)))
 
 
 @router.post("/{submission_id}/reject", response_model=APIResponse[dict])
@@ -217,4 +227,4 @@ async def reject_kyc(
     await _publish(s.user_id, "rejected", s)
 
     user = await User.get(s.user_id)
-    return APIResponse(data=_serialise(s, user))
+    return APIResponse(data=_serialise(s, user, reveal=await user_service.can_read_contacts(admin)))

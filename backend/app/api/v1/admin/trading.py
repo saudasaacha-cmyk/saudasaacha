@@ -19,6 +19,7 @@ from app.core.dependencies import (
     CurrentAdmin,
     SuperAdmin,
     assert_user_in_scope,
+    merge_scope,
     require_perm,
     scoped_user_ids,
     super_admin_direct_user_ids,
@@ -292,17 +293,28 @@ async def list_orders(
                 )
             query["user_id"] = {"$in": scope}
     # Free-text search splice — match user_id ∈ matched_users OR
-    # `instrument.symbol` matches the regex. Keeps any existing
-    # `user_id`/`status` filters intact via top-level merge: Mongo
-    # implicitly `$and`s sibling keys, so the search `$or` narrows the
-    # result without clobbering scope/status filters set above. Empty
-    # `search_user_ids` is fine — `$in: []` matches nothing, and the
-    # symbol regex still gets a chance to match.
+    # `instrument.symbol` matches the regex. Goes in through `merge_scope`
+    # rather than by assigning the query's `$or`: a dict holds that key
+    # exactly once, and the demo-account exclusion built above already owns
+    # it. Assigning the search clause on top of it silently dropped the demo
+    # filter, so the instant an operator typed into the Orders search box,
+    # DEMO accounts' orders appeared in the live list next to real money —
+    # and nothing raised, the list just got longer. Sibling keys (`status`,
+    # `user_id`) were never the hazard; the one shared key was. Empty
+    # `search_user_ids` is fine — `$in: []` matches nothing, and the symbol
+    # regex still gets a chance to match. Same `$and` splice the positions
+    # and SL/TP branches in this file already use.
     if search_user_ids is not None and search_symbol_regex is not None:
-        query["$or"] = [
-            {"user_id": {"$in": search_user_ids}},
-            {"instrument.symbol": search_symbol_regex},
-        ]
+        merge_scope(
+            query,
+            None,
+            {
+                "$or": [
+                    {"user_id": {"$in": search_user_ids}},
+                    {"instrument.symbol": search_symbol_regex},
+                ]
+            },
+        )
     total = await Order.find(query).count()
     rows = await Order.find(query).sort("-created_at").skip((page - 1) * page_size).limit(page_size).to_list()
 
