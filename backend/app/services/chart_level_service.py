@@ -942,17 +942,27 @@ async def clear_for_admin(admin: User, token: str) -> bool:
     return True
 
 
-def _owner_cascade(
-    user: User, *, include_platform: bool
-) -> list[dict[str, PydanticObjectId | None]]:
+def _owner_cascade(user: User) -> list[dict[str, PydanticObjectId | None]]:
     """Owners to consult for `user`, closest first: immediate broker → parent
     brokers (tip→root) → assigned admin → platform default.
 
-    ``include_platform`` is the one place the two cascades differ. LINES stop
-    at the assigned admin — a sub-admin's users must never be shown the
-    platform's levels, same rule as company banks. VISIBILITY does fall
-    through to the platform, because "the sub-admin didn't choose" has to
-    mean "whatever the super admin said".
+    ONE cascade, for lines and for visibility alike. It used to take an
+    `include_platform` flag that LINES passed as False, on the reasoning that
+    "a sub-admin's users must never be shown the platform's levels, same rule
+    as company banks". The bank rule is about money — you must never point a
+    sub-admin's client at the platform's account — and it does not carry over
+    to drawing hints. What it actually did was strand the super admin: their
+    rows live at (None, None), every user under an admin stopped one step
+    short of it, so a platform-wide change reached only the super admin's own
+    direct clients and nobody else's. Operator, exactly: "super admin se
+    change kar raha hu tab vo sirf super admin ke user ke liye ho raha hai".
+
+    Closest-wins still does the overriding, which is the whole point: a
+    broker's own rows beat their admin's, an admin's beat the platform's, and
+    a tier that has set nothing inherits from above instead of showing an
+    empty chart. The flag is gone rather than flipped — this file already
+    warned that "a second, subtly different one would be a bug waiting to
+    happen", and that is precisely what it turned out to be.
     """
     tried: list[dict[str, PydanticObjectId | None]] = []
     if user.assigned_broker_id is not None:
@@ -963,10 +973,7 @@ def _owner_cascade(
         tried.append({"owner_admin_id": None, "owner_broker_id": parent})
     if user.assigned_admin_id is not None:
         tried.append({"owner_admin_id": user.assigned_admin_id, "owner_broker_id": None})
-        if include_platform:
-            tried.append({"owner_admin_id": None, "owner_broker_id": None})
-    else:
-        tried.append({"owner_admin_id": None, "owner_broker_id": None})
+    tried.append({"owner_admin_id": None, "owner_broker_id": None})
     return tried
 
 
@@ -1011,13 +1018,13 @@ def _admin_cascade(admin: User) -> list[dict[str, PydanticObjectId | None]]:
     """
     own = owner_filter_for_admin(admin)
     return [own] + [
-        f for f in _owner_cascade(admin, include_platform=True) if f != own
+        f for f in _owner_cascade(admin) if f != own
     ]
 
 
 async def visibility_for_user(user: User) -> bool:
     """Should this user see chart lines at all?"""
-    shown, _ = await _resolve_visibility(_owner_cascade(user, include_platform=True))
+    shown, _ = await _resolve_visibility(_owner_cascade(user))
     return shown
 
 
@@ -1146,7 +1153,7 @@ async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
     ``crypto_config_service.resolve_for_user``."""
     if not await visibility_for_user(user):
         return {"levels": [], "trend": None}
-    tried = _owner_cascade(user, include_platform=False)
+    tried = _owner_cascade(user)
 
     # The chart addresses some instruments by SYMBOL where the catalog keys
     # them by token — crypto is "BTCUSD" on screen and "CRYPTO_BTCUSD" in the

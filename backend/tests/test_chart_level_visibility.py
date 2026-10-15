@@ -57,31 +57,36 @@ def rows(monkeypatch):
 
 
 # ── the cascade itself ───────────────────────────────────────────────
-def test_lines_stop_at_the_assigned_admin():
-    """A sub-admin's user must never be shown the PLATFORM's levels — same
-    rule as company banks."""
-    got = cl._owner_cascade(_user(admin=ADMIN_ID, broker=BROKER_ID), include_platform=False)
-    assert got == [BROKER, ADMIN]
+def test_lines_reach_the_platform_like_visibility_does():
+    """This test used to assert the opposite — "a sub-admin's user must never
+    be shown the PLATFORM's levels, same rule as company banks" — and that
+    rule was wrong here. The bank rule is about money and must not point a
+    sub-admin's client at the platform account; chart lines are drawing
+    hints. Stopping at the admin meant a super admin's upload reached only
+    their own direct clients, which is what the operator reported.
 
-
-def test_visibility_falls_through_to_the_platform():
-    """'The sub-admin didn't choose' has to mean 'whatever the super admin
-    said', so this cascade has one more step than the levels one."""
-    got = cl._owner_cascade(_user(admin=ADMIN_ID, broker=BROKER_ID), include_platform=True)
+    One cascade now, for lines and visibility alike."""
+    got = cl._owner_cascade(_user(admin=ADMIN_ID, broker=BROKER_ID))
     assert got == [BROKER, ADMIN, SUPER]
+
+
+def test_the_nearer_tier_still_overrides_the_platform():
+    """Inheriting upward is not the platform overriding everyone: SUPER is
+    LAST, so any tier that has actually set something beats it."""
+    got = cl._owner_cascade(_user(admin=ADMIN_ID, broker=BROKER_ID))
+    assert got[-1] == SUPER
+    assert got.index(BROKER) < got.index(ADMIN) < got.index(SUPER)
 
 
 def test_parent_brokers_come_tip_first():
     root, mid = PydanticObjectId(), PydanticObjectId()
-    got = cl._owner_cascade(
-        _user(admin=ADMIN_ID, broker=BROKER_ID, ancestry=[root, mid]),
-        include_platform=False,
-    )
+    got = cl._owner_cascade(_user(admin=ADMIN_ID, broker=BROKER_ID, ancestry=[root, mid]))
     assert got == [
         BROKER,
         {"owner_admin_id": None, "owner_broker_id": mid},
         {"owner_admin_id": None, "owner_broker_id": root},
         ADMIN,
+        SUPER,
     ]
 
 
