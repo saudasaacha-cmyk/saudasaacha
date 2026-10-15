@@ -91,14 +91,14 @@ async def _publish_wallet_event(
             amt_num = Decimal(str(amount))
             amt_label = f"₹{abs(amt_num):,.2f}"
             if upper == "DEPOSIT":
-                title, body = "✅ Deposit approved", f"{amt_label} added to your wallet"
+                title, body = "Deposit approved", f"{amt_label} added to your wallet"
             elif upper == "WITHDRAWAL":
-                title, body = "✅ Withdrawal processed", f"{amt_label} sent to your bank"
+                title, body = "Withdrawal processed", f"{amt_label} sent to your bank"
             else:  # ADJUSTMENT
                 if amt_num >= 0:
-                    title, body = "💰 Funds added by admin", f"{amt_label} credited"
+                    title, body = "Funds added by admin", f"{amt_label} credited"
                 else:
-                    title, body = "⚠️ Funds deducted by admin", f"{amt_label} debited"
+                    title, body = "Funds deducted by admin", f"{amt_label} debited"
             import asyncio as _asyncio
 
             from app.services.push_service import send_to_user as _push_user

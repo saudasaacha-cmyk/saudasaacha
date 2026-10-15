@@ -287,6 +287,24 @@ async def notify_payment_details_changed(actor, what: str) -> int:
         f"{what} has changed. Please use the latest details shown on the "
         "deposit screen before sending any money."
     )
+    # The SAME warning, said two ways on purpose.
+    #
+    # `message` is the real one and it goes to the bell and the socket,
+    # neither of which anybody filters. The Web Push copy cannot be that
+    # sentence: Chrome runs an on-device spam classifier over every
+    # Android notification's title and body, and "the account details
+    # changed, use the new ones before you send money" is, word for word,
+    # the shape of a payment-redirection scam. The classifier cannot tell
+    # our warning from the fraud it warns about — and it is not wrong to
+    # be suspicious of that sentence.
+    #
+    # A flagged notification is replaced by "Possible spam" with an
+    # Unsubscribe button that REVOKES the site's notification permission
+    # outright, so one bad-looking push costs that user every future one.
+    # So the push says only enough to get them into the app, where the
+    # full wording above is waiting. No amount, no instruction to pay, no
+    # urgency word.
+    push_body = "Your deposit page has been updated — open the app to see the current details."
 
     await Notification.insert_many(
         [
@@ -333,7 +351,7 @@ async def notify_payment_details_changed(actor, what: str) -> int:
         await push_service.send_to_users(
             recipients,
             title=title,
-            body=message,
+            body=push_body,
             url="/wallet",
             tag=f"mp-payment-{actor.id}",
         )

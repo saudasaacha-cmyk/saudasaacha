@@ -503,7 +503,7 @@ async def create_deposit(payload: DepositCreate, user: CurrentUser):
         _asyncio.create_task(
             _push_owners(
                 user.id,
-                title="💰 New deposit request",
+                title="New deposit request",
                 body=f"₹{payload.amount} · {user.full_name or user.user_code} · {payload.payment_mode.upper()}",
                 url="/payments?tab=deposits",
                 tag=f"deposit-{req.id}",
@@ -819,7 +819,7 @@ async def create_withdrawal(payload: WithdrawalCreate, user: CurrentUser):
         _asyncio.create_task(
             _push_owners(
                 user.id,
-                title="🏦 New withdrawal request",
+                title="New withdrawal request",
                 body=f"₹{payload.amount} · {user.full_name or user.user_code}",
                 url="/payments?tab=withdrawals",
                 tag=f"withdrawal-{req.id}",

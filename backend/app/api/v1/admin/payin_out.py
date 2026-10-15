@@ -435,7 +435,7 @@ async def reject_deposit(
         _asyncio.create_task(
             _push_user(
                 r.user_id,
-                title="❌ Deposit rejected",
+                title="Deposit rejected",
                 body=f"{amt_label} was rejected{reason_label}",
                 url="/wallet",
                 tag=f"deposit-rejected-{r.id}",
@@ -876,7 +876,7 @@ async def reject_withdrawal(
         _asyncio.create_task(
             _push_user(
                 r.user_id,
-                title="❌ Withdrawal rejected",
+                title="Withdrawal rejected",
                 body=f"{amt_label} was rejected{reason_label}",
                 url="/wallet",
                 tag=f"withdrawal-rejected-{r.id}",
