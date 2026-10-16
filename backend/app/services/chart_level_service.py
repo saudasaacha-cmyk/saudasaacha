@@ -35,6 +35,7 @@ from app.models.instrument import Instrument
 from app.models.notification import Notification, NotificationLevel, NotificationType
 from app.models.user import User, UserRole, UserStatus
 from app.utils.decimal_utils import to_decimal
+from app.utils.time_utils import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -1371,10 +1372,16 @@ async def notify_levels_changed(actor: User, tokens: set[str] | list[str]) -> in
     except Exception:  # pragma: no cover - a Redis blip must not mute the alert
         logger.debug("chart_levels_notify_gate_unavailable", exc_info=True)
 
+    # One stamp for the whole send, not the per-row default — see the note
+    # in api/v1/admin/notifications.py. The admin sent-history regroups
+    # these rows by their second, and the default splits a big send across
+    # a second boundary into two half-sized entries.
+    sent_at = now_utc()
     await Notification.insert_many(
         [
             Notification(
                 user_id=uid,
+                created_at=sent_at,
                 type=NotificationType.SYSTEM,
                 level=NotificationLevel.INFO,
                 title="Chart lines updated",
@@ -1382,7 +1389,15 @@ async def notify_levels_changed(actor: User, tokens: set[str] | list[str]) -> in
                     "The reference lines on your charts have been updated. "
                     "Open a chart to see the current ones."
                 ),
-                data={"link": "/terminal", "category": "general"},
+                # `category` picks the sound on the user side; keep it.
+                # `source`/`sender_id` are how the admin sent-history
+                # groups and attributes this send.
+                data={
+                    "link": "/terminal",
+                    "category": "general",
+                    "source": "chart_lines",
+                    "sender_id": str(actor.id),
+                },
             )
             for uid in recipients
         ]

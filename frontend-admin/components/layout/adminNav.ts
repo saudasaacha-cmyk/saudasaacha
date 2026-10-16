@@ -92,6 +92,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         empPerm: "active_users",
       },
       { href: "/send-notification", label: "Send Notification", icon: MessageCircle, perm: "users" },
+      // The other half of the composer: what already went out, and to whom.
+      // Same `users` gate — if you can send to a pool you can audit the pool.
+      { href: "/notification-history", label: "Notification History", icon: History, perm: "users" },
     ],
   },
   {

@@ -695,6 +695,47 @@ export const KycAPI = {
     unwrap<any>(api.post(`/admin/kyc/${id}/reject`, { rejection_reason, admin_remark })),
 };
 
+/**
+ * One SEND of a user-facing notification — not one recipient.
+ *
+ * `Notification` is one document per user, so a 674-user broadcast is 674
+ * rows written in the same millisecond. The backend folds them back into a
+ * single row by (title, message, level, source, sender, second): there is no
+ * batch id on the documents, and grouping means the sends that already
+ * happened have a history too, with no migration.
+ */
+export type SentNotification = {
+  title: string;
+  message: string;
+  level: string;
+  /** `admin_broadcast` | `chart_lines` | `payment_details` | `system` —
+   *  `data.source` when the writer set one, else derived from the row. */
+  source: string;
+  /** Null for the sends no admin typed (chart lines, payment details, …),
+   *  and for everything written before attribution was stamped. */
+  sender_id: string | null;
+  sender_name: string | null;
+  sender_code: string | null;
+  recipients: number;
+  read_count: number;
+  sent_at: string;
+  link: string | null;
+};
+
+/** One recipient of one send. Name and code ONLY — client email / mobile are
+ *  masked from admins behind the separate `user_contacts` grant, and a
+ *  "who got this" list has no business re-exposing them.
+ *
+ *  Both go null when the account has since been deleted: the notification
+ *  row outlives the user, so the send still reports it as delivered. */
+export type SentRecipient = {
+  user_id: string;
+  user_code: string | null;
+  full_name: string | null;
+  is_read: boolean;
+  read_at: string | null;
+};
+
 // Admin notification bell — backed by /admin/notifications endpoints.
 // Each row is per-(recipient_admin, event); backend already filters by
 // the caller's admin id, so no scope param is needed here.
@@ -713,6 +754,42 @@ export const NotificationsAPI = {
     unwrap<{ count: number }>(api.get("/admin/notifications/broadcast/recipients")),
   broadcast: (body: { title: string; message: string; link?: string; level?: string }) =>
     unwrap<{ count: number }>(api.post("/admin/notifications/broadcast", body)),
+  /**
+   * History of what went out TO USERS, newest first — broadcasts an admin
+   * typed plus the automatic ones (chart lines, payment details).
+   *
+   * Scoped like every other user list: an admin / broker sees the sends that
+   * reached THEIR users, the super admin sees the platform. Nothing older
+   * than 90 days exists to return — the collection TTLs on `expires_at`.
+   */
+  sent: (params?: {
+    page?: number;
+    page_size?: number;
+    q?: string;
+    source?: string;
+    days?: number;
+  }) =>
+    unwrap<{
+      items: SentNotification[];
+      meta: { page: number; page_size: number; total: number; total_pages: number };
+    }>(api.get("/admin/notifications/sent", { params })),
+  /** Who one send reached. The send is identified by its second + title —
+   *  see `SentNotification` for why that is the key and not an id. */
+  sentRecipients: (params: {
+    sent_at: string;
+    title: string;
+    /** `/sent` groups on six fields; pass these so the drill-down narrows
+     *  the same way. Omitted means "don't narrow on it" — a send that
+     *  predates attribution has no sender to pass. */
+    level?: string;
+    sender_id?: string;
+    page?: number;
+    page_size?: number;
+  }) =>
+    unwrap<{
+      items: SentRecipient[];
+      meta: { page: number; page_size: number; total: number; total_pages: number };
+    }>(api.get("/admin/notifications/sent/recipients", { params })),
 };
 
 export type CryptoConfig = {

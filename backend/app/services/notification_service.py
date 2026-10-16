@@ -48,6 +48,7 @@ from app.models.notification import (
     NotificationType,
 )
 from app.models.user import User, UserRole, UserStatus
+from app.utils.time_utils import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -306,15 +307,31 @@ async def notify_payment_details_changed(actor, what: str) -> int:
     # urgency word.
     push_body = "Your deposit page has been updated — open the app to see the current details."
 
+    # One stamp for the whole send, not the per-row default — see the note
+    # in api/v1/admin/notifications.py. The admin sent-history regroups
+    # these rows by their second, and the default splits a big send across
+    # a second boundary into two half-sized entries.
+    sent_at = now_utc()
     await Notification.insert_many(
         [
             Notification(
                 user_id=uid,
+                created_at=sent_at,
                 type=NotificationType.SYSTEM,
                 level=NotificationLevel.WARNING,
                 title=title,
                 message=message,
-                data={"link": "/wallet", "category": "payment"},
+                # `category` is read by the user-side client to pick the
+                # notification SOUND — leave it alone. `source`/`sender_id`
+                # are what the admin sent-history groups and attributes by;
+                # without them this whole family reads as "system", with
+                # nobody to ask about it.
+                data={
+                    "link": "/wallet",
+                    "category": "payment",
+                    "source": "payment_details",
+                    "sender_id": str(actor.id),
+                },
             )
             for uid in recipients
         ]
