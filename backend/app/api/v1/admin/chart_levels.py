@@ -12,6 +12,7 @@ crypto configs and company banks.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import quote
 
@@ -72,6 +73,32 @@ async def download_template(admin: CurrentAdmin, segment: str = Query(...)):
     )
 
 
+# Tasks are kept referenced until they finish: `asyncio.create_task` holds
+# only a weak reference, so a fire-and-forget task can be collected
+# mid-flight and the fan-out would just stop, silently.
+_announcements: set[asyncio.Task] = set()
+
+
+def _announce(admin, tokens) -> None:
+    """Fire-and-forget: tell the affected users their lines moved.
+
+    Off the request path on purpose. The fan-out walks a few hundred users
+    and writes a row each; an admin saving a sheet should not wait for it,
+    and a failure in it must never turn a successful save into an error.
+
+    `tokens` are the instruments that actually changed — the fan-out needs
+    them to tell "this user's own admin overrides THIS instrument" from
+    "that admin happens to own a row somewhere else".
+    """
+    if not tokens:
+        return
+    task = asyncio.create_task(
+        chart_level_service.notify_levels_changed(admin, tokens)
+    )
+    _announcements.add(task)
+    task.add_done_callback(_announcements.discard)
+
+
 @router.post("/import", response_model=APIResponse[dict])
 async def import_levels(admin: CurrentAdmin, file: UploadFile = File(...)):
     """Upload a filled template. Replaces each listed instrument's lines."""
@@ -93,6 +120,10 @@ async def import_levels(admin: CurrentAdmin, file: UploadFile = File(...)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    # A sheet that changed nothing is not news. `errors` alone can be
+    # non-empty on a wholly rejected upload, so gate on real writes.
+    if result.get("updated") or result.get("cleared"):
+        _announce(admin, result.get("tokens"))
     return APIResponse(data=result)
 
 
@@ -166,6 +197,8 @@ async def clear_levels(token: str, admin: CurrentAdmin):
     if not re.fullmatch(r"[A-Za-z0-9_:.\-]{1,64}", token):
         raise HTTPException(status_code=400, detail="Invalid token.")
     removed = await chart_level_service.clear_for_admin(admin, token)
+    if removed:
+        _announce(admin, [token])
     return APIResponse(data={"cleared": removed})
 
 
@@ -196,4 +229,9 @@ async def save_levels(token: str, body: LevelsIn, admin: CurrentAdmin):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    # Not every Save is a change: `changed` is False when the row was
+    # already blank and stayed blank. Without this, clicking Save on an
+    # untouched instrument would tell every user their lines moved.
+    if result.get("changed"):
+        _announce(admin, [token])
     return APIResponse(data=result)

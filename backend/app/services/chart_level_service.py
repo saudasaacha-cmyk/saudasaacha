@@ -13,6 +13,7 @@ second, subtly different one would be a bug waiting to happen.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_EVEN, Decimal
@@ -27,10 +28,15 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from app.core.dependencies import _pool_clause, merge_scope
+from app.core.redis_client import get_redis
 from app.models.chart_level import ChartLevel, ChartLevelEntry, ChartLevelVisibility
 from app.models.instrument import Instrument
+from app.models.notification import Notification, NotificationLevel, NotificationType
 from app.models.user import User, UserRole, UserStatus
 from app.utils.decimal_utils import to_decimal
+
+logger = logging.getLogger(__name__)
 
 # How many line columns a FRESH template ships with, and how many slots the
 # inline editor shows. The import has no cap: the operator adds as many
@@ -667,6 +673,7 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
     updated = cleared = 0
     errors: list[str] = []
     touched: dict[str, list[Decimal]] = {}
+    changed_tokens: list[str] = []
 
     for row in rows[body_start:]:
         if not row or row[0] in (None, ""):
@@ -702,6 +709,11 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
         )
         if n_saved is None:
             continue
+        # Every instrument the sheet actually moved, saved OR cleared.
+        # `touched` holds only the saved ones (it feeds the off-screen price
+        # check), and a cleared instrument is just as much a change to the
+        # person whose chart it vanishes from.
+        changed_tokens.append(token)
         if n_saved:
             updated += 1
             touched[token] = [e.price.to_decimal() for e in entries]
@@ -713,6 +725,7 @@ async def import_workbook(admin: User, data: bytes) -> dict[str, Any]:
         "cleared": cleared,
         "errors": errors,
         "warnings": await _offscreen_warnings(touched, known),
+        "tokens": changed_tokens,
     }
 
 
@@ -926,7 +939,13 @@ async def save_levels(
         admin, inst, entries, owner_filter_for_admin(admin), trend=normalize_trend(trend),
         token=token if row_symbol else None, symbol=row_symbol,
     )
-    return {"saved": bool(saved), "levels": len(entries)}
+    # `changed` carries the third state `saved` throws away. `_upsert`
+    # answers True/False/None — saved / cleared / nothing-to-do — and
+    # `bool()` folds the last two together, so a Save pressed on an
+    # already-blank row looked exactly like a real clear. The caller needs
+    # to tell them apart before it announces a change to a few hundred
+    # people who would find nothing different on their chart.
+    return {"saved": bool(saved), "levels": len(entries), "changed": saved is not None}
 
 
 async def clear_for_admin(admin: User, token: str) -> bool:
@@ -986,6 +1005,27 @@ async def _visibility_row(
     )
 
 
+def _decide_visibility(
+    rows: list[ChartLevelVisibility | None],
+) -> tuple[bool, bool]:
+    """(shown, locked) from the cascade's rows, closest first.
+
+    Pure, because it is asked two ways: once per user against the database,
+    and once over a preloaded dict when fanning a notification out to a few
+    hundred users at a time. Two copies of "whose switch wins" is how the
+    lines and visibility cascades drifted apart in the first place.
+    """
+    nearest: ChartLevelVisibility | None = None
+    for row in rows:
+        if row is None:
+            continue
+        if row.locked:
+            return row.enabled, True
+        if nearest is None:
+            nearest = row
+    return (nearest.enabled if nearest is not None else True), False
+
+
 async def _resolve_visibility(
     cascade: list[dict[str, PydanticObjectId | None]],
 ) -> tuple[bool, bool]:
@@ -996,17 +1036,12 @@ async def _resolve_visibility(
     cannot switch their own lines back on. Failing that, the nearest row of
     any kind wins. Nobody has decided anything = shown, which is how the
     feature behaved before the switch existed.
+
+    One row per step, which is fine for a single user; the notification
+    fan-out preloads the whole (tiny) collection instead and hands the rows
+    to the same `_decide_visibility`.
     """
-    nearest: ChartLevelVisibility | None = None
-    for f in cascade:
-        row = await _visibility_row(f)
-        if row is None:
-            continue
-        if row.locked:
-            return row.enabled, True
-        if nearest is None:
-            nearest = row
-    return (nearest.enabled if nearest is not None else True), False
+    return _decide_visibility([await _visibility_row(f) for f in cascade])
 
 
 def _admin_cascade(admin: User) -> list[dict[str, PydanticObjectId | None]]:
@@ -1184,3 +1219,176 @@ async def resolve_for_user(user: User, token: str) -> dict[str, Any]:
                 full = to_dict(doc, inst.tick_size if inst else None)
                 return {"levels": full["levels"], "trend": full["trend"]}
     return {"levels": [], "trend": None}
+
+
+# ── "the lines changed" fan-out ──────────────────────────────────────
+# One bell row per admin action, to the people whose chart actually moved.
+#
+# Two things here were wrong on the first attempt and are worth naming,
+# because both failed SILENTLY and both looked fine in review:
+#
+#   * the shadow check asked a per-OWNER question of per-TOKEN data. Chart
+#     lines resolve per (owner, token), so an admin holding ONE row for
+#     GOLD made `holders` contain that admin — which suppressed every
+#     super-admin announcement to that admin's entire pool, for every
+#     instrument, including the 499 the admin never touched. The
+#     "precision" filter turned "sab user ko jayega" into "almost nobody".
+#     Hence `tokens`: the shadow is now asked about the instruments that
+#     actually changed.
+#
+#   * it published to `user:{id}:notification`, which the comment called
+#     "bell + live socket, deliberately not a push". Read the client
+#     before believing that: `UserWsBridge.tsx:241` handles that envelope
+#     by raising an OS tray notification through the service worker
+#     (`renotify: true`), playing a sound, AND reading the message aloud
+#     over text-to-speech. One admin typing one price would have made
+#     every connected terminal talk. So this writes the Notification row
+#     and stops; the bell picks it up on its next refetch. Quiet by
+#     construction rather than by intention.
+_NOTIFY_COOLDOWN_SEC = 600
+
+# CLIENT, DEALER and MASTER all trade and all see charts. Matching the
+# spelling used by the accounts dashboard rather than inventing a third.
+_CHART_ROLES = [UserRole.CLIENT.value, UserRole.DEALER.value, UserRole.MASTER.value]
+
+
+def _owner_key(f: dict[str, PydanticObjectId | None]) -> tuple[str | None, str | None]:
+    """Hashable form of an owner filter, for set membership."""
+    a, b = f["owner_admin_id"], f["owner_broker_id"]
+    return (str(a) if a else None, str(b) if b else None)
+
+
+async def _holders_of(tokens: set[str]) -> set[tuple[tuple[str | None, str | None], str]]:
+    """`{(owner_key, token)}` for the instruments that just changed.
+
+    Scoped to `tokens` on purpose — see the note above. Asking "does this
+    owner hold ANY rows" is a different and much broader question than the
+    one closest-wins actually answers.
+    """
+    out: set[tuple[tuple[str | None, str | None], str]] = set()
+    if not tokens:
+        return out
+    async for r in ChartLevel.get_motor_collection().aggregate(
+        [
+            {"$match": {"token": {"$in": sorted(tokens)}}},
+            {"$group": {"_id": {"a": "$owner_admin_id", "b": "$owner_broker_id", "t": "$token"}}},
+        ]
+    ):
+        k = r["_id"]
+        out.add((_owner_key({"owner_admin_id": k["a"], "owner_broker_id": k["b"]}), k["t"]))
+    return out
+
+
+def _change_reaches(
+    chain: list[dict[str, PydanticObjectId | None]],
+    own_key: tuple[str | None, str | None],
+    tokens: set[str],
+    holders: set[tuple[tuple[str | None, str | None], str]],
+    vis_rows: dict[tuple[str | None, str | None], ChartLevelVisibility],
+) -> bool:
+    """Did a change by `own_key` to `tokens` alter what this user's chart draws?
+
+    True when at least ONE changed instrument reaches them. Per instrument,
+    a nearer tier holding a row for THAT instrument shadows the actor — the
+    slice stops before the actor's own key, so "I cleared my last row" still
+    reaches the people who were reading it. A user with lines switched off
+    hears nothing, having nothing to see.
+    """
+    keys = [_owner_key(f) for f in chain]
+    if own_key not in keys:
+        return False
+    shown, _ = _decide_visibility([vis_rows.get(k) for k in keys])
+    if not shown:
+        return False
+    nearer = keys[: keys.index(own_key)]
+    return any(
+        not any((k, token) in holders for k in nearer)
+        for token in tokens
+    )
+
+
+async def notify_levels_changed(actor: User, tokens: set[str] | list[str]) -> int:
+    """Tell everyone beneath `actor` whose chart these instruments moved on.
+
+    Who hears it, in the operator's words: super admin changes it and every
+    user hears; an admin changes it and that admin's users plus every broker
+    and sub-broker beneath them hear; a broker changes it and that broker's
+    subtree hears.
+
+    Who does not: anyone a nearer tier already overrides FOR THOSE
+    INSTRUMENTS, anyone with chart lines switched off, and everyone if the
+    same actor already announced within `_NOTIFY_COOLDOWN_SEC` — filling a
+    sheet is iterative, and six saves is one change to the reader.
+
+    Best-effort throughout: a failure here must never fail the save that
+    triggered it.
+    """
+    tokens = {t for t in (tokens or ()) if t}
+    if not tokens:
+        return 0
+
+    own = owner_filter_for_admin(actor)
+    own_key = _owner_key(own)
+
+    base: dict[str, Any] = {
+        "role": {"$in": _CHART_ROLES},
+        "status": UserStatus.ACTIVE.value,
+        "is_demo": {"$ne": True},
+    }
+    # SUPER_ADMIN owns the platform row, which sits at the END of every
+    # cascade — so their reach is everyone, where `_pool_clause` would
+    # answer the narrower "my own direct clients".
+    if actor.role != UserRole.SUPER_ADMIN:
+        merge_scope(base, await _pool_clause(actor))
+
+    candidates = await User.find(base).to_list()
+    if not candidates:
+        return 0
+
+    holders = await _holders_of(tokens)
+    vis_rows = {
+        _owner_key({"owner_admin_id": v.owner_admin_id, "owner_broker_id": v.owner_broker_id}): v
+        for v in await ChartLevelVisibility.find_all().to_list()
+    }
+    recipients = [
+        u.id
+        for u in candidates
+        if _change_reaches(_owner_cascade(u), own_key, tokens, holders, vis_rows)
+    ]
+    if not recipients:
+        logger.info("chart_levels_notify_nobody actor=%s tokens=%d", actor.id, len(tokens))
+        return 0
+
+    # Claimed only now that there is something to send. Burning it earlier
+    # meant a run that reached nobody — a save shadowed for every user —
+    # silenced the next ten minutes of real changes.
+    try:
+        r = get_redis()
+        gate = f"chartlines:notified:{own_key[0]}:{own_key[1]}"
+        if not await r.set(gate, "1", ex=_NOTIFY_COOLDOWN_SEC, nx=True):
+            logger.info("chart_levels_notify_cooldown actor=%s", actor.id)
+            return 0
+    except Exception:  # pragma: no cover - a Redis blip must not mute the alert
+        logger.debug("chart_levels_notify_gate_unavailable", exc_info=True)
+
+    await Notification.insert_many(
+        [
+            Notification(
+                user_id=uid,
+                type=NotificationType.SYSTEM,
+                level=NotificationLevel.INFO,
+                title="Chart lines updated",
+                message=(
+                    "The reference lines on your charts have been updated. "
+                    "Open a chart to see the current ones."
+                ),
+                data={"link": "/terminal", "category": "general"},
+            )
+            for uid in recipients
+        ]
+    )
+    logger.info(
+        "chart_levels_notified actor=%s role=%s users=%d tokens=%d",
+        actor.id, actor.role, len(recipients), len(tokens),
+    )
+    return len(recipients)
