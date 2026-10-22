@@ -222,9 +222,20 @@ export function WithdrawalsPanel() {
     {
       key: "utr_number",
       header: "UTR",
-      render: (r) => (
-        <CopyableField value={r.utr_number ?? null} label="UTR" />
-      ),
+      // A cash payout has no UTR and no destination — where it is to be
+      // handed over is the only thing an approver can check it against,
+      // so it takes this column rather than leaving it blank.
+      render: (r: any) =>
+        r.payout_mode === "CASH" ? (
+          <div className="flex max-w-[170px] flex-col items-start leading-tight">
+            <span className="text-[11px] font-semibold uppercase text-muted-foreground">Cash</span>
+            <span className="truncate text-xs" title={[r.cash_area, r.cash_city].filter(Boolean).join(", ")}>
+              {[r.cash_area, r.cash_city].filter(Boolean).join(", ") || "—"}
+            </span>
+          </div>
+        ) : (
+          <CopyableField value={r.utr_number ?? null} label="UTR" />
+        ),
     },
     {
       key: "proof_url",

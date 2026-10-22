@@ -779,9 +779,23 @@ async def create_withdrawal(payload: WithdrawalCreate, user: CurrentUser):
     upi_id = (b.get("upi_id") or "").strip()
     account_number = (b.get("account_number") or "").strip()
 
+    # Cash payout: collected in person, so there is no destination to
+    # validate and every bank gate below is skipped. Where it will be
+    # handed over takes its place — the same thing a cash DEPOSIT records,
+    # and for the same reason: no UTR, no account, so the place is the
+    # only thing an admin can check it against.
+    _is_cash = str(payload.payout_mode or "BANK").upper() == "CASH"
+    if _is_cash and not (
+        (payload.cash_city or "").strip() and (payload.cash_area or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="City and area are required for a cash withdrawal.",
+        )
+
     # UPI payout channel gate (admin-configurable). When the admin disabled UPI
     # withdrawals for this pool, drop any UPI id — the user must use a bank.
-    if upi_id and not _wd_rule.get("allow_upi_payout", True):
+    if not _is_cash and upi_id and not _wd_rule.get("allow_upi_payout", True):
         upi_id = ""
         if not (account_number and (b.get("ifsc") or "").strip()):
             raise HTTPException(
@@ -793,7 +807,7 @@ async def create_withdrawal(payload: WithdrawalCreate, user: CurrentUser):
     # not require the user to save the destination — every withdrawal
     # carries its own snapshot so they can pay to a different account
     # any time without managing a saved-banks list.
-    if not upi_id and not (account_number and (b.get("ifsc") or "").strip()):
+    if not _is_cash and not upi_id and not (account_number and (b.get("ifsc") or "").strip()):
         raise HTTPException(
             status_code=400,
             detail="Provide either a UPI ID or full bank details (account number + IFSC).",
@@ -802,7 +816,7 @@ async def create_withdrawal(payload: WithdrawalCreate, user: CurrentUser):
     # Bank-required gate (admin-configurable, per-pool, default OFF). When the
     # user's effective WITHDRAWAL rule turns `require_bank_details` on, full bank
     # details are MANDATORY — a UPI ID alone won't do. `_wd_rule` resolved above.
-    if _wd_rule.get("require_bank_details") and not (
+    if not _is_cash and _wd_rule.get("require_bank_details") and not (
         account_number and (b.get("ifsc") or "").strip()
     ):
         raise HTTPException(
@@ -836,6 +850,9 @@ async def create_withdrawal(payload: WithdrawalCreate, user: CurrentUser):
         user_id=user.id,
         amount=to_decimal128(payload.amount),
         bank=snap,
+        payout_mode="CASH" if _is_cash else "BANK",
+        cash_city=(payload.cash_city or "").strip() if _is_cash else None,
+        cash_area=(payload.cash_area or "").strip() if _is_cash else None,
         remarks=payload.remarks,
         status=WithdrawalStatus.PENDING,
         idempotency_key=idem,
@@ -924,6 +941,9 @@ async def my_withdrawals(user: CurrentUser):
                 "bank": r.bank.model_dump(),
                 "status": r.status.value,
                 "remarks": r.remarks,
+                "payout_mode": r.payout_mode,
+                "cash_city": r.cash_city,
+                "cash_area": r.cash_area,
                 "utr_number": r.utr_number,
                 # The payment proof the admin attached. The whole reason
                 # it is stored is for the user to see it, so it ships on

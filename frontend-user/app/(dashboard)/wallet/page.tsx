@@ -44,7 +44,7 @@ import { WdRulesBanner } from "@/components/common/WdRulesBanner";
 import { AddFundsWizard } from "@/components/wallet/AddFundsWizard";
 import { BonusCard } from "@/components/wallet/BonusCard";
 import { cn, formatINR, pnlColor } from "@/lib/utils";
-import { buildMailtoUrl, buildWhatsappUrl, useBrandName, useDepositSupportPrefill, useSupportContacts } from "@/lib/useSupport";
+import { buildMailtoUrl, buildWhatsappUrl, useBrandName, useCashWithdrawalWhatsapp, useDepositSupportPrefill, useSupportContacts } from "@/lib/useSupport";
 
 // ─────────────────────────────────────────────────────────────────
 // Official-style UPI logo mark (orange/green chevrons + UPI text).
@@ -86,6 +86,7 @@ function UpiLogo({ className }: { className?: string }) {
 export default function WalletPage() {
   const qc = useQueryClient();
   const authUser = useAuthStore((s) => s.user);
+  const cashWithdrawalWhatsapp = useCashWithdrawalWhatsapp();
   const isDemo = authUser?.is_demo ?? false;
   const { data: summary } = useQuery({
     queryKey: ["wallet-summary"],
@@ -122,6 +123,13 @@ export default function WalletPage() {
   // ── Dialogs ─────────────────────────────────────────────────────
   const [depositOpen, setDepositOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
+  // BANK (transfer / UPI, the existing flow) or CASH (collected in
+  // person). Cash has no destination at all, so the whole "Withdraw to"
+  // block and every bank rule below are skipped for it — where it will be
+  // handed over takes their place, exactly as a cash DEPOSIT records it.
+  const [wdPayout, setWdPayout] = useState<"BANK" | "CASH">("BANK");
+  const [wdCashCity, setWdCashCity] = useState("");
+  const [wdCashArea, setWdCashArea] = useState("");
   const [demoUpgradeOpen, setDemoUpgradeOpen] = useState(false);
 
   function openDeposit() {
@@ -130,6 +138,9 @@ export default function WalletPage() {
   }
   function openWithdraw() {
     if (isDemo) { setDemoUpgradeOpen(true); return; }
+    setWdPayout("BANK");
+    setWdCashCity("");
+    setWdCashArea("");
     setWithdrawOpen(true);
   }
 
@@ -267,25 +278,35 @@ export default function WalletPage() {
   async function submitWithdrawal() {
     if (wdSubmitting) return; // guard against double / triple clicks
     if (!wd.amount || Number(wd.amount) <= 0) return toast.error("Amount required");
-    if (!savedMethods.length) return toast.error("Add a bank or UPI to withdraw to");
+
+    const isCash = wdPayout === "CASH";
+    if (isCash && !(wdCashCity.trim() && wdCashArea.trim()))
+      return toast.error("Enter the city and area where you want to collect the cash");
+    if (!isCash && !savedMethods.length)
+      return toast.error("Add a bank or UPI to withdraw to");
 
     // Build the destination from the saved method(s) the user picked. Default
     // ("PRIMARY") sends the primary bank + primary UPI together so the admin
     // can pay by either; otherwise a single chosen method.
+    // Destination, for a BANK payout only. Cash is collected in person,
+    // so there is nothing to build and nothing to validate — the city and
+    // area checked above are its whole address.
     const bank: Record<string, string> = {};
-    if (wdChoice === "PRIMARY") {
-      if (primaryBank) applyMethodToBank(primaryBank, bank);
-      if (primaryUpi && upiAllowed) applyMethodToBank(primaryUpi, bank);
-    } else {
-      const m = savedMethods.find((x) => x.id === wdChoice);
-      if (!m) return toast.error("Select where to withdraw");
-      applyMethodToBank(m, bank);
+    if (!isCash) {
+      if (wdChoice === "PRIMARY") {
+        if (primaryBank) applyMethodToBank(primaryBank, bank);
+        if (primaryUpi && upiAllowed) applyMethodToBank(primaryUpi, bank);
+      } else {
+        const m = savedMethods.find((x) => x.id === wdChoice);
+        if (!m) return toast.error("Select where to withdraw");
+        applyMethodToBank(m, bank);
+      }
+      const hasUpi = !!bank.upi_id;
+      const hasBank = !!(bank.account_number && bank.ifsc);
+      if (!hasUpi && !hasBank) return toast.error("Select where to withdraw");
+      if (requireBank && !hasBank)
+        return toast.error("Bank details are required — pick a bank account");
     }
-    const hasUpi = !!bank.upi_id;
-    const hasBank = !!(bank.account_number && bank.ifsc);
-    if (!hasUpi && !hasBank) return toast.error("Select where to withdraw");
-    if (requireBank && !hasBank)
-      return toast.error("Bank details are required — pick a bank account");
 
     // One stable key per intended withdrawal — reused if the user retries
     // after a network blip, so the backend dedups instead of double-booking.
@@ -302,10 +323,30 @@ export default function WalletPage() {
         amount: Number(wd.amount),
         remarks: wd.remarks,
         bank,
+        payout_mode: wdPayout,
+        cash_city: isCash ? wdCashCity.trim() : undefined,
+        cash_area: isCash ? wdCashArea.trim() : undefined,
         idempotency_key: wdIdemRef.current,
-      });
+      } as any);
       toast.success("Withdrawal requested");
       wdIdemRef.current = "";
+      if (isCash) {
+        // Same hand-off as a cash deposit, for the same reason: there is
+        // no account and no reference, so support would have to ask for
+        // every one of these fields before arranging the handover.
+        const wa = cashWithdrawalWhatsapp({
+          amount: Number(wd.amount),
+          city: wdCashCity.trim(),
+          area: wdCashArea.trim(),
+          note: wd.remarks?.trim() || undefined,
+          userCode: authUser?.user_code,
+          userName: authUser?.full_name,
+        });
+        if (wa) {
+          const win = window.open(wa, "_blank");
+          if (!win) window.location.href = wa;
+        }
+      }
       setWithdrawOpen(false);
       setWd({
         amount: "",
@@ -728,6 +769,33 @@ export default function WalletPage() {
           {/* Rules banner — withdraw is the more-restricted side
               (day + time window + mandatory-remark typically matter). */}
           <WdRulesBanner kind="withdrawal" className="mb-2" />
+
+          {/* How, before how much — same shape as the deposit flow. */}
+          <div className="grid grid-cols-2 gap-2">
+            {(["BANK", "CASH"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setWdPayout(m)}
+                className={cn(
+                  "rounded-lg border px-3 py-2.5 text-left transition",
+                  wdPayout === m
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted/40",
+                )}
+              >
+                <span className="block text-sm font-semibold">
+                  {m === "BANK" ? "Withdraw to bank" : "Withdraw in cash"}
+                </span>
+                <span className="block text-[11px] text-muted-foreground">
+                  {m === "BANK"
+                    ? "Bank transfer or UPI"
+                    : "Collect in person — tell us where"}
+                </span>
+              </button>
+            ))}
+          </div>
+
           <div className="space-y-3">
             <Field label="Amount (₹)">
               <Input
@@ -739,8 +807,11 @@ export default function WalletPage() {
             </Field>
 
             {/* Withdraw to — saved bank accounts + UPIs. Just pick one
-                (default = primary bank + primary UPI); no re-typing. */}
-            <div className="space-y-2 rounded-md border border-border p-3">
+                (default = primary bank + primary UPI); no re-typing.
+                Hidden for a cash payout: there is no account to pay into,
+                and leaving it up would make a required-looking field
+                block a withdrawal that does not need it. */}
+            <div className={cn("space-y-2 rounded-md border border-border p-3", wdPayout === "CASH" && "hidden")}>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold">Withdraw to</span>
                 <button
@@ -881,6 +952,27 @@ export default function WalletPage() {
                 <p className="text-[10px] text-amber-500">A bank account is required for withdrawals.</p>
               )}
             </div>
+
+            {wdPayout === "CASH" && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="City">
+                  <Input
+                    value={wdCashCity}
+                    maxLength={80}
+                    placeholder="Indore"
+                    onChange={(e) => setWdCashCity(e.target.value)}
+                  />
+                </Field>
+                <Field label="Area">
+                  <Input
+                    value={wdCashArea}
+                    maxLength={120}
+                    placeholder="Vijay Nagar"
+                    onChange={(e) => setWdCashArea(e.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
 
             <Field label="Remarks (optional)">
               <Input value={wd.remarks} onChange={(e) => setWd((d) => ({ ...d, remarks: e.target.value }))} />

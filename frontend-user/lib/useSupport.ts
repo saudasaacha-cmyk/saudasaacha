@@ -178,6 +178,38 @@ export function useCashDepositWhatsapp(): (d: {
   };
 }
 
+/** The WhatsApp hand-off for a cash WITHDRAWAL the user just requested.
+ *
+ *  Same reasoning as the deposit one: cash has no account and no
+ *  reference, so support would otherwise have to ask for every field
+ *  before they could arrange the handover.
+ */
+export function useCashWithdrawalWhatsapp(): (d: {
+  amount: number;
+  city: string;
+  area: string;
+  note?: string;
+  userCode?: string;
+  userName?: string;
+}) => string | null {
+  const { data: support } = useSupportContacts();
+  const name = useBrandName();
+  return (d) => {
+    const lines = [
+      name ? `Cash withdrawal requested — ${name}` : "Cash withdrawal requested",
+      "",
+      `Amount: Rs ${d.amount}`,
+      `Collect at — City: ${d.city}`,
+      `Area: ${d.area}`,
+    ];
+    if (d.note) lines.push(`Remarks: ${d.note}`);
+    if (d.userCode) lines.push(`Client code: ${d.userCode}`);
+    if (d.userName) lines.push(`Name: ${d.userName}`);
+    lines.push("", "Awaiting approval. Please confirm the handover.");
+    return buildWhatsappUrl(support?.whatsapp, lines.join("\n"));
+  };
+}
+
 /** Per-category alert tones, set by the admin in Platform Settings. */
 export function fetchNotifySounds() {
   return unwrap<Record<string, string>>(api.get("/user/support/notify-sounds"));

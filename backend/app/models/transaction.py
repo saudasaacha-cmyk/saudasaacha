@@ -185,6 +185,17 @@ class WithdrawalRequest(TimestampMixin):
     bank: BankSnapshot
     remarks: str | None = None
     utr_number: str | None = None  # filled by admin after disbursal
+    # How the money leaves: BANK (the default, a transfer or UPI to the
+    # `bank` snapshot above) or CASH (handed over in person).
+    #
+    # A cash payout carries no destination at all — that is the point, and
+    # it is why `bank` holds an empty snapshot for these rows rather than
+    # being made optional: every reader of this collection already assumes
+    # the field exists, and an audit record that silently changes shape by
+    # mode is how those readers start crashing.
+    payout_mode: str = "BANK"
+    cash_city: str | None = None
+    cash_area: str | None = None
     # Payment proof the ADMIN attaches (slip, screenshot, receipt). Visible
     # to the user, which is the point: "paid" with nothing to show is what
     # generates the next support ticket. Admin-written only — the user

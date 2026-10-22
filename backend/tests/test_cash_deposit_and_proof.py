@@ -132,3 +132,36 @@ def test_the_user_sees_the_proof():
     """Storing it is pointless if it never reaches the person waiting for
     their money."""
     assert '"proof_url": r.proof_url' in inspect.getsource(wallet)
+
+
+# ── cash WITHDRAWAL: the same idea, pointing the other way ───────────
+def test_a_withdrawal_can_be_paid_in_cash():
+    for field in ("payout_mode", "cash_city", "cash_area"):
+        assert field in WithdrawalRequest.model_fields, field
+    # BANK stays the default, so every existing row and every existing
+    # client keeps the behaviour it had.
+    assert WithdrawalRequest.model_fields["payout_mode"].default == "BANK"
+
+
+def test_the_bank_snapshot_did_not_become_optional():
+    """A cash row carries an EMPTY snapshot rather than none. Every reader
+    of this collection already assumes the field exists, and an audit
+    record that changes shape by mode is how those readers start
+    crashing."""
+    assert WithdrawalRequest.model_fields["bank"].is_required() or (
+        WithdrawalRequest.model_fields["bank"].default_factory is not None
+    )
+
+
+def test_cash_skips_every_destination_gate_and_demands_a_place():
+    """The three bank gates — UPI allowed, one-of-bank-or-UPI, and the
+    per-pool require_bank_details — all exist to validate a destination.
+    Cash has none, so each is skipped; the city and area replace them."""
+    src = inspect.getsource(wallet)
+    assert "City and area are required for a cash withdrawal." in src
+    for gate in (
+        'if not _is_cash and upi_id and not _wd_rule.get("allow_upi_payout", True):',
+        "if not _is_cash and not upi_id and not (account_number",
+        'if not _is_cash and _wd_rule.get("require_bank_details")',
+    ):
+        assert gate in src, gate

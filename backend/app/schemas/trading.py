@@ -315,7 +315,13 @@ class DepositCreate(BaseModel):
 
 class WithdrawalCreate(BaseModel):
     amount: float = Field(gt=0)
-    bank: dict[str, Any]
+    # Optional because a CASH payout has no destination. The endpoint
+    # still demands a bank or UPI for the BANK mode, so the existing
+    # flow is unchanged.
+    bank: dict[str, Any] = Field(default_factory=dict)
+    payout_mode: str = "BANK"
+    cash_city: str | None = Field(default=None, max_length=80)
+    cash_area: str | None = Field(default=None, max_length=120)
     remarks: str | None = None
     # See DepositCreate — guarantees one request per intended withdrawal.
     idempotency_key: str | None = None
