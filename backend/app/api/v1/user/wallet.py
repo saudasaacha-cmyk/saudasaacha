@@ -384,6 +384,47 @@ async def submit_gateway_utr(payload: _SubmitUtrBody, user: CurrentUser):
     return APIResponse(data={"status": str(st.get("status") or "pending"), "credited": False})
 
 
+def _check_deposit_proof(payload) -> tuple[bool, bool]:
+    """Validate the per-mode proof. Returns `(is_crypto, is_cash)`.
+
+    Proof is mandatory so the admin has something to approve ON, and what
+    counts as proof differs by mode:
+
+      * CRYPTO — the on-chain tx hash IS the proof; a screenshot is an
+        alternative to it, not an addition;
+      * CASH — no UTR and no bank row to reconcile against, so the slip
+        plus WHERE it changed hands is the whole audit trail. City and
+        area are required rather than optional, because a cash deposit
+        without them is a row nobody can follow up on when it is disputed;
+      * everything else — the payment screenshot, as before.
+
+    Lifted out of the endpoint because "what counts as proof for this
+    mode" is one question worth reading in one place, and because adding
+    the cash arm inline tipped an already-long handler past its limit.
+    """
+    mode = str(payload.payment_mode or "").upper()
+    is_crypto = mode == "CRYPTO"
+    is_cash = mode == "CASH"
+    shot = (payload.screenshot_url or "").strip()
+
+    if is_crypto:
+        if not ((payload.crypto_tx_hash or "").strip() or shot):
+            raise HTTPException(
+                status_code=400,
+                detail="Enter the transaction hash (or upload a screenshot) for your crypto payment.",
+            )
+    elif not shot:
+        raise HTTPException(status_code=400, detail="Payment screenshot is required.")
+
+    if is_cash and not (
+        (payload.cash_city or "").strip() and (payload.cash_area or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400, detail="City and area are required for a cash deposit."
+        )
+    return is_crypto, is_cash
+
+
 @router.post("/deposits", response_model=APIResponse[dict])
 async def create_deposit(payload: DepositCreate, user: CurrentUser):
     if getattr(user, "is_demo", False):
@@ -444,15 +485,7 @@ async def create_deposit(payload: DepositCreate, user: CurrentUser):
     # Proof is mandatory so the admin can verify before approving. For a
     # CRYPTO deposit the on-chain tx hash IS the proof (screenshot optional);
     # for INR the payment screenshot is required as before.
-    _is_crypto = str(payload.payment_mode or "").upper() == "CRYPTO"
-    if _is_crypto:
-        if not ((payload.crypto_tx_hash or "").strip() or (payload.screenshot_url or "").strip()):
-            raise HTTPException(
-                status_code=400,
-                detail="Enter the transaction hash (or upload a screenshot) for your crypto payment.",
-            )
-    elif not (payload.screenshot_url or "").strip():
-        raise HTTPException(status_code=400, detail="Payment screenshot is required.")
+    _is_crypto, _is_cash = _check_deposit_proof(payload)
 
     # Idempotency: a client-supplied key dedups double / triple clicks and
     # retried-after-timeout requests — if a deposit with this key already
@@ -482,6 +515,8 @@ async def create_deposit(payload: DepositCreate, user: CurrentUser):
         crypto_network=payload.crypto_network if _is_crypto else None,
         crypto_address=payload.crypto_address if _is_crypto else None,
         crypto_tx_hash=payload.crypto_tx_hash if _is_crypto else None,
+        cash_city=(payload.cash_city or "").strip() if _is_cash else None,
+        cash_area=(payload.cash_area or "").strip() if _is_cash else None,
     )
     await req.insert()
     # Scope-aware push fan-out — survives PWA force-stop / locked phone
@@ -575,6 +610,8 @@ async def my_deposits(user: CurrentUser):
                 "payment_mode": r.payment_mode.value,
                 "utr_number": r.utr_number,
                 "screenshot_url": r.screenshot_url,
+                "cash_city": r.cash_city,
+                "cash_area": r.cash_area,
                 "status": r.status.value,
                 "user_remark": r.user_remark,
                 "admin_remark": r.admin_remark,
@@ -888,6 +925,10 @@ async def my_withdrawals(user: CurrentUser):
                 "status": r.status.value,
                 "remarks": r.remarks,
                 "utr_number": r.utr_number,
+                # The payment proof the admin attached. The whole reason
+                # it is stored is for the user to see it, so it ships on
+                # the user's own withdrawal list.
+                "proof_url": r.proof_url,
                 "rejection_reason": r.rejection_reason,
                 "created_at": r.created_at,
                 "processed_at": r.processed_at,

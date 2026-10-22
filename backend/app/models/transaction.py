@@ -100,6 +100,10 @@ class PaymentMode(StrEnum):
     NEFT = "NEFT"
     RTGS = "RTGS"
     IMPS = "IMPS"
+    # Handed over in person. No UTR and no bank row to match against, so
+    # the city/area below plus the uploaded slip ARE the audit trail — the
+    # admin approves on those the way they approve on a screenshot.
+    CASH = "CASH"
 
 
 class DepositRequest(TimestampMixin):
@@ -117,6 +121,12 @@ class DepositRequest(TimestampMixin):
     gateway_ref: str | None = None        # oxapay invoice/track id
     gateway_status: str | None = None     # raw provider status (paid / expired …)
     bank_account_id: PydanticObjectId | None = None  # company bank used
+    # ── Cash deposit (payment_mode == CASH) ───────────────────────────
+    # Who to ask and where to look when a slip is disputed. A bank
+    # transfer has a UTR for that; cash has only the place it changed
+    # hands, so these are the record rather than extra detail.
+    cash_city: str | None = None
+    cash_area: str | None = None
     # Bonus Management — stamped by the approval path when an auto-grant fires.
     bonus_id: PydanticObjectId | None = None
     bonus_amount: Money | None = None
@@ -175,6 +185,11 @@ class WithdrawalRequest(TimestampMixin):
     bank: BankSnapshot
     remarks: str | None = None
     utr_number: str | None = None  # filled by admin after disbursal
+    # Payment proof the ADMIN attaches (slip, screenshot, receipt). Visible
+    # to the user, which is the point: "paid" with nothing to show is what
+    # generates the next support ticket. Admin-written only — the user
+    # never uploads here.
+    proof_url: str | None = None
     charges: Money = Field(default_factory=_zero)
     net_amount: Money = Field(default_factory=_zero)
 

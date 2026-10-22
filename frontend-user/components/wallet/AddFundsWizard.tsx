@@ -16,6 +16,8 @@ import {
   Camera,
   Bitcoin,
   Gift,
+  Landmark,
+  Banknote,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { WalletAPI, BonusesUserAPI } from "@/lib/api";
@@ -24,7 +26,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { DemoUpgradeDialog } from "@/components/wallet/DemoUpgradeDialog";
 import { UpiQR } from "@/components/common/UpiQR";
 import { cn, formatINR } from "@/lib/utils";
-import { buildWhatsappUrl, useSupportContacts } from "@/lib/useSupport";
+import { buildWhatsappUrl, useCashDepositWhatsapp, useSupportContacts } from "@/lib/useSupport";
 
 // ── Brand marks (inline SVG / badges — no asset bundling). Recognisable
 //    by colour + glyph, sized for a clean payment row. ──────────────────
@@ -120,6 +122,67 @@ function PoweredFooter() {
   );
 }
 
+function UploadBox({
+  url,
+  uploading,
+  onPick,
+  hint,
+}: {
+  url: string;
+  uploading: boolean;
+  onPick: (f: File) => void;
+  hint: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onPick(f);
+          e.target.value = "";
+        }}
+      />
+      <button
+        onClick={() => ref.current?.click()}
+        disabled={uploading}
+        className={cn(
+          "flex min-h-[150px] w-full flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed p-5 text-center transition",
+          url ? "border-primary/50 bg-primary/5" : "border-border bg-muted/30 hover:bg-muted/50",
+        )}
+      >
+        {uploading ? (
+          <Loader2 className="size-7 animate-spin text-primary" />
+        ) : url ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url.startsWith("http") ? url : `${API_URL}${url}`}
+              alt="Proof"
+              className="max-h-32 rounded-md object-contain"
+            />
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+              <Check className="size-3.5" /> Uploaded · tap to change
+            </span>
+          </>
+        ) : (
+          <>
+            <div className="grid size-12 place-items-center rounded-full bg-primary/10">
+              <Upload className="size-5 text-primary" />
+            </div>
+            <div className="text-sm font-semibold">Tap to upload</div>
+            <div className="text-xs text-muted-foreground">{hint}</div>
+          </>
+        )}
+      </button>
+    </>
+  );
+}
+
 function Stepper({ active }: { active: "pay" | "upload" }) {
   return (
     <div className="mb-5 flex items-center justify-center gap-2 text-xs font-medium">
@@ -171,7 +234,16 @@ export function AddFundsWizard({
   onSuccess?: () => void;
 }) {
   const user = useAuthStore((s) => s.user);
+  const cashWhatsapp = useCashDepositWhatsapp();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  // Cash handover. A separate panel rather than another `step`, because
+  // the numbered steps are the UPI/bank walk (pay → screenshot → done)
+  // and cash shares none of them — there is no QR to show and no UTR to
+  // read back.
+  const [cashMode, setCashMode] = useState(false);
+  const [cashCity, setCashCity] = useState("");
+  const [cashArea, setCashArea] = useState("");
+  const [cashNote, setCashNote] = useState("");
   const [amtStr, setAmtStr] = useState("");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -393,6 +465,59 @@ export function AddFundsWizard({
     }
   }
 
+  async function submitCash() {
+    if (amount < minAmount) return toast.error(`Minimum deposit is ${formatINR(minAmount)}`);
+    if (!cashCity.trim() || !cashArea.trim())
+      return toast.error("Enter the city and area where you handed over the cash");
+    if (!screenshotUrl) return toast.error("Upload the receipt or slip");
+    if (submitting) return;
+    if (!idemRef.current) {
+      idemRef.current =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+    setSubmitting(true);
+    try {
+      await WalletAPI.createDeposit({
+        amount,
+        payment_mode: "CASH",
+        screenshot_url: screenshotUrl,
+        cash_city: cashCity.trim(),
+        cash_area: cashArea.trim(),
+        user_remark: cashNote.trim() || undefined,
+        idempotency_key: idemRef.current,
+      } as any);
+      toast.success("Cash deposit submitted — awaiting admin approval");
+      idemRef.current = "";
+      // Hand the details straight to support. Cash is the one mode with
+      // nothing for them to look up — no UTR, no bank row — so the
+      // message carries everything they would otherwise have to ask for.
+      const wa = cashWhatsapp({
+        amount,
+        city: cashCity.trim(),
+        area: cashArea.trim(),
+        note: cashNote.trim() || undefined,
+        userCode: user?.user_code,
+        userName: user?.full_name,
+      });
+      if (wa) {
+        // `window.open` after an await is blocked by some mobile
+        // browsers even though a tap started this, so fall back to
+        // navigating — the deposit is already saved either way, and a
+        // blocked pop-up must not look like a failed submit.
+        const win = window.open(wa, "_blank");
+        if (!win) window.location.href = wa;
+      }
+      onSuccess?.();
+      onClose();
+    } catch (e: any) {
+      toast.error(e?.message || "Could not submit");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function submitCrypto() {
     if (amount < minAmount) return toast.error(`Minimum deposit is ${formatINR(minAmount)}`);
     if (!cryptoTx.trim() && !screenshotUrl)
@@ -538,7 +663,7 @@ export function AddFundsWizard({
               )}
 
               <button
-                onClick={isGateway ? gatewayPay : () => (cryptoAvailable ? setChooseMethod(true) : setStep(2))}
+                onClick={isGateway ? gatewayPay : () => setChooseMethod(true)}
                 disabled={amount < effMin || gwBusy}
                 className="mt-7 flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -621,30 +746,135 @@ export function AddFundsWizard({
           </div>
         )}
 
-        {/* ─────────────── Payment method choice (only when crypto is on) ─────────────── */}
+        {/* ─────────────── Payment method choice ─────────────── */}
+        {/* Always shown now. It used to appear only when crypto was
+            enabled; cash and bank are offered on every deposit, so the
+            sheet is the entry point rather than a crypto detour. */}
         {chooseMethod && (
           <div className="absolute inset-0 z-20 flex flex-col justify-end">
             <button className="absolute inset-0 bg-black/40" onClick={() => setChooseMethod(false)} aria-label="Close" />
             <div className="relative animate-in slide-in-from-bottom-4 rounded-t-2xl border-t border-border bg-card p-5 shadow-2xl">
               <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/30" />
               <div className="mb-3 text-base font-semibold">Payment options</div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2.5">
                 <button
                   onClick={() => { setChooseMethod(false); setStep(2); }}
-                  className="overflow-hidden rounded-2xl shadow-md transition active:scale-[0.98]"
-                  aria-label="Pay with UPI / Bank"
+                  className="flex w-full items-center gap-3 rounded-2xl border border-border bg-background p-3.5 text-left transition active:scale-[0.99]"
+                  aria-label="Deposit in bank"
                 >
-                  <img src="/inr_pay.png" alt="UPI / Bank" className="aspect-[16/10] size-full object-cover" />
+                  <Landmark className="size-5 shrink-0 text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">Deposit in bank</span>
+                    <span className="block text-xs text-muted-foreground">
+                      UPI or bank transfer, then upload the screenshot
+                    </span>
+                  </span>
                 </button>
                 <button
-                  onClick={startCrypto}
-                  disabled={submitting}
-                  className="overflow-hidden rounded-2xl shadow-md transition active:scale-[0.98] disabled:opacity-60"
-                  aria-label="Pay with crypto"
+                  onClick={() => { setChooseMethod(false); setCashMode(true); }}
+                  className="flex w-full items-center gap-3 rounded-2xl border border-border bg-background p-3.5 text-left transition active:scale-[0.99]"
+                  aria-label="Deposit in cash"
                 >
-                  <img src="/usdt_pay.png" alt="Crypto Payment" className="aspect-[16/10] size-full object-cover" />
+                  <Banknote className="size-5 shrink-0 text-primary" />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">Deposit in cash</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Handed over in person — tell us where, and attach the slip
+                    </span>
+                  </span>
                 </button>
+                {cryptoAvailable && (
+                  <button
+                    onClick={startCrypto}
+                    disabled={submitting}
+                    className="overflow-hidden rounded-2xl shadow-md transition active:scale-[0.98] disabled:opacity-60"
+                    aria-label="Pay with crypto"
+                  >
+                    <img src="/usdt_pay.png" alt="Crypto Payment" className="aspect-[16/10] w-full object-cover" />
+                  </button>
+                )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─────────────── Cash: where it changed hands + the slip ─────────────── */}
+        {cashMode && (
+          <div className="absolute inset-0 z-30 flex flex-col bg-background">
+            <Header onBack={() => setCashMode(false)} />
+            <div className="flex-1 overflow-y-auto px-5 pb-5">
+              <div className="mb-4 rounded-xl border border-border bg-card p-3 text-xs text-muted-foreground">
+                Cash has no UTR to look up, so where it changed hands is what we
+                check against. An admin approves it the same way as any other
+                deposit.
+              </div>
+
+              <label className="mb-3 block">
+                <span className="mb-1.5 block text-sm font-semibold">Amount</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={amtStr}
+                  onChange={(e) => setAmtStr(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+                  placeholder={`Minimum ${formatINR(minAmount)}`}
+                />
+              </label>
+
+              <div className="mb-3 grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold">City</span>
+                  <input
+                    value={cashCity}
+                    onChange={(e) => setCashCity(e.target.value)}
+                    maxLength={80}
+                    className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+                    placeholder="Indore"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-sm font-semibold">Area</span>
+                  <input
+                    value={cashArea}
+                    onChange={(e) => setCashArea(e.target.value)}
+                    maxLength={120}
+                    className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+                    placeholder="Vijay Nagar"
+                  />
+                </label>
+              </div>
+
+              <label className="mb-3 block">
+                <span className="mb-1.5 block text-sm font-semibold">
+                  Notes <span className="font-normal text-muted-foreground">(optional)</span>
+                </span>
+                <textarea
+                  value={cashNote}
+                  onChange={(e) => setCashNote(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full resize-none rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+                  placeholder="Who you handed it to, reference, anything else"
+                />
+              </label>
+
+              <div className="mb-4">
+                <span className="mb-1.5 block text-sm font-semibold">Receipt or slip</span>
+                <UploadBox
+                  url={screenshotUrl}
+                  uploading={uploading}
+                  onPick={(f) => void onPickFile(f)}
+                  hint="Photo of the receipt or slip"
+                />
+              </div>
+
+              <button
+                onClick={submitCash}
+                disabled={submitting || uploading}
+                className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {submitting ? "Submitting…" : "Submit"}
+              </button>
             </div>
           </div>
         )}

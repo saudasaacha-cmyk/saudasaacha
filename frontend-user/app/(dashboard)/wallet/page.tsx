@@ -972,6 +972,13 @@ type FeedRow = {
   // Raw DepositRequest / WithdrawalRequest id — set only for a still-PENDING
   // request so the row can offer a delete action (approved/rejected are final).
   reqId?: string;
+  // Payment proof an admin attached to a withdrawal. Reaches a COMPLETED
+  // withdrawal through the ledger row rather than the request row: the
+  // feed deliberately drops approved requests to avoid showing one
+  // payment twice, and the proof is attached exactly when the money has
+  // gone out — i.e. precisely on the rows that were being dropped. The
+  // ledger txn carries `reference_id`, so the two join cleanly.
+  proofUrl?: string | null;
 };
 
 function TransactionsFeed({
@@ -984,6 +991,13 @@ function TransactionsFeed({
   withdrawals: any[];
 }) {
   const [filter, setFilter] = useState<"all" | "in" | "out">("all");
+
+  // id -> proof, so a ledger WITHDRAWAL row can find the file the admin
+  // attached to the request behind it.
+  const proofByWithdrawal = new Map<string, string>();
+  for (const w of withdrawals) {
+    if (w?.proof_url) proofByWithdrawal.set(String(w.id), String(w.proof_url));
+  }
 
   const rows: FeedRow[] = (() => {
     const out: FeedRow[] = [];
@@ -1031,6 +1045,10 @@ function TransactionsFeed({
         status: "completed",
         narration,
         balance_after: t.balance_after != null ? Number(t.balance_after) : null,
+        proofUrl:
+          kind === "withdrawal" && t.reference_id
+            ? proofByWithdrawal.get(String(t.reference_id))
+            : undefined,
       });
     }
 
@@ -1087,6 +1105,7 @@ function TransactionsFeed({
             : `Withdrawal request · ${w.mode ?? "bank"}`,
         balance_after: null,
         reqId: status === "PENDING" ? String(w.id) : undefined,
+        proofUrl: w.proof_url || undefined,
       });
     }
 
@@ -1246,6 +1265,16 @@ function FeedRowItem({ row }: { row: FeedRow }) {
           })}{" "}
           IST
         </div>
+        {row.proofUrl ? (
+          <a
+            href={row.proofUrl.startsWith("http") ? row.proofUrl : `${API_URL}${row.proofUrl}`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary underline-offset-2 hover:underline"
+          >
+            View payment proof
+          </a>
+        ) : null}
       </div>
 
       <div className="shrink-0 text-right">

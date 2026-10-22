@@ -588,6 +588,17 @@ export const PayinOutAPI = {
       api.get("/admin/withdrawals", { params }),
     ),
   approveWithdrawal: (id: string, body: any) => unwrap<any>(api.post(`/admin/withdrawals/${id}/approve`, body)),
+  /** Attach a payment proof the USER will see. Multipart, so it does not
+   *  go through the JSON helpers above. */
+  uploadWithdrawalProof: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return unwrap<{ proof_url: string }>(
+      api.post(`/admin/withdrawals/${id}/proof`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }),
+    );
+  },
   rejectWithdrawal: (id: string, rejection_reason: string) =>
     unwrap<any>(api.post(`/admin/withdrawals/${id}/reject`, { rejection_reason })),
   bankAccounts: () => unwrap<any[]>(api.get("/admin/bank-accounts")),

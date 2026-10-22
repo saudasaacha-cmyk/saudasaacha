@@ -142,6 +142,42 @@ export function useDepositSupportPrefill(): string {
     : "Hi, I need help adding funds to my account";
 }
 
+/** The WhatsApp hand-off for a cash deposit the user just submitted.
+ *
+ *  Cash is the one mode with nothing for support to look up — no UTR, no
+ *  bank row, no gateway reference. So the message carries everything the
+ *  person on the other end would otherwise have to ask for, in the brand
+ *  the user is actually signed in to.
+ *
+ *  Returns null when the admin has set no WhatsApp number, so the caller
+ *  can simply skip the hand-off rather than opening a broken link.
+ */
+export function useCashDepositWhatsapp(): (d: {
+  amount: number;
+  city: string;
+  area: string;
+  note?: string;
+  userCode?: string;
+  userName?: string;
+}) => string | null {
+  const { data: support } = useSupportContacts();
+  const name = useBrandName();
+  return (d) => {
+    const lines = [
+      name ? `Cash deposit submitted — ${name}` : "Cash deposit submitted",
+      "",
+      `Amount: Rs ${d.amount}`,
+      `City: ${d.city}`,
+      `Area: ${d.area}`,
+    ];
+    if (d.note) lines.push(`Notes: ${d.note}`);
+    if (d.userCode) lines.push(`Client code: ${d.userCode}`);
+    if (d.userName) lines.push(`Name: ${d.userName}`);
+    lines.push("", "Receipt uploaded in the app. Please verify and approve.");
+    return buildWhatsappUrl(support?.whatsapp, lines.join("\n"));
+  };
+}
+
 /** Per-category alert tones, set by the admin in Platform Settings. */
 export function fetchNotifySounds() {
   return unwrap<Record<string, string>>(api.get("/user/support/notify-sounds"));

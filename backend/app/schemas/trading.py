@@ -296,6 +296,11 @@ class DepositCreate(BaseModel):
     screenshot_url: str | None = None
     user_remark: str | None = None
     bank_account_id: str | None = None
+    # Cash deposit (payment_mode == "CASH"): where it was handed over.
+    # Required for that mode — see the endpoint, which rejects a cash
+    # request without them rather than storing a deposit nobody can trace.
+    cash_city: str | None = Field(default=None, max_length=80)
+    cash_area: str | None = Field(default=None, max_length=120)
     # Crypto deposit (payment_mode == "CRYPTO"). The on-chain tx hash is the
     # proof the admin approves on (screenshot optional in that mode).
     crypto_asset: str | None = None

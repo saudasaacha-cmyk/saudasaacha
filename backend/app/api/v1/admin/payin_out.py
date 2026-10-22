@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
+from pathlib import Path
 from typing import Any
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.api.v1.admin._owner import build_owner_map, owner_fields
 from app.core.dependencies import (
@@ -177,6 +179,8 @@ async def list_deposits(
                     "gateway_ref": r.gateway_ref,
                     "gateway_status": r.gateway_status,
                     "screenshot_url": r.screenshot_url,
+                    "cash_city": r.cash_city,
+                    "cash_area": r.cash_area,
                     "status": r.status.value,
                     "user_remark": r.user_remark,
                     "admin_remark": r.admin_remark,
@@ -696,6 +700,7 @@ async def list_withdrawals(
                     "status": r.status.value,
                     "remarks": r.remarks,
                     "utr_number": r.utr_number,
+                    "proof_url": r.proof_url,
                     "rejection_reason": r.rejection_reason,
                     "created_at": r.created_at,
                     "processed_at": r.processed_at,
@@ -1350,3 +1355,72 @@ async def update_wd_rule(
         },
     )
     return APIResponse(data={"ok": True, "tier": target_tier, "rule_type": rule_type})
+
+
+# Withdrawal proof lives beside the users' own deposit screenshots: same
+# StaticFiles mount, same disk, one place to back up. Under `admin/` so a
+# glance at the path says who put the file there — the user never writes
+# here, and these are the only files in this tree an admin uploaded.
+PROOF_ROOT = Path("uploads") / "screenshots" / "admin"
+PROOF_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
+PROOF_MAX_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/withdrawals/{withdrawal_id}/proof", response_model=APIResponse[dict])
+async def upload_withdrawal_proof(
+    withdrawal_id: str,
+    admin: CurrentAdmin,
+    file: UploadFile = File(...),
+    _: None = Depends(require_perm("payments", "write")),
+):
+    """Attach a payment proof to a withdrawal. The USER sees this.
+
+    PDF is allowed here where the user's screenshot upload is images only:
+    a bank's own payment advice usually arrives as one, and telling an
+    admin to screenshot a PDF to prove a payment is busywork.
+
+    Scope-checked like every other withdrawal action — an admin must not
+    be able to write a file onto another admin's user's row by guessing an
+    id.
+    """
+    try:
+        oid = PydanticObjectId(withdrawal_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid withdrawal id") from exc
+    req = await WithdrawalRequest.get(oid)
+    if req is None:
+        raise HTTPException(status_code=404, detail="Withdrawal not found")
+    await assert_user_in_scope(admin, str(req.user_id))
+
+    ext = (Path(file.filename or "").suffix or "").lower()
+    if ext not in PROOF_EXTS:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported file type. Allowed: {sorted(PROOF_EXTS)}"
+        )
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(contents) > PROOF_MAX_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"File too large (max {PROOF_MAX_BYTES // (1024 * 1024)} MB)"
+        )
+
+    out_dir = PROOF_ROOT / str(req.user_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}{ext}"
+    # Offloaded: a synchronous write blocks the event loop for every other
+    # request on this worker, which matters more here than in the user app
+    # because one admin uploading holds up the whole panel.
+    await asyncio.to_thread((out_dir / fname).write_bytes, contents)
+
+    req.proof_url = f"/uploads/screenshots/admin/{req.user_id}/{fname}"
+    await req.save()
+    await log_event(
+        action=AuditAction.UPDATE,
+        entity_type="WithdrawalRequest",
+        entity_id=req.id,
+        actor_id=admin.id,
+        target_user_id=req.user_id,
+        new_values={"proof_url": req.proof_url},
+    )
+    return APIResponse(data={"proof_url": req.proof_url}, message="Proof attached.")

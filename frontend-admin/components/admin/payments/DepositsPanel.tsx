@@ -440,6 +440,20 @@ export function DepositsPanel() {
  */
 function TxnCell({ r }: { r: any }) {
   const isCrypto = r.payment_mode === "CRYPTO";
+  // Cash has no UTR, no tx hash and no gateway ref — where it changed
+  // hands IS the reference, and this column is where an approver looks
+  // for one. Showing "—" here would hide the only thing they can check.
+  if (r.payment_mode === "CASH") {
+    const place = [r.cash_area, r.cash_city].filter(Boolean).join(", ");
+    return (
+      <div className="flex max-w-[170px] flex-col items-start leading-tight">
+        <span className="text-[11px] font-semibold uppercase text-muted-foreground">Cash</span>
+        <span className="truncate text-xs" title={place}>
+          {place || "—"}
+        </span>
+      </div>
+    );
+  }
   const txn = r.utr_number || r.crypto_tx_hash || r.gateway_ref || "";
   const sub = isCrypto
     ? [r.crypto_asset, r.crypto_network].filter(Boolean).join(" · ")

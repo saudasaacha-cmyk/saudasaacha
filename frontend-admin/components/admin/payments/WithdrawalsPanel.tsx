@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn, formatINR } from "@/lib/utils";
+import { API_URL } from "@/lib/constants";
 import { OwnerBadge } from "@/components/admin/OwnerBadge";
 import { LedgerSheet } from "@/components/admin/LedgerSheet";
 import { useAdminAuthStore } from "@/stores/authStore";
@@ -223,6 +224,19 @@ export function WithdrawalsPanel() {
       header: "UTR",
       render: (r) => (
         <CopyableField value={r.utr_number ?? null} label="UTR" />
+      ),
+    },
+    {
+      key: "proof_url",
+      header: "Proof",
+      align: "center",
+      // Admin-uploaded and USER-visible — "paid" with nothing to show is
+      // what generates the next support ticket.
+      render: (r: any) => (
+        <ProofCell
+          row={r}
+          onDone={() => qc.invalidateQueries({ queryKey: ["admin", "withdrawals"] })}
+        />
       ),
     },
     { key: "status", header: "Status", render: (r) => <StatusPill status={r.status} /> },
@@ -590,6 +604,74 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div className="flex items-start justify-between gap-2">
       <span className="shrink-0 text-[9px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className="min-w-0 max-w-[65%] text-right">{children}</span>
+    </div>
+  );
+}
+
+
+/** Upload / replace / view the payment proof for one withdrawal.
+ *
+ *  Its own file input and its own ref: one shared ref across every row
+ *  would mean whichever row mounted last swallows the click. */
+function ProofCell({ row, onDone }: { row: any; onDone: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const url = row.proof_url
+    ? row.proof_url.startsWith("http")
+      ? row.proof_url
+      : `${API_URL}${row.proof_url}`
+    : null;
+
+  async function pick(file: File) {
+    setBusy(true);
+    try {
+      await PayinOutAPI.uploadWithdrawalProof(row.id, file);
+      toast.success("Proof attached — the user can see it now.");
+      onDone();
+    } catch (e: any) {
+      toast.error(e?.message || "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-1">
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void pick(f);
+          e.target.value = "";
+        }}
+      />
+      {url && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+        >
+          View
+        </a>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2 text-xs"
+        disabled={busy}
+        title={url ? "Replace the proof" : "Attach a payment proof"}
+        onClick={(e) => {
+          e.stopPropagation();
+          ref.current?.click();
+        }}
+      >
+        {busy ? "…" : url ? "Replace" : "Upload"}
+      </Button>
     </div>
   );
 }
