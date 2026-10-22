@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.core.dependencies import CurrentUser
-from app.models._base import OrderAction, OrderType, ProductType
+from app.models._base import OrderAction, OrderType
 from app.models.audit_log import AuditAction
 from app.models.position import Position, PositionStatus
 from app.models.trade import Trade
 from app.schemas.common import APIResponse
 from app.schemas.trading import HoldingOut, PositionOut
-from app.services import audit_service, market_data_service, netting_service, order_service, order_validator, position_service
+from app.services import (
+    audit_service,
+    market_data_service,
+    netting_service,
+    order_service,
+    order_validator,
+    position_service,
+)
 from app.utils.decimal_utils import to_decimal
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/positions", tags=["user-positions"])
 
@@ -86,6 +96,7 @@ def _is_segment_market_open_now(segment_type: str | None) -> bool:
     always return True (24/7 / 24×5 segments).
     """
     from datetime import datetime as _dt
+
     from app.utils.time_utils import now_ist
 
     seg = (segment_type or "").upper()
@@ -663,7 +674,9 @@ async def squareoff(
     # OR losing position may be closed. Stops scalpers from hammering the
     # backend / abusing latency arbitrage. Skip for MIS auto-squareoff
     # (no `placed_from`); fire only on user-initiated closes.
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
     from app.services import netting_service as _ns
 
     risk = (await _ns.get_effective_risk(str(user.id)))["settings"]
@@ -838,9 +851,10 @@ async def update_sl_tp(position_id: str, payload: dict, user: CurrentUser):
     tp_val = _to_float(payload.get("target")) if "target" in payload else None
 
     # Fetch live LTP + resolved settings (for limit_away) in parallel.
+    import asyncio as _asyncio
+
     from app.services import market_data_service as _mds
     from app.services import netting_service as _ns
-    import asyncio as _asyncio
 
     async def _get_ltp() -> float:
         try:
@@ -1283,7 +1297,8 @@ async def list_active_trades(user: CurrentUser):
     # Per-fill SL/TP (pending-order model): map each opening fill → its parked
     # exit orders' stop / target so the Active tab shows the SL/TP that belongs
     # to THAT fill only, not the whole position's bracket.
-    from app.models.order import Order as _OrderM, OrderStatus as _OSM
+    from app.models.order import Order as _OrderM
+    from app.models.order import OrderStatus as _OSM
 
     _fill_sltp: dict[str, dict] = {}
     try:
@@ -1771,8 +1786,7 @@ async def close_active_trade(trade_id: str, user: CurrentUser):
         for tr in recent_same:
             if str(tr.id) in recent_ids:
                 t_time = _aware(tr.executed_at)
-                if t_time < oldest_claimed_time:
-                    oldest_claimed_time = t_time
+                oldest_claimed_time = min(oldest_claimed_time, t_time)
         scoped = [
             tr for tr in pool
             if str(tr.id) in recent_ids or
@@ -1883,7 +1897,8 @@ async def _fill_open_qty(user_id, t) -> float:
     """Best-effort open (un-closed) qty of the opening fill `t`, via FIFO over
     the token's trades. The exit order's fire-time guard re-checks anyway, so
     an approximate value here is safe."""
-    from datetime import datetime as _d, timezone as _tz
+    from datetime import datetime as _d
+    from datetime import timezone as _tz
 
     trades = await Trade.find(
         Trade.user_id == user_id, Trade.instrument.token == t.instrument.token
@@ -1923,7 +1938,8 @@ async def _ensure_fill_sl_tp(user, p, t, sl_val, tp_val, set_sl: bool, set_tp: b
     addressed: cancels any existing exit order for that leg, then parks a fresh
     LIMIT (target) / SL-M (stop) exit. Clears the position-level SL/TP so the
     risk enforcer never double-fires the whole position."""
-    from app.models._base import OrderAction as _OA, OrderType as _OT
+    from app.models._base import OrderAction as _OA
+    from app.models._base import OrderType as _OT
     from app.models.order import Order, OrderStatus
     from app.services import order_service as _os
 
@@ -1941,15 +1957,14 @@ async def _ensure_fill_sl_tp(user, p, t, sl_val, tp_val, set_sl: bool, set_tp: b
         Order.sl_tp_source_trade_id == t.id,
         {"status": {"$in": [OrderStatus.OPEN.value, OrderStatus.PENDING.value, OrderStatus.PARTIAL.value]}},
     ).to_list()
-    for o in existing:
-        ot = str(getattr(o.order_type, "value", o.order_type) or "").upper()
-        is_tp_leg = ot == "LIMIT"
-        is_sl_leg = ot in ("SL", "SL_M")
-        if (is_tp_leg and set_tp) or (is_sl_leg and set_sl):
-            try:
-                await _os.cancel(user.id, str(o.id))
-            except Exception:  # noqa: BLE001
-                pass
+    # Which of the old exits this call replaces. Collected now, cancelled
+    # only AFTER the replacements are live — see below.
+    superseded = [
+        o
+        for o in existing
+        for ot in [str(getattr(o.order_type, "value", o.order_type) or "").upper()]
+        if (ot == "LIMIT" and set_tp) or (ot in ("SL", "SL_M") and set_sl)
+    ]
 
     base = {
         "token": p.instrument.token,
@@ -1963,6 +1978,23 @@ async def _ensure_fill_sl_tp(user, p, t, sl_val, tp_val, set_sl: bool, set_tp: b
         "oco_group_id": group,
         "placed_from": "WEB",
     }
+    # Place FIRST, cancel the old ones after. The order here is the whole
+    # point of this block.
+    #
+    # It used to cancel and then place. `place_order` persists a REJECTED
+    # row and re-raises, and one of the things it rejects on is a stale
+    # price — "price has not moved for 27s (limit 5s)" — which on a thin
+    # MCX future is an ordinary afternoon. So editing a stop on a quiet
+    # contract cancelled the live exit, failed to park the replacement,
+    # and left the position with NO protection at all. The endpoint
+    # returned an error, but by then the stop was already gone; the user
+    # saw it vanish and reported it as "SL/TP set kar rahe hain, hat ja
+    # raha hai". Production carries 67 rejected exits with that reason on
+    # NATURALGAS / GOLD / SILVERM / ZINC / CRUDEOIL, against 43 cancels.
+    #
+    # Placing first means a failure leaves the user exactly as they were.
+    # The two legs briefly coexist with the ones they replace, which is
+    # safe: they share one `oco_group_id`, so a fire cancels its siblings.
     if set_tp and tp_val is not None:
         await _os.place_order(
             user=user, payload={**base, "order_type": _OT.LIMIT.value, "price": tp_val}
@@ -1972,8 +2004,17 @@ async def _ensure_fill_sl_tp(user, p, t, sl_val, tp_val, set_sl: bool, set_tp: b
             user=user, payload={**base, "order_type": _OT.SL_M.value, "trigger_price": sl_val}
         )
 
+    for o in superseded:
+        try:
+            await _os.cancel(user.id, str(o.id))
+        except Exception:  # noqa: BLE001
+            # Best-effort: the replacement is already live, so a stuck old
+            # leg is a duplicate the OCO group will clear, not a gap.
+            logger.debug("sl_tp_supersede_cancel_failed order=%s", o.id, exc_info=True)
+
     # Per-fill mode owns SL/TP now — drop any whole-position bracket so the
-    # risk enforcer can't ALSO fire it and double-close.
+    # risk enforcer can't ALSO fire it and double-close. Reached only once
+    # the replacements are parked, for the same reason as above.
     if p.stop_loss is not None or p.target is not None:
         p.stop_loss = None
         p.target = None
@@ -2122,6 +2163,7 @@ async def update_active_trade_sl_tp(trade_id: str, payload: dict, user: CurrentU
 
 
 import time as _pnl_time
+from datetime import UTC
 
 # Per-user short-TTL cache for the (heavy) pnl-summary compute. The dashboard
 # polls this every 5 s and the positions strip / multiple tabs can hit it
@@ -2155,7 +2197,9 @@ async def positions_pnl_summary(user: CurrentUser):
     if _hit is not None and _hit[0] > _pnl_time.monotonic():
         return APIResponse(data=_hit[1])
 
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
 
     IST = _tz(_td(hours=5, minutes=30))
     now_ist = _dt.now(IST)
@@ -2165,10 +2209,10 @@ async def positions_pnl_summary(user: CurrentUser):
     last_week_start_ist = week_start_ist - _td(days=7)
     last_week_end_ist = week_start_ist  # exclusive
 
-    today_start = today_start_ist.astimezone(_tz.utc)
-    week_start = week_start_ist.astimezone(_tz.utc)
-    last_week_start = last_week_start_ist.astimezone(_tz.utc)
-    last_week_end = last_week_end_ist.astimezone(_tz.utc)
+    today_start = today_start_ist.astimezone(UTC)
+    week_start = week_start_ist.astimezone(UTC)
+    last_week_start = last_week_start_ist.astimezone(UTC)
+    last_week_end = last_week_end_ist.astimezone(UTC)
 
     current_usd_inr = market_data_service.get_usd_inr_rate()
 
@@ -2275,9 +2319,10 @@ async def positions_pnl_summary(user: CurrentUser):
 
 @router.post("/squareoff-all", response_model=APIResponse[dict])
 async def squareoff_all(user: CurrentUser):
-    from datetime import datetime as _dt, timezone as _tz
-    from app.services import netting_service as _ns
+    from datetime import datetime as _dt
+
     from app.core.redis_client import idempotency_check_and_set as _idem
+    from app.services import netting_service as _ns
 
     # User-level lock: prevent two simultaneous close-all calls (e.g. double-tap
     # on the "Close All" button while the first request is still iterating).
@@ -2312,8 +2357,8 @@ async def squareoff_all(user: CurrentUser):
         # Per-row hold-time gate: skip (don't fail the whole batch) when the
         # row is too young. The user gets a count of how many were blocked.
         if (profit_min or loss_min) and r.opened_at:
-            opened = r.opened_at if r.opened_at.tzinfo else r.opened_at.replace(tzinfo=_tz.utc)
-            held = (_dt.now(_tz.utc) - opened).total_seconds()
+            opened = r.opened_at if r.opened_at.tzinfo else r.opened_at.replace(tzinfo=UTC)
+            held = (_dt.now(UTC) - opened).total_seconds()
             # Same close-side mark as the position card (see single-close
             # path) — bid for a long, ask for a short — so the profit/loss
             # decision matches what the user sees, not a lagging LTP.
