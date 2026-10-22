@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { WalletAPI } from "@/lib/api";
 import { API_URL } from "@/lib/constants";
+import { useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { DemoUpgradeDialog } from "@/components/wallet/DemoUpgradeDialog";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,12 @@ export default function WalletPage() {
   const qc = useQueryClient();
   const authUser = useAuthStore((s) => s.user);
   const cashWithdrawalWhatsapp = useCashWithdrawalWhatsapp();
+  // `?withdraw=cash|bank` opens this dialog straight into that mode. The
+  // home page's quick cards are mode-specific and the withdraw dialog
+  // lives here, so they navigate with the answer rather than making the
+  // user pick twice. Read once on mount — a later param change is a
+  // navigation, which remounts anyway.
+  const searchParams = useSearchParams();
   const isDemo = authUser?.is_demo ?? false;
   const { data: summary } = useQuery({
     queryKey: ["wallet-summary"],
@@ -136,13 +143,22 @@ export default function WalletPage() {
     if (isDemo) { setDemoUpgradeOpen(true); return; }
     setDepositOpen(true);
   }
-  function openWithdraw() {
+  function openWithdraw(mode: "BANK" | "CASH" = "BANK") {
     if (isDemo) { setDemoUpgradeOpen(true); return; }
-    setWdPayout("BANK");
+    setWdPayout(mode);
     setWdCashCity("");
     setWdCashArea("");
     setWithdrawOpen(true);
   }
+
+  useEffect(() => {
+    const want = (searchParams.get("withdraw") || "").toUpperCase();
+    if (want === "CASH" || want === "BANK") openWithdraw(want as "BANK" | "CASH");
+    // Mount-only: arriving with the param IS the intent to open, and
+    // re-running on every param change would reopen the dialog after the
+    // user closed it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Form state ──────────────────────────────────────────────────
   const [dep, setDep] = useState({
@@ -477,7 +493,7 @@ export default function WalletPage() {
         <Button onClick={openDeposit} className="h-12 rounded-xl">
           <ArrowDownToLine className="size-4" /> Add funds
         </Button>
-        <Button onClick={openWithdraw} variant="outline" className="h-12 rounded-xl">
+        <Button onClick={() => openWithdraw()} variant="outline" className="h-12 rounded-xl">
           <ArrowUpToLine className="size-4" /> Withdraw
         </Button>
       </div>

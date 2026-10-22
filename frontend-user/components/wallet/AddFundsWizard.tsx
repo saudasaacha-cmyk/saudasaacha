@@ -226,12 +226,18 @@ export function AddFundsWizard({
   companyBanks,
   payeeName,
   onSuccess,
+  initialMode,
 }: {
   open: boolean;
   onClose: () => void;
   companyBanks: Bank[];
   payeeName?: string;
   onSuccess?: () => void;
+  /** Skip the "how" sheet because the caller already asked. The home
+   *  page's quick cards are mode-specific, so re-asking there would be
+   *  one tap to answer a question the user just answered. Left undefined
+   *  from the Wallet page, which still opens on the sheet. */
+  initialMode?: "BANK" | "CASH";
 }) {
   const user = useAuthStore((s) => s.user);
   const cashWhatsapp = useCashDepositWhatsapp();
@@ -317,10 +323,12 @@ export function AddFundsWizard({
       // The method sheet opens WITH the wizard, so the first thing asked
       // is how, not how much. Previously the choice came after the
       // amount and after "Next", which meant a gateway-enabled pool
-      // never reached it at all.
-      setChooseMethod(true);
+      // never reached it at all. A caller that already knows the mode
+      // passes it instead and lands straight on that flow.
+      setChooseMethod(!initialMode);
+      if (initialMode === "CASH") setCashMode(true);
     }
-  }, [open]);
+  }, [open, initialMode]);
 
   // Lock background scroll while the full-screen flow is up.
   useEffect(() => {

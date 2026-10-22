@@ -4,14 +4,13 @@ import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
+  Banknote,
+  Landmark,
   ArrowUpRight,
-  Briefcase,
   ChevronRight,
   Eye,
   EyeOff,
   Gift,
-  LineChart,
-  Table2,
   TrendingUp,
   Wallet,
 } from "lucide-react";
@@ -62,6 +61,7 @@ export default function DashboardPage() {
   // from the home Deposit quick-action so users don't have to hop to /wallet.
   const qc = useQueryClient();
   const [depositOpen, setDepositOpen] = useState(false);
+  const [depositMode, setDepositMode] = useState<"BANK" | "CASH">("BANK");
   const { data: companyBanks } = useQuery({
     queryKey: ["company-banks"],
     queryFn: () => WalletAPI.companyBanks(),
@@ -177,18 +177,43 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* ── Quick actions ─────────────────────────────────────── */}
-      <section className="grid grid-cols-4 gap-2 sm:gap-3">
-        <QuickAction onClick={() => setDepositOpen(true)} icon={ArrowDownToLine} label="Deposit" />
-        <QuickAction href="/option-chain" icon={Table2} label="Options" />
-        <QuickAction href="/positions" icon={Briefcase} label="Position" />
-        <QuickAction href="/marketwatch" icon={LineChart} label="Market" />
+      {/* ── Quick actions ─────────────────────────────────────────
+          Two cards, one per payout channel, each carrying both
+          directions. The previous four were Deposit / Options /
+          Position / Market — the last three duplicate the bottom nav,
+          while money in and out is what people actually come here to do.
+
+          Each card already knows its channel, so the flows it opens skip
+          the "how" question: cash lands on the cash form, bank on the
+          existing bank flow. Asking again here would be a tap to answer
+          something the user just answered.
+
+          Withdrawal lives on the Wallet page, so those buttons navigate
+          with the answer in the URL rather than duplicating the dialog.
+          The Wallet page itself is untouched: it still opens on the
+          chooser, exactly as before. ─────────────────────────────── */}
+      <section className="grid grid-cols-2 gap-2 sm:gap-3">
+        <MoneyCard
+          label="Cash"
+          hint="Handed over in person"
+          icon={Banknote}
+          onDeposit={() => { setDepositMode("CASH"); setDepositOpen(true); }}
+          withdrawHref="/wallet?withdraw=cash"
+        />
+        <MoneyCard
+          label="Bank"
+          hint="Transfer or UPI"
+          icon={Landmark}
+          onDeposit={() => { setDepositMode("BANK"); setDepositOpen(true); }}
+          withdrawHref="/wallet?withdraw=bank"
+        />
       </section>
 
       {/* Add-funds 4-step wizard — same flow as the Wallet page. */}
       <AddFundsWizard
         open={depositOpen}
         onClose={() => setDepositOpen(false)}
+        initialMode={depositMode}
         companyBanks={(companyBanks as any[]) ?? []}
         payeeName={defaultBank?.account_holder}
         onSuccess={() => {
@@ -338,42 +363,50 @@ function MiniStat({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-function QuickAction({
-  href,
-  onClick,
-  icon: Icon,
+/** One payout channel, both directions. Deposit opens the wizard in
+ *  place; withdrawal lives on the Wallet page, so it navigates. */
+function MoneyCard({
   label,
+  hint,
+  icon: Icon,
+  onDeposit,
+  withdrawHref,
 }: {
-  href?: string;
-  onClick?: () => void;
-  icon: any;
   label: string;
+  hint: string;
+  icon: any;
+  onDeposit: () => void;
+  withdrawHref: string;
 }) {
-  const cls = cn(
-    "flex flex-col items-center justify-center gap-1.5 rounded-xl border border-border bg-card p-3 text-[11px] font-medium transition-all",
-    "hover:border-primary/40 hover:bg-primary/5 active:scale-95",
-  );
-  const inner = (
-    <>
-      <div className="grid size-10 place-items-center rounded-full bg-primary/10 text-primary">
-        <Icon className="size-5" strokeWidth={2.25} />
-      </div>
-      <span>{label}</span>
-    </>
-  );
-  if (onClick) {
-    return (
-      <button type="button" onClick={onClick} className={cls}>
-        {inner}
-      </button>
-    );
-  }
   return (
-    <Link href={href ?? "#"} className={cls}>
-      {inner}
-    </Link>
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
+      <div className="flex items-center gap-2">
+        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+          <Icon className="size-4.5" strokeWidth={2.25} />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold">{label}</div>
+          <div className="truncate text-[10px] text-muted-foreground">{hint}</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          onClick={onDeposit}
+          className="rounded-lg bg-primary/10 py-2 text-[11px] font-semibold text-primary transition active:scale-95 hover:bg-primary/15"
+        >
+          Deposit
+        </button>
+        <Link
+          href={withdrawHref}
+          className="rounded-lg border border-border py-2 text-center text-[11px] font-semibold transition active:scale-95 hover:bg-muted/50"
+        >
+          Withdraw
+        </Link>
+      </div>
+    </div>
   );
 }
+
 
 function StatTile({
   label,
