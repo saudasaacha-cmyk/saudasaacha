@@ -310,6 +310,15 @@ export function AddFundsWizard({
       setSelectedBankId(null);
       setGwOrder(null);
       setGwUtr("");
+      setCashMode(false);
+      setCashCity("");
+      setCashArea("");
+      setCashNote("");
+      // The method sheet opens WITH the wizard, so the first thing asked
+      // is how, not how much. Previously the choice came after the
+      // amount and after "Next", which meant a gateway-enabled pool
+      // never reached it at all.
+      setChooseMethod(true);
     }
   }, [open]);
 
@@ -663,7 +672,7 @@ export function AddFundsWizard({
               )}
 
               <button
-                onClick={isGateway ? gatewayPay : () => setChooseMethod(true)}
+                onClick={isGateway ? gatewayPay : () => setStep(2)}
                 disabled={amount < effMin || gwBusy}
                 className="mt-7 flex h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -752,13 +761,17 @@ export function AddFundsWizard({
             sheet is the entry point rather than a crypto detour. */}
         {chooseMethod && (
           <div className="absolute inset-0 z-20 flex flex-col justify-end">
-            <button className="absolute inset-0 bg-black/40" onClick={() => setChooseMethod(false)} aria-label="Close" />
+            <button
+              className="absolute inset-0 bg-black/40"
+              onClick={() => { setChooseMethod(false); onClose(); }}
+              aria-label="Close"
+            />
             <div className="relative animate-in slide-in-from-bottom-4 rounded-t-2xl border-t border-border bg-card p-5 shadow-2xl">
               <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/30" />
-              <div className="mb-3 text-base font-semibold">Payment options</div>
+              <div className="mb-3 text-base font-semibold">How do you want to deposit?</div>
               <div className="space-y-2.5">
                 <button
-                  onClick={() => { setChooseMethod(false); setStep(2); }}
+                  onClick={() => setChooseMethod(false)}
                   className="flex w-full items-center gap-3 rounded-2xl border border-border bg-background p-3.5 text-left transition active:scale-[0.99]"
                   aria-label="Deposit in bank"
                 >

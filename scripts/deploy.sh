@@ -136,6 +136,26 @@ if [ "$user_changed" = "1" ]; then
     echo "  npm ci…"
     as_app npm ci --no-audit --no-fund
   fi
+  # Stamp the service worker with this commit BEFORE building.
+  #
+  # `public/sw.js` scopes every runtime cache to a hardcoded VERSION and
+  # its own comment promises that "bumping VERSION evicts every old
+  # runtime cache on activate" — but nothing ever bumped it. It sat at
+  # v9 across every deploy since the brand rename, so the cached app
+  # shell was never evicted: on a slow connection the 2-second navigation
+  # race hands the user that stale shell, which references the old
+  # chunk hashes, which are themselves cache-first stored. The result is
+  # a deploy that went out cleanly and a user who keeps seeing the old
+  # app with nothing to tell either of them why.
+  #
+  # Done here rather than in the app because `sw.js` is a static file
+  # with no build-time substitution, and because a constant that must be
+  # hand-bumped every release is a constant that will not be.
+  if [ -f public/sw.js ]; then
+    as_app sed -i -E "s/^const VERSION = \".*\";/const VERSION = \"sachchasauda-pwa-${NEW_SHA:0:12}\";/" public/sw.js
+    echo "  sw.js VERSION → sachchasauda-pwa-${NEW_SHA:0:12}"
+  fi
+
   echo "  building…"
   # Build beside the live .next, then swap. Deleting .next first left the
   # running server serving a folder that no longer existed for the whole
