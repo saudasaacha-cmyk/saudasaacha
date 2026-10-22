@@ -486,8 +486,40 @@ export function AddFundsWizard({
     if (amount < minAmount) return toast.error(`Minimum deposit is ${formatINR(minAmount)}`);
     if (!cashCity.trim() || !cashArea.trim())
       return toast.error("Enter the city and area where you handed over the cash");
-    if (!screenshotUrl) return toast.error("Upload the receipt or slip");
     if (submitting) return;
+
+    const wa = cashWhatsapp({
+      amount,
+      city: cashCity.trim(),
+      area: cashArea.trim(),
+      note: cashNote.trim() || undefined,
+      userCode: user?.user_code,
+      userName: user?.full_name,
+    });
+
+    // The slip decides the route, which is the whole point of this
+    // branch. WITH one the admin has something to approve ON, so the
+    // request is created and lands in their queue like any other. WITHOUT
+    // one there is nothing to approve, so creating a row would only put
+    // an un-actionable request in front of them — it goes to support over
+    // WhatsApp instead, carrying every field the user just typed.
+    //
+    // It also keeps the server's invariant intact rather than relaxing
+    // it: a stored deposit always has proof attached, because the
+    // no-proof case never reaches the server at all.
+    if (!screenshotUrl) {
+      if (!wa) {
+        return toast.error(
+          "Upload the receipt, or ask support to add a WhatsApp number.",
+        );
+      }
+      toast.success("Opening WhatsApp with your details…");
+      const win = window.open(wa, "_blank");
+      if (!win) window.location.href = wa;
+      onClose();
+      return;
+    }
+
     if (!idemRef.current) {
       idemRef.current =
         typeof crypto !== "undefined" && crypto.randomUUID
@@ -507,25 +539,6 @@ export function AddFundsWizard({
       } as any);
       toast.success("Cash deposit submitted — awaiting admin approval");
       idemRef.current = "";
-      // Hand the details straight to support. Cash is the one mode with
-      // nothing for them to look up — no UTR, no bank row — so the
-      // message carries everything they would otherwise have to ask for.
-      const wa = cashWhatsapp({
-        amount,
-        city: cashCity.trim(),
-        area: cashArea.trim(),
-        note: cashNote.trim() || undefined,
-        userCode: user?.user_code,
-        userName: user?.full_name,
-      });
-      if (wa) {
-        // `window.open` after an await is blocked by some mobile
-        // browsers even though a tap started this, so fall back to
-        // navigating — the deposit is already saved either way, and a
-        // blocked pop-up must not look like a failed submit.
-        const win = window.open(wa, "_blank");
-        if (!win) window.location.href = wa;
-      }
       onSuccess?.();
       onClose();
     } catch (e: any) {
@@ -879,8 +892,11 @@ export function AddFundsWizard({
                 />
               </label>
 
-              <div className="mb-4">
-                <span className="mb-1.5 block text-sm font-semibold">Receipt or slip</span>
+              <div className="mb-2">
+                <span className="mb-1.5 block text-sm font-semibold">
+                  Receipt or slip{" "}
+                  <span className="font-normal text-muted-foreground">(optional)</span>
+                </span>
                 <UploadBox
                   url={screenshotUrl}
                   uploading={uploading}
@@ -889,12 +905,25 @@ export function AddFundsWizard({
                 />
               </div>
 
+              {/* The slip decides where this goes, so the button says so
+                  rather than reading "Submit" and then doing two
+                  different things. */}
+              <p className="mb-4 text-[11px] text-muted-foreground">
+                {screenshotUrl
+                  ? "Goes to your admin for approval."
+                  : "No slip yet — we'll send these details to support on WhatsApp instead."}
+              </p>
+
               <button
                 onClick={submitCash}
                 disabled={submitting || uploading}
                 className="w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
               >
-                {submitting ? "Submitting…" : "Submit"}
+                {submitting
+                  ? "Submitting…"
+                  : screenshotUrl
+                    ? "Submit for approval"
+                    : "Send on WhatsApp"}
               </button>
             </div>
           </div>

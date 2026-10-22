@@ -196,14 +196,17 @@ export default function DashboardPage() {
 
       {/* Direction sheet — only the question the card left open. */}
       {channel && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="fixed inset-0 z-50 flex flex-col justify-end sm:items-center sm:justify-center sm:p-6">
           <button
             className="absolute inset-0 bg-black/40"
             onClick={() => setChannel(null)}
             aria-label="Close"
           />
-          <div className="relative animate-in slide-in-from-bottom-4 rounded-t-2xl border-t border-border bg-card p-5 pb-8 shadow-2xl">
-            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/30" />
+          {/* A bottom sheet is right on a phone and wrong on a 27-inch
+              monitor, where it stretches edge to edge for two buttons.
+              Above `sm` it becomes a centred card of its own width. */}
+          <div className="relative w-full animate-in slide-in-from-bottom-4 rounded-t-2xl border-t border-border bg-card p-5 pb-8 shadow-2xl sm:max-w-xs sm:rounded-2xl sm:border sm:p-6 sm:pb-6 sm:zoom-in-95">
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-muted-foreground/30 sm:hidden" />
             <div className="mb-1 text-base font-semibold">
               {channel === "CASH" ? "Cash" : "Bank"}
             </div>
