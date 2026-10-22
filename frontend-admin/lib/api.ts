@@ -792,6 +792,34 @@ export const NotificationsAPI = {
     }>(api.get("/admin/notifications/sent/recipients", { params })),
 };
 
+/** TeleCRM integration settings. Tokens come back as `"***"` and a save
+ *  carrying that value leaves them alone, so a form round-trip cannot blank
+ *  a credential it was never shown. */
+export type TeleCrmSettings = {
+  enabled: boolean;
+  enterprise_id: string;
+  async_token: string;
+  async_token_configured: boolean;
+  sync_token: string;
+  sync_token_configured: boolean;
+  send_assignee: boolean;
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_message: string;
+  last_push_at: string | null;
+  pushed_total: number;
+  failed_total: number;
+  last_error: string;
+};
+
+export const TeleCrmAPI = {
+  get: () => unwrap<TeleCrmSettings>(api.get("/admin/telecrm")),
+  save: (body: Partial<Omit<TeleCrmSettings, "last_test_at">>) =>
+    unwrap<TeleCrmSettings>(api.put("/admin/telecrm", body)),
+  test: () => unwrap<TeleCrmSettings>(api.post("/admin/telecrm/test", {})),
+  syncAll: () => unwrap<{ started: boolean }>(api.post("/admin/telecrm/sync-all", {})),
+};
+
 export type CryptoConfig = {
   enabled: boolean;
   mode: "manual" | "gateway" | "both";

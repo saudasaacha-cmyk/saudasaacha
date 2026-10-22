@@ -24,6 +24,7 @@ from app import __version__
 from app.api.v1 import branding as branding_public
 from app.api.v1 import webhooks as webhooks_public
 from app.api.v1.admin import router as admin_router
+from app.services.telecrm_service import reconcile_loop as _telecrm_reconcile
 from app.api.v1.user import router as user_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
@@ -770,6 +771,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # and marks them inactive in the Instrument collection. The first sweep
     # runs immediately so anything that expired overnight is cleaned at boot.
     from app.services.expiry_cleanup import expiry_cleanup_loop
+
+    # TeleCRM reconcile — inert until a super admin configures and enables
+    # it, so this costs one `find_one` every six hours when it is off.
+    telecrm_task: _asyncio.Task = _asyncio.create_task(
+        _supervise(
+            "telecrm_reconcile",
+            _leader_only("telecrm_reconcile", _telecrm_reconcile, interval_sec=21600.0),
+        )
+    )
+    app._telecrm_task = telecrm_task  # type: ignore[attr-defined]
+
     expiry_task: _asyncio.Task = _asyncio.create_task(
         _supervise(
             "expiry_cleanup",

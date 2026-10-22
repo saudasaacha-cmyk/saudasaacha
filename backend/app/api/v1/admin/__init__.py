@@ -23,6 +23,7 @@ from app.api.v1.admin import (
     money_transactions,
     netting,
     notifications,
+    telecrm,
     payin_out,
     platform_reports,
     pnl_sharing,
@@ -67,6 +68,7 @@ router.include_router(employees.router)
 router.include_router(brokers.router)
 router.include_router(pnl_sharing.router)
 router.include_router(notifications.router)
+router.include_router(telecrm.router)
 router.include_router(support.router)
 router.include_router(branding.router)
 router.include_router(push.router)

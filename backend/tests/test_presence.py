@@ -49,8 +49,22 @@ def test_the_heartbeat_is_what_refreshes_it():
     """If beats stop, so does the refresh — that is the whole mechanism."""
     from app.api.ws.user_ws import _heartbeat
 
-    beat = inspect.getsource(_heartbeat)
-    assert beat.count("mark_online") == 2  # once on connect, once per beat
+    # Counted as CALLS in the AST, not as occurrences in the text: the
+    # comment explaining the connect-time call names `mark_online` too,
+    # and a substring count cannot tell the explanation from the thing it
+    # explains.
+    import ast
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(_heartbeat)))
+    calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "mark_online"
+    ]
+    assert len(calls) == 2, "once on connect, once per beat"
 
 
 def test_the_admin_list_is_scoped_like_every_other_user_list():

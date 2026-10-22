@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
@@ -27,7 +28,7 @@ from app.core.ws_hub import user_channel_hub
 from app.core.ws_limiter import acquire as ws_limit_acquire
 from app.core.ws_limiter import client_ip as ws_client_ip
 from app.core.ws_limiter import release as ws_limit_release
-from app.services import presence_service
+from app.services import presence_service, telecrm_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,7 +42,12 @@ async def _heartbeat(ws: WebSocket, user_id: str) -> None:
     on every beat, and left to expire on its own — see
     `presence_service` for why a disconnect doesn't clear it.
     """
-    await presence_service.mark_online(user_id)
+    # The CRM wants "came online", not "is still online". `mark_online`
+    # answers True only for the call that actually won the SET NX, so a
+    # user with three tabs pushes once and the 25-second beat below never
+    # pushes at all.
+    if await presence_service.mark_online(user_id):
+        telecrm_service.push_user_bg(user_id, online_since=int(time.time()))
     try:
         while True:
             await asyncio.sleep(25)

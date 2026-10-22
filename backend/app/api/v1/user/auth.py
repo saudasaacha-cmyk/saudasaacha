@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.core.config import settings
 from app.core.dependencies import CurrentUser
 from app.core.exceptions import (
     InvalidCredentialsError,
@@ -11,7 +12,6 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationFailedError,
 )
-from app.core.config import settings
 from app.core.rate_limit import rate_limit
 from app.models.audit_log import AuditAction
 from app.models.user import UserRole, UserStatus
@@ -32,7 +32,7 @@ from app.schemas.auth import (
     TwoFASetupResponse,
 )
 from app.schemas.common import APIResponse, OkResponse
-from app.services import auth_service, branding_service, user_service
+from app.services import auth_service, branding_service, telecrm_service, user_service
 from app.services.audit_service import log_event
 from app.utils.otp import issue_otp, verify_otp
 
@@ -133,6 +133,11 @@ async def register(payload: RegisterRequest, request: Request):
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    # CRM sync, fire-and-forget. A new sign-up is the event the CRM most
+    # wants, so it goes out here rather than waiting for the nightly
+    # reconcile. Never awaited and never raising — a CRM outage must not
+    # cost someone their registration.
+    telecrm_service.push_user_bg(user)
     return APIResponse(
         data=AuthUserOut(
             id=str(user.id),
@@ -183,6 +188,10 @@ async def login(payload: LoginRequest, request: Request):
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    # `last_login_at` has just moved, and that is one of the columns the
+    # CRM carries. Same fire-and-forget contract as registration.
+    if _full is not None:
+        telecrm_service.push_user_bg(_full)
     return APIResponse(data=pair)
 
 

@@ -35,19 +35,30 @@ def _key(user_id: str) -> str:
     return f"{_PREFIX}{user_id}"
 
 
-async def mark_online(user_id: str) -> None:
+async def mark_online(user_id: str) -> bool:
     """Called on connect and on every heartbeat.
 
     `SET NX` keeps the ORIGINAL online-since through reconnects and
     extra tabs; the separate EXPIRE refreshes the clock either way.
+
+    Returns True only when this call is the one that brought the user
+    ONLINE — the `SET NX` won. That makes it the offline→online
+    transition, which is a different and much rarer event than "a
+    heartbeat arrived": a user with three tabs open trips it once, and a
+    reconnect inside the TTL does not trip it at all. Callers that want
+    to act on someone coming online (rather than on every 25-second
+    beat) key off this. False on a Redis failure, which fails quiet
+    rather than firing a spurious transition.
     """
     try:
         r = get_redis()
         key = _key(str(user_id))
-        await r.set(key, str(int(time.time())), ex=TTL_SEC, nx=True)
+        first = bool(await r.set(key, str(int(time.time())), ex=TTL_SEC, nx=True))
         await r.expire(key, TTL_SEC)
+        return first
     except Exception:  # pragma: no cover - presence is never load-bearing
         logger.debug("presence_mark_failed user=%s", user_id, exc_info=True)
+        return False
 
 
 async def online_user_ids() -> dict[str, int]:
