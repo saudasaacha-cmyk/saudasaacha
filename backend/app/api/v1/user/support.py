@@ -59,6 +59,24 @@ def _broker_support_allowed(broker: User) -> bool:
     return level != PermissionLevel.OFF
 
 
+async def _super_admin_whatsapp() -> str:
+    """The platform owner's own `support_whatsapp`, or "".
+
+    The end of everyone's chain. Sorted by `created_at` so a deployment
+    that somehow holds two SUPER_ADMIN rows answers the same way on every
+    request rather than whichever Mongo returned first.
+    """
+    su = (
+        await User.find(User.role == UserRole.SUPER_ADMIN)
+        .sort("+created_at")
+        .limit(1)
+        .to_list()
+    )
+    if not su:
+        return ""
+    return (su[0].support_whatsapp or "").strip()
+
+
 async def _resolve_whatsapp_for_user(user: User) -> str:
     """Walk UP the assignment chain from `user`, returning the first
     non-empty `support_whatsapp` found. Self is checked first so an
@@ -252,6 +270,21 @@ async def get_support_contacts(user: CurrentUser):
     corresponding action button in that case so the user never sees a
     half-broken "Contact support" affordance."""
     whatsapp = await _resolve_whatsapp_for_user(user)
+    if not whatsapp:
+        # The super admin's own number, which the walk above can never
+        # reach. It terminates at the first node with neither
+        # `assigned_broker_id` nor `assigned_admin_id` — and that is true
+        # of every admin AND of the super admin, so a number typed into
+        # the super admin's Support page was saved to their own row and
+        # read by nobody. Operator, exactly: "super admin me support me
+        # whatsapp no connect kiya hu par super admin ke user ko show
+        # nahi hota".
+        #
+        # Sits ABOVE the platform setting because it is the newer and
+        # more specific mechanism: the Platform Settings row predates
+        # per-admin numbers and its own comment below calls itself the
+        # last resort.
+        whatsapp = await _super_admin_whatsapp()
     if not whatsapp:
         # Last-resort fallback: super-admin set a global WhatsApp via
         # the Platform Settings page (this was the only mechanism
