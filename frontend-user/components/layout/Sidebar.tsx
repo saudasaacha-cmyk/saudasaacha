@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   FileText,
   Home,
+  ListOrdered,
   MessageCircle,
   ScrollText,
   User,
@@ -27,10 +28,15 @@ const items = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/terminal", label: "Trading Terminal", icon: CandlestickChart },
   // Positions is the unified blotter — Position / Active / Closed /
-  // Cancelled / Rejected tabs all live there. The old separate /orders
-  // route was folded in per user request: "orders aur position dono
-  // ka same kaam hai, bas position section rakho".
+  // Cancelled / Rejected tabs all live there, so most of what Orders
+  // shows is reachable from it. `/orders` was unlinked from here once on
+  // the request "orders aur position dono ka same kaam hai, bas position
+  // section rakho", but the page was never removed and the mobile bottom
+  // nav kept linking to it — so the two navs disagreed, and a desktop
+  // user simply could not reach a page their phone offered. Relinked on
+  // request; the two now match.
   { href: "/positions", label: "Positions", icon: Activity },
+  { href: "/orders", label: "Orders", icon: ListOrdered },
   { href: "/wallet", label: "Wallet", icon: Wallet },
   { href: "/ledger", label: "Ledger", icon: ScrollText },
   { href: "/reports/tradebook", label: "Reports", icon: FileText },
