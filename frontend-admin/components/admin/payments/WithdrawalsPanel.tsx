@@ -367,6 +367,7 @@ export function WithdrawalsPanel() {
             canMutate={canMutate}
             onApprove={() => setApproving({ id: r.id, utr: "" })}
             onReject={() => setRejecting({ id: r.id, reason: "" })}
+            onProofDone={() => qc.invalidateQueries({ queryKey: ["admin", "withdrawals"] })}
           />
         ))}
       </div>
@@ -480,12 +481,14 @@ function WithdrawalMobileCard({
   canMutate,
   onApprove,
   onReject,
+  onProofDone,
 }: {
   r: any;
   me: any;
   canMutate: boolean;
   onApprove: () => void;
   onReject: () => void;
+  onProofDone: () => void;
 }) {
   const isPending = r.status === "PENDING";
   const isCompleted = r.status === "COMPLETED";
@@ -569,6 +572,16 @@ function WithdrawalMobileCard({
           </Row>
         )}
       </div>
+
+      {/* Payment proof — NOT gated on PENDING. It is attached once the
+          money has gone out, i.e. after approval, so hiding it with the
+          approve/reject row would hide it exactly when it is wanted. */}
+      {!isRejected && (
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+          <span className="text-xs text-muted-foreground">Payment proof</span>
+          <ProofCell row={r} onDone={onProofDone} />
+        </div>
+      )}
 
       {/* Footer actions */}
       {isPending && (
