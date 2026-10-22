@@ -50,16 +50,62 @@ from app.services import wallet_service
 from app.utils.decimal_utils import to_decimal
 from app.utils.time_utils import now_ist, now_utc, start_of_day_ist, to_utc
 
+from app.core.redis_client import get_redis
+
 logger = logging.getLogger(__name__)
 
 _UTC = timezone.utc
 
-# Module-level kill switch + per-day run guard (same pattern as the
-# intraday→carry rollover loop). `_last_run_day` is the IST YYYYMMDD the
-# sweep last completed, so we fire exactly once per calendar day.
+# Module-level kill switch.
 _stop = False
+
 # Per settings row: the IST YYYYMMDD its cutoff last swept on.
+#
+# Kept in REDIS, not in a dict. It used to be module state, which made the
+# promise "exactly once per calendar day" actually mean "once per worker
+# lifetime per day" — every restart handed the sweep a blank slate and it
+# ran again. Harmless for the order cancellations, which are idempotent;
+# not harmless for `clear_carry_brackets`, which wipes SL/TP off open
+# positions. A user who re-set their stop after the first sweep lost it
+# again on the next deploy. Seen in production on 2026-10-22: position
+# 4acec4 cleared at 08:43 and again at 10:29, position 901a4f at 08:43
+# and again at 11:19 — the same positions, the same day, because the
+# backend had restarted in between.
+#
+# The in-memory dict stays as a per-process fast path so the common
+# "nothing due" poll every 60s costs no Redis round trip.
 _last_run_day: dict[str, str] = {}
+# A day's mark outlives any restart but not the week.
+_RUN_MARK_TTL = 3 * 24 * 3600
+
+
+def _mark_key(name: str) -> str:
+    return f"eod:swept:{name}"
+
+
+async def _last_swept(name: str) -> str | None:
+    """The IST day this segment last swept, across restarts."""
+    cached = _last_run_day.get(name)
+    if cached:
+        return cached
+    try:
+        val = await get_redis().get(_mark_key(name))
+    except Exception:  # pragma: no cover - a Redis blip must not block the sweep
+        logger.debug("eod_run_mark_read_failed", exc_info=True)
+        return None
+    if val:
+        day = val if isinstance(val, str) else val.decode()
+        _last_run_day[name] = day
+        return day
+    return None
+
+
+async def _mark_swept(name: str, day_key: str) -> None:
+    _last_run_day[name] = day_key
+    try:
+        await get_redis().set(_mark_key(name), day_key, ex=_RUN_MARK_TTL)
+    except Exception:  # pragma: no cover
+        logger.debug("eod_run_mark_write_failed", exc_info=True)
 
 
 def stop_eod_order_cleanup() -> None:
@@ -223,7 +269,7 @@ async def expire_stale_day_orders() -> dict[str, int]:
     due = {
         name
         for name, cut in cutoffs.items()
-        if cutoff_reached(cut, now, _last_run_day.get(name))
+        if cutoff_reached(cut, now, await _last_swept(name))
     }
     if not due:
         return {"scanned": 0, "expired": 0, "brackets_cleared": 0}
@@ -328,7 +374,7 @@ async def expire_stale_day_orders() -> dict[str, int]:
 
     day_key = now.strftime("%Y%m%d")
     for name in due:
-        _last_run_day[name] = day_key
+        await _mark_swept(name, day_key)
 
     return {
         "scanned": len(rows),
