@@ -20,6 +20,43 @@ export type HostBranding = { brand_name: string | null; logo_url: string | null 
  * so the endpoint 404s and the caller keeps its platform default.
  * Same on any failure: nothing here can break the login form.
  */
+const NONE: HostBranding = { brand_name: null, logo_url: null };
+
+/**
+ * One request per host, shared by every caller on the page.
+ *
+ * The login screen mounts this hook TWICE — once in the page for the
+ * wordmark, once in `AdminBrandingChrome` for the tab title and PWA
+ * name — and each used to run its own effect and its own fetch. So a
+ * tenant paid two identical unauthenticated round-trips before the form
+ * was usable, and the platform's own host logged the expected 404
+ * twice.
+ *
+ * A FAILURE is deliberately not cached: a transient blip would
+ * otherwise pin the platform default until a full reload, and this
+ * runs on the page where that is most visible.
+ */
+const inFlight = new Map<string, Promise<HostBranding>>();
+
+function brandForHost(host: string): Promise<HostBranding> {
+  const hit = inFlight.get(host);
+  if (hit) return hit;
+  const p = fetch(`${API_URL}/api/v1/branding/by-domain?domain=${encodeURIComponent(host)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((body) => {
+      const d = body?.data;
+      return d
+        ? { brand_name: d.brand_name ?? null, logo_url: d.logo_url ?? null }
+        : NONE;
+    })
+    .catch(() => {
+      inFlight.delete(host);
+      return NONE;
+    });
+  inFlight.set(host, p);
+  return p;
+}
+
 export function useHostBranding(): HostBranding {
   // Seeded by the auth layout from the Host header, so the login screens
   // never paint the platform brand before correcting themselves. Absent
@@ -34,7 +71,7 @@ export function useHostBranding(): HostBranding {
   // on the platform's own host is the cheaper half of that trade.
   const seed = useSeededHostBrand();
   const seeded = seed?.brand_name || seed?.logo_url ? seed : null;
-  const [brand, setBrand] = useState<HostBranding>({ brand_name: null, logo_url: null });
+  const [brand, setBrand] = useState<HostBranding>(NONE);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -43,16 +80,9 @@ export function useHostBranding(): HostBranding {
     if (!host || host === "localhost" || host === "127.0.0.1") return;
 
     let cancelled = false;
-    fetch(`${API_URL}/api/v1/branding/by-domain?domain=${encodeURIComponent(host)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body) => {
-        const d = body?.data;
-        if (cancelled || !d) return;
-        setBrand({ brand_name: d.brand_name ?? null, logo_url: d.logo_url ?? null });
-      })
-      .catch(() => {
-        /* platform default stands */
-      });
+    brandForHost(host).then((b) => {
+      if (!cancelled) setBrand(b);
+    });
     return () => {
       cancelled = true;
     };
