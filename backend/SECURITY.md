@@ -23,8 +23,11 @@ internet, and must require authentication.
    // mongosh — create an admin user, then an app user scoped to the DB
    use admin
    db.createUser({ user: "mpadmin", pwd: "<STRONG_RANDOM>", roles: ["root"] })
-   use sachchasauda
-   db.createUser({ user: "mpapp", pwd: "<STRONG_RANDOM>", roles: [{ role: "readWrite", db: "sachchasauda" }] })
+   // The DB name is whatever MONGODB_URL's path says — `nexbrokers` on
+   // the live box. It is NOT named after the brand and never has been,
+   // so a rename does not touch it.
+   use nexbrokers
+   db.createUser({ user: "app", pwd: "<STRONG_RANDOM>", roles: [{ role: "readWrite", db: "nexbrokers" }] })
    ```
    Start `mongod` with `--auth` (or `security.authorization: enabled` in
    `mongod.conf`), then point the backend at it:
