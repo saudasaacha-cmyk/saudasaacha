@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Settings). Empty = not configured, and the UI simply hides the email
     # option rather than showing a dead address — which is why this has no
     # invented default. Previously the seed hard-coded a stale
-    # `support@sachchasauda.com` straight into the DB.
+    # `support@rizingbull.in` straight into the DB.
     SUPPORT_EMAIL: str = ""
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_DEBUG: bool = False
@@ -191,7 +191,7 @@ class Settings(BaseSettings):
 
     # ── Public backend URL (used by OAuth callback URLs etc.) ────────
     # Override in production to your actual API hostname, e.g.
-    # https://api.sachchasauda.com — Kite redirects the user's browser here.
+    # https://api.rizingbull.in — Kite redirects the user's browser here.
     BACKEND_PUBLIC_URL: str = "http://localhost:8000"
 
     # ── Rate limit ───────────────────────────────────────────────────
@@ -260,7 +260,7 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: SecretStr = Field(default=SecretStr(""))
-    SMTP_FROM: str = "no-reply@sachchasauda.com"
+    SMTP_FROM: str = "no-reply@rizingbull.in"
     SMTP_TLS: bool = True
     SMS_PROVIDER: Literal["mock", "twilio", "msg91"] = "mock"
     SMS_API_KEY: SecretStr = Field(default=SecretStr(""))
@@ -294,9 +294,16 @@ class Settings(BaseSettings):
     # leave blank in dev — push send is a no-op until both are set.
     VAPID_PUBLIC_KEY: str = ""
     VAPID_PRIVATE_KEY: SecretStr = Field(default=SecretStr(""))
-    VAPID_SUBJECT: str = "mailto:admin@sachchasauda.com"
+    VAPID_SUBJECT: str = "mailto:admin@rizingbull.in"
 
     # ── Seed ─────────────────────────────────────────────────────────
+    # Deliberately still on the OLD domain, and not a leftover from the
+    # rename. The seed looks the super admin up BY THIS ADDRESS, so the
+    # live founding account is the row that carries it; pointing this at
+    # rizingbull.in would not rename that account, it would create a
+    # second super admin beside it on the next boot and leave the real
+    # one unreachable from here. Moving it means updating the DB row in
+    # the same change.
     SEED_SUPER_ADMIN_EMAIL: str = "admin@sachchasauda.com"
     SEED_SUPER_ADMIN_PASSWORD: SecretStr = Field(default=SecretStr("Admin@123"))
     SEED_SUPER_ADMIN_MOBILE: str = "9999999999"

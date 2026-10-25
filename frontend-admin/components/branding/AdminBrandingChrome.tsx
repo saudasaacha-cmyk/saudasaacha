@@ -148,7 +148,7 @@ export function AdminBrandingChrome() {
       // For them the auth payload already carries their EMPLOYER's
       // `custom_domain`, so `?d=` works on any host, including the
       // platform's own. Without this a broker or employee signing in at
-      // admin.sachchasauda.com installed a home-screen app named for the
+      // admin.rizingbull.in installed a home-screen app named for the
       // platform while their sidebar, tab and favicon all said the
       // tenant — the one surface that stayed wrong after the rest was
       // fixed. Falls through to the browser's host only when the payload

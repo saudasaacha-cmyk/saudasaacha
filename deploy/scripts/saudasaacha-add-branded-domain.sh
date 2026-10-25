@@ -27,7 +27,7 @@
 set -euo pipefail
 
 DOMAIN="${1:-}"
-EMAIL="${2:-ops@sachchasauda.com}"
+EMAIL="${2:-ops@rizingbull.in}"
 WITH_ADMIN="${3:-}"
 
 if [[ -z "$DOMAIN" ]]; then

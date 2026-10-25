@@ -539,8 +539,8 @@ export default function BrandingPage() {
   const userCode = meQuery.data?.user_code ?? "";
   const domainSaved = (meQuery.data?.custom_domain ?? "").trim();
   // Branded links are CLIENT-FACING (signup / login) — they must point at
-  // the END-USER frontend (e.g. https://sachchasauda.com), NOT the admin
-  // panel host (admin.sachchasauda.com). These are the deliberately
+  // the END-USER frontend (e.g. https://rizingbull.in), NOT the admin
+  // panel host (admin.rizingbull.in). These are the deliberately
   // platform-hosted ones, so they resolve without the tenant domain and
   // carry `?ref=`; see `lib/user-app-url` for the cascade.
   const platformOrigin = useMemo(() => platformUserAppOrigin(), []);

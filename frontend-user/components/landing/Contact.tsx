@@ -21,7 +21,7 @@ const contactMethods = [
     icon: Mail,
     title: 'Email Support',
     desc: 'Get detailed answers to your queries',
-    value: 'support@sachchasauda.com',
+    value: 'support@rizingbull.in',
     sub: 'Response within 2 hours',
     color: 'text-[#C4161C]',
     bg: 'bg-brand-50',

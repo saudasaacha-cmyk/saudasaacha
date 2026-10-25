@@ -107,7 +107,7 @@ async def seed_platform_settings() -> None:
         # hard-coded literal. These are seeded into PlatformSetting on first
         # boot and are editable afterwards in admin → Platform Settings, so a
         # literal here silently stamped a stale brand name /
-        # `support@sachchasauda.com` into every fresh deploy's DB even when the
+        # `support@rizingbull.in` into every fresh deploy's DB even when the
         # .env already carried the correct brand. SUPPORT_EMAIL defaults to
         # empty — the support UI then hides the email option instead of
         # showing a dead address.

@@ -7,9 +7,9 @@
  * they have to land on the trading app — never on the admin panel host this
  * code is running in. Three pages used to carry their own copy of this
  * resolution and they had drifted: the dashboard's referral link fell back
- * to a hardcoded `https://app.sachchasauda.com`, a host that is not the
- * user app, while the Branding and Download-App pages correctly derived
- * the apex from the current origin.
+ * to a hardcoded `app.` subdomain, a host that has never served the user
+ * app, while the Branding and Download-App pages correctly derived the
+ * apex from the current origin.
  *
  * Resolution order, most specific first:
  *
@@ -21,9 +21,9 @@
  *   2. `NEXT_PUBLIC_USER_APP_URL` — explicit deploy-time override.
  *   3. The current panel origin minus its `admin.` prefix. This is what
  *      makes an un-configured deploy behave: a panel served from
- *      `admin.sachchasauda.com` hands out `sachchasauda.com`, and one on
+ *      `admin.rizingbull.in` hands out `rizingbull.in`, and one on
  *      `admin.risingbull.live` hands out `risingbull.live`.
- *   4. `https://sachchasauda.com` — SSR and mis-config backstop.
+ *   4. `https://rizingbull.in` — SSR and mis-config backstop.
  */
 
 export type BrandedActor =
@@ -34,7 +34,7 @@ export type BrandedActor =
   | null
   | undefined;
 
-const PLATFORM_FALLBACK = "https://sachchasauda.com";
+const PLATFORM_FALLBACK = "https://rizingbull.in";
 
 /** Trailing slash off; http upgraded to https except on a dev host, where
  *  the user app really is served over plain http. */
@@ -83,7 +83,7 @@ export function adminPanelOrigin(actor: BrandedActor): string {
   const domain = tenantDomain(actor);
   if (domain) return `https://admin.${domain}`;
   if (typeof window !== "undefined") return normalize(window.location.origin);
-  return "https://admin.sachchasauda.com";
+  return "https://admin.rizingbull.in";
 }
 
 /** The actor's own domain, bare, only once SSL is live. */

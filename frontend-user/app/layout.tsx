@@ -43,6 +43,9 @@ const plexMono = IBM_Plex_Mono({
 
 // Hosts that are the platform itself (not a tenant's branded domain).
 const PLATFORM_METADATA_HOSTS = new Set([
+  "rizingbull.in",
+  "www.rizingbull.in",
+  // Pre-rename, see lib/branding-context.tsx.
   "sachchasauda.com",
   "www.sachchasauda.com",
   "localhost",

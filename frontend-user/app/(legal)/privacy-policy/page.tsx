@@ -97,16 +97,16 @@ export default function PrivacyPage() {
               <span>
                 Email:{" "}
                 <a
-                  href="mailto:privacy@sachchasauda.com"
+                  href="mailto:privacy@rizingbull.in"
                   className="font-medium text-mp-accent hover:underline"
                 >
-                  privacy@sachchasauda.com
+                  privacy@rizingbull.in
                 </a>
               </span>
               <span className="text-mp-text-mut">
                 Support:{" "}
                 <a href="/contact" className="text-mp-accent hover:underline">
-                  sachchasauda.com/contact
+                  rizingbull.in/contact
                 </a>
               </span>
             </div>

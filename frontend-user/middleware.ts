@@ -5,12 +5,12 @@ import type { NextRequest } from "next/server";
 //  Flagship-domain hiding.
 //
 //  When HIDE_PUBLIC_SITE=true, the public marketing site is made to look
-//  "not found" ONLY on the flagship host (sachchasauda.com / www) so the
+//  "not found" ONLY on the flagship host (rizingbull.in / www) so the
 //  platform isn't publicly discoverable via search.  Everything that
 //  matters keeps working, untouched:
 //    • /login, /register (+ ?ref=), /2fa, /forgot-password
 //    • the whole trading app (/dashboard, /terminal, /wallet, …)
-//    • api.sachchasauda.com + admin.sachchasauda.com (separate hosts)
+//    • api.rizingbull.in + admin.rizingbull.in (separate hosts)
 //    • every branded tenant domain (their host isn't the flagship, so
 //      this middleware passes through and their marketing still shows)
 //
@@ -19,12 +19,24 @@ import type { NextRequest } from "next/server";
 // ─────────────────────────────────────────────────────────────────────
 const HIDE = process.env.HIDE_PUBLIC_SITE === "true";
 
-const FLAGSHIP_HOSTS = new Set(["sachchasauda.com", "www.sachchasauda.com"]);
+const FLAGSHIP_HOSTS = new Set([
+  "rizingbull.in",
+  "www.rizingbull.in",
+  // The pre-rename domain, kept until its DNS is retired. A host that
+  // is NOT listed here is treated as a tenant's branded domain, so
+  // dropping it the day the name changed would have handed everyone
+  // still on the old link a tenant lookup that resolves to nothing.
+  "sachchasauda.com",
+  "www.sachchasauda.com",
+]);
 
 // Platform hosts (flagship + dev/preview). Anything NOT in here is a branded
 // tenant domain (trade5x.in, marginx.in, …) — those are login portals, so their
 // bare domain opens /login instead of the marketing site.
 const PLATFORM_HOSTS = new Set([
+  "rizingbull.in",
+  "www.rizingbull.in",
+  // Pre-rename, see FLAGSHIP_HOSTS above.
   "sachchasauda.com",
   "www.sachchasauda.com",
   "localhost",

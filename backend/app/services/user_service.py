@@ -23,7 +23,7 @@ from app.models.wallet import Wallet
 from app.utils.validators import is_valid_mobile_in, normalize_mobile_in
 
 # Stand-ins for a missing email / phone on an admin-created account.
-NO_EMAIL_DOMAIN = "noemail.sachchasauda.com"
+NO_EMAIL_DOMAIN = "noemail.rizingbull.in"
 NO_MOBILE_PREFIX = "NOMOB"
 
 

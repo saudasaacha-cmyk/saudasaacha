@@ -159,7 +159,7 @@ export default function FAQ() {
               <div className="text-sm font-bold text-slate-700 font-manrope mb-2">Reach us directly</div>
               {[
                 { icon: Phone, label: 'Phone Support', value: '+91 98765 43210', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-                { icon: Mail, label: 'Email Support', value: 'support@sachchasauda.com', color: 'text-brand-600', bg: 'bg-brand-50', border: 'border-brand-100' },
+                { icon: Mail, label: 'Email Support', value: 'support@rizingbull.in', color: 'text-brand-600', bg: 'bg-brand-50', border: 'border-brand-100' },
                 { icon: MessageCircle, label: 'Live Chat', value: 'Available 24/7', color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
               ].map((item) => {
                 const Icon = item.icon;

@@ -182,7 +182,7 @@ async def find_platform_super_admin() -> User | None:
     render their branding (logo + brand_name + favicon) when the
     visitor isn't on a specific tenant's domain or referral link.
 
-    Without this, the platform host (sachchasauda.com) had no
+    Without this, the platform host (rizingbull.in) had no
     branding source at all — BrandingProvider stayed null and the
     auth screens fell back to the hard-coded RIZING BULL glyph.
     Picking the OLDEST active SUPER_ADMIN matches the bootstrap
@@ -478,7 +478,7 @@ def admin_host_for(domain: str) -> str:
     """The hostname the ADMIN panel is served on for a tenant domain.
 
     `admin.<domain>`, mirroring how the platform itself is laid out
-    (admin.sachchasauda.com). Kept in one place because the DNS check,
+    (admin.rizingbull.in). Kept in one place because the DNS check,
     the preview, the provisioning helper, the CORS allow-list and the
     UI all have to agree on it.
     """

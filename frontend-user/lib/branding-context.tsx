@@ -16,7 +16,7 @@
  *   2. POST-LOGIN REDIRECT (gated, never fires for legacy users) —
  *      A user whose `signup_origin` is BRANDED_REFERRAL or
  *      CUSTOM_DOMAIN AND whose admin has a READY custom_domain gets
- *      redirected from `sachchasauda.com/dashboard` to
+ *      redirected from `rizingbull.in/dashboard` to
  *      `https://<admin.custom_domain>/dashboard#wl=<session>`.
  *      Existing 10k users have `signup_origin = null` → this path is
  *      physically unreachable for them.
@@ -56,7 +56,7 @@ type BrandingContextValue = {
   branding: Branding | null;
   loading: boolean;
   /** True ONLY once the client has confirmed we're on the platform host
-   *  (sachchasauda.com / localhost). The super-admin "RIZING BULL" default
+   *  (rizingbull.in / localhost). The super-admin "RIZING BULL" default
    *  logo + wordmark may render ONLY when this is true — never during SSR,
    *  never on a tenant's branded domain, never before the host is known.
    *  This is what stops RIZING BULL flashing on `broker.example.com`. */
@@ -77,6 +77,11 @@ const Ctx = createContext<BrandingContextValue>({
 
 const PLATFORM_HOSTS = new Set<string>(
   [
+    "rizingbull.in",
+    "www.rizingbull.in",
+    // Pre-rename domain. Still platform, not a tenant, until its DNS
+    // is retired — otherwise a visitor on the old link gets a
+    // /branding/by-domain lookup that finds nothing and a bare glyph.
     "sachchasauda.com",
     "www.sachchasauda.com",
     "localhost",
@@ -125,7 +130,7 @@ async function fetchBrandingByDomain(domain: string): Promise<Branding | null> {
 }
 
 /** Fetch the platform-default branding (super admin's logo +
- *  brand_name).  Used on the platform host (sachchasauda.com) where
+ *  brand_name).  Used on the platform host (rizingbull.in) where
  *  there's no tenant referral or custom domain to resolve against —
  *  without this fall-back the auth pages would render the generic
  *  built-in glyph even though the super admin has uploaded a logo. */
@@ -363,7 +368,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
           brand = me?.branding ?? null;
         }
         // Anonymous platform-host visitor (e.g. login / register on
-        // sachchasauda.com) OR logged-in user whose admin has no
+        // rizingbull.in) OR logged-in user whose admin has no
         // branding — fall back to the super admin's branding so the
         // auth + dashboard screens render the platform owner's logo +
         // favicon instead of the generic glyph.
