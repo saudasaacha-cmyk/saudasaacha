@@ -45,9 +45,6 @@ const plexMono = IBM_Plex_Mono({
 const PLATFORM_METADATA_HOSTS = new Set([
   "rizingbull.in",
   "www.rizingbull.in",
-  // Pre-rename, see lib/branding-context.tsx.
-  "sachchasauda.com",
-  "www.sachchasauda.com",
   "localhost",
   "127.0.0.1",
 ]);

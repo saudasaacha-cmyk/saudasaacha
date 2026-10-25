@@ -19,16 +19,7 @@ import type { NextRequest } from "next/server";
 // ─────────────────────────────────────────────────────────────────────
 const HIDE = process.env.HIDE_PUBLIC_SITE === "true";
 
-const FLAGSHIP_HOSTS = new Set([
-  "rizingbull.in",
-  "www.rizingbull.in",
-  // The pre-rename domain, kept until its DNS is retired. A host that
-  // is NOT listed here is treated as a tenant's branded domain, so
-  // dropping it the day the name changed would have handed everyone
-  // still on the old link a tenant lookup that resolves to nothing.
-  "sachchasauda.com",
-  "www.sachchasauda.com",
-]);
+const FLAGSHIP_HOSTS = new Set(["rizingbull.in", "www.rizingbull.in"]);
 
 // Platform hosts (flagship + dev/preview). Anything NOT in here is a branded
 // tenant domain (trade5x.in, marginx.in, …) — those are login portals, so their
@@ -36,9 +27,6 @@ const FLAGSHIP_HOSTS = new Set([
 const PLATFORM_HOSTS = new Set([
   "rizingbull.in",
   "www.rizingbull.in",
-  // Pre-rename, see FLAGSHIP_HOSTS above.
-  "sachchasauda.com",
-  "www.sachchasauda.com",
   "localhost",
   "127.0.0.1",
 ]);

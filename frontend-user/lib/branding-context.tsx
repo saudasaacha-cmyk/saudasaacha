@@ -79,11 +79,6 @@ const PLATFORM_HOSTS = new Set<string>(
   [
     "rizingbull.in",
     "www.rizingbull.in",
-    // Pre-rename domain. Still platform, not a tenant, until its DNS
-    // is retired — otherwise a visitor on the old link gets a
-    // /branding/by-domain lookup that finds nothing and a bare glyph.
-    "sachchasauda.com",
-    "www.sachchasauda.com",
     "localhost",
     "127.0.0.1",
   ].map((h) => h.toLowerCase()),

@@ -18,9 +18,9 @@ GitHub Action over SSH but can also be run by hand on the EC2.
 
 | Secret | Value |
 |--------|-------|
-| `EC2_HOST` | `100.48.201.136` (or whatever your elastic IP is) |
+| `EC2_HOST` | `200.234.44.125` (the live origin — Cloudflare proxies to it) |
 | `EC2_USER` | `sauda` |
-| `EC2_SSH_KEY` | paste the full contents of `sachchasauda.com.pem` (the PRIVATE key, including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines) |
+| `EC2_SSH_KEY` | paste the full contents of the deploy private key, including the `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----` lines |
 | `EC2_PORT` | `22` (optional — defaults to 22) |
 
 > Use a deploy-only SSH key in production. The current key gives full sudo
@@ -56,7 +56,7 @@ If you haven't already:
 ```bash
 sudo mkdir -p /opt/saudasaacha
 sudo chown ubuntu:ubuntu /opt/saudasaacha
-git clone https://github.com/shivammacoss/sachchasauda_ind.git /opt/saudasaacha
+git clone https://github.com/saudasaacha-cmyk/saudasaacha.git /opt/saudasaacha
 chmod +x /opt/saudasaacha/scripts/deploy.sh
 ```
 
@@ -74,7 +74,7 @@ Push to `main` (any commit, even a README touch). Watch
 ## Manual deploy (no GitHub)
 
 ```bash
-ssh -i sachchasauda.com.pem ubuntu@100.48.201.136
+ssh root@200.234.44.125        # host srv1949529
 cd /opt/saudasaacha
 bash scripts/deploy.sh
 ```

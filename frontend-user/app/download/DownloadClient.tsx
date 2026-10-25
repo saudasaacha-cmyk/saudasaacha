@@ -64,7 +64,7 @@ function DownloadInner() {
       if (!b && typeof window !== "undefined") {
         const host = window.location.hostname;
         // Keep in step with download/page.tsx and middleware.ts.
-        const isPlatform = /(^|\.)(rizingbull\.in|sachchasauda\.com)$/i.test(host) ||
+        const isPlatform = /(^|\.)rizingbull\.in$/i.test(host) ||
           host === "localhost" || host === "127.0.0.1" ||
           /\.(vercel|netlify|fly)\.(app|dev)$/i.test(host);
         if (!isPlatform) {

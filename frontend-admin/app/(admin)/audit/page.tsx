@@ -498,13 +498,13 @@ function AuditLogsInner() {
 function shortDevice(ua: string | null | undefined): string {
   if (!ua) return "—";
   const s = ua;
-  // Both brands on purpose: every APK already installed still sends the
-  // SachchaSauda user-agent it was built with, and will keep doing so
-  // until its owner updates. Dropping the old token would silently
-  // reclassify the entire existing fleet as "browser".
+  // One brand only. The retired token was kept while it was unclear
+  // whether APKs built under the old name were in the wild; they are
+  // not — no mobile build has shipped yet. The FIRST one must send a
+  // user-agent matching this, or every install here reads as "browser".
   if (
-    /(RizingBull|SachchaSauda)[-\s]?Mobile/i.test(s) ||
-    /(rizingbull|sachchasauda).+(Capacitor|Cordova)/i.test(s)
+    /RizingBull[-\s]?Mobile/i.test(s) ||
+    /rizingbull.+(Capacitor|Cordova)/i.test(s)
   ) {
     if (/iPhone|iPad|iOS/i.test(s)) return "iOS app";
     if (/Android/i.test(s)) return "Android app";

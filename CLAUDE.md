@@ -181,12 +181,18 @@ Two things deliberately do NOT move:
   address, so repointing it creates a second one rather than renaming the
   live account.
 
-The old domain stays listed beside the new one in all five platform-host
-checks (`middleware.ts`, `app/layout.tsx`, `lib/branding-context.tsx`,
-`download/page.tsx`, `DownloadClient.tsx`) and in nginx `server_name`
-until its DNS is retired — a host missing from those lists is treated as
-a tenant's branded domain. The cert must cover every name listed, so
-dropping the old names and reissuing are one change.
+The platform apex is listed in FIVE places, and a host missing from any
+of them is treated as a tenant's branded domain rather than the
+platform: `middleware.ts`, `app/layout.tsx`, `lib/branding-context.tsx`,
+`download/page.tsx` and `DownloadClient.tsx` — the last two as REGEXES,
+which is why a literal search for the domain misses them. nginx
+`server_name` is the sixth.
+
+When retiring a domain, delete its DNS BEFORE deploying the removal.
+nginx falls back to the first server block across all of
+`sites-enabled/`, and `sachchasauda-branded-*.conf` sorts ahead of
+`saudasaacha` — so a retired apex that still resolves would be served a
+TENANT's branded site, not a 404.
 
 Brand assets all come from `frontend-user/public/icons/_gen_brand_assets.py`,
 which writes both apps' tiles, favicons, wordmarks and `BrandGlyph.tsx`
