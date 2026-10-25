@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { MpPageHero, MpProse, MpSection } from "@/components/marketing/mp-ui";
 
 export const metadata: Metadata = {
-  title: "Refund Policy | SachchaSauda",
+  title: "Refund Policy | RIZING BULL",
   description:
-    "How refunds work at SachchaSauda for account charges, subscriptions and added funds.",
+    "How refunds work at RIZING BULL for account charges, subscriptions and added funds.",
 };
 
 const SECTIONS = [
@@ -36,7 +36,7 @@ export default function RefundPage() {
       <MpPageHero
         eyebrow="Legal"
         title="Refund Policy"
-        lead="How refunds work for funds, account charges and any optional plans at SachchaSauda."
+        lead="How refunds work for funds, account charges and any optional plans at RIZING BULL."
       />
       <MpSection>
         <div className="flex flex-col gap-8">

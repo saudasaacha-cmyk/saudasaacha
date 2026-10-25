@@ -1,6 +1,6 @@
-# SachchaSauda Broker Backend
+# RIZING BULL Backend
 
-Production-grade FastAPI backend for the **SachchaSauda Broker** Indian B-Book stock trading platform.
+Production-grade FastAPI backend for the **RIZING BULL** Indian B-Book stock trading platform.
 
 ## Stack
 - Python 3.11+ / FastAPI (async)

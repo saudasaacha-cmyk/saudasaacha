@@ -13,7 +13,7 @@ import { InstallPwaButton } from "@/components/common/InstallPwaButton";
  * resolves the SAME branding server-side so the Open Graph link preview
  * (WhatsApp / Telegram / iMessage) shows the tenant's brand — crawlers don't
  * run this client fetch, so without the server metadata every shared link
- * fell back to the platform default ("SachchaSauda") logo + name.
+ * fell back to the platform default ("RIZING BULL") logo + name.
  */
 type Branding = {
   brand_name: string | null;

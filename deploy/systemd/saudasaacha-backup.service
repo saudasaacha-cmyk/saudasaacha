@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────
-#  SachchaSauda — local MongoDB → Atlas warm-standby backup (oneshot)
+#  RIZING BULL — local MongoDB → Atlas warm-standby backup (oneshot)
 #
 #  Triggered by saudasaacha-backup.timer every 15 minutes. Streams a full
 #  mongodump of local Mongo into mongorestore --drop against Atlas, so the
@@ -13,7 +13,7 @@
 #      (apt-get install -y mongodb-database-tools).
 # ─────────────────────────────────────────────────────────────────────
 [Unit]
-Description=SachchaSauda MongoDB → Atlas warm-standby backup
+Description=RIZING BULL MongoDB → Atlas warm-standby backup
 After=network-online.target
 Wants=network-online.target
 

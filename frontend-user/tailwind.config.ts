@@ -22,7 +22,7 @@ const config: Config = {
         // primary button and a losing position wore nearly the same
         // colour. Single source for the blue; public/*.svg and the icon
         // generator repeat the literals because they render outside
-        // Tailwind — they are still RED and need a separate pass.
+        // Tailwind — keep them in step by hand when this moves.
         brand: {
           50: "#F0F7FF",
           100: "#DBEDFF",
@@ -36,6 +36,11 @@ const config: Config = {
           900: "#003166",
           DEFAULT: "#007DFF",
         },
+        // The second half of the RIZING BULL lockup — the gold of the
+        // arrow and the horns, sampled off the artwork. Wordmark only:
+        // it is not a UI colour, and on a light surface it does not
+        // carry enough contrast to be one.
+        gold: "#F7CA09",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
@@ -56,7 +61,7 @@ const config: Config = {
         info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
         atm: { DEFAULT: "hsl(var(--atm))", foreground: "hsl(var(--atm-foreground))" },
 
-        // ── SachchaSauda marketing palette (LOCKED design system) ──────────
+        // ── RIZING BULL marketing palette (LOCKED design system) ──────────
         // Scoped to the marketing pages via `.mp-scope` (light default) and
         // flipped to the dark palette inside `.mp-dark` sections. Stored as
         // space-separated RGB channels so Tailwind's `/<alpha>` modifier

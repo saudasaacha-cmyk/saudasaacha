@@ -21,7 +21,7 @@ const inter = Inter({
 });
 
 // Marketing-site display + numeric faces. Space Grotesk is the tight,
-// geometric heading face from the SachchaSauda design system (the brief's
+// geometric heading face from the RIZING BULL design system (the brief's
 // "Clash Display" alternative, but Google-hosted so it ships via next/font
 // with zero runtime CDN hit). IBM Plex Mono carries prices, payouts, and
 // stats with a tabular/mono feel. Both are scoped to the marketing pages
@@ -53,8 +53,8 @@ const PLATFORM_METADATA_HOSTS = new Set([
  * Resolve the brand for the REQUEST host, server-side. This is what makes
  * link-preview cards (WhatsApp / Telegram / Slack — crawlers that read the
  * SSR <head> and never run our client JS) show the TENANT's own name + logo
- * instead of the super-admin "SachchaSauda" default. On the platform host it
- * returns the SachchaSauda defaults; on a branded domain it fetches the
+ * instead of the super-admin "RIZING BULL" default. On the platform host it
+ * returns the RIZING BULL defaults; on a branded domain it fetches the
  * admin's brand_name + logo from the backend.
  */
 async function resolveHostBrand(): Promise<{
@@ -67,7 +67,7 @@ async function resolveHostBrand(): Promise<{
     PLATFORM_METADATA_HOSTS.has(host) ||
     /\.(vercel|netlify|fly)\.(app|dev)$/.test(host);
   if (platform || !host) {
-    return { platform: true, name: "SachchaSauda Broker", logo: null };
+    return { platform: true, name: "RIZING BULL", logo: null };
   }
   try {
     const res = await fetch(
@@ -91,7 +91,7 @@ async function resolveHostBrand(): Promise<{
 
 export async function generateMetadata(): Promise<Metadata> {
   const { platform, name, logo } = await resolveHostBrand();
-  const displayName = name || (platform ? "SachchaSauda Broker" : "Trading Platform");
+  const displayName = name || (platform ? "RIZING BULL" : "Trading Platform");
   const title = `${displayName} — Trading Platform`;
   // No market list here. This is what WhatsApp, Telegram and search
   // results quote, it is served under every tenant's own domain, and
@@ -123,7 +123,7 @@ export async function generateMetadata(): Promise<Metadata> {
     manifest: "/manifest.webmanifest",
     // The link-preview card crawlers read. siteName/title/image drive the
     // WhatsApp/Telegram preview — this is the actual fix for "register link
-    // shares with SachchaSauda's name + logo instead of the admin's".
+    // shares with RIZING BULL's name + logo instead of the admin's".
     openGraph: {
       type: "website",
       siteName: displayName,

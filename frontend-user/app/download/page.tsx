@@ -14,7 +14,7 @@ import { DownloadClient } from "./DownloadClient";
  * branding server-side and emit the correct Open Graph tags — WhatsApp /
  * Telegram / iMessage crawlers read the rendered <head> WITHOUT running JS,
  * so the client-side brand fetch alone never reached the link preview and
- * every shared link fell back to the platform default ("SachchaSauda") logo +
+ * every shared link fell back to the platform default ("RIZING BULL") logo +
  * name. The visible UI still hydrates via <DownloadClient>.
  */
 type Branding = {

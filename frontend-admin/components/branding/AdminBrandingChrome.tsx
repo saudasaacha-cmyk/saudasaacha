@@ -20,7 +20,7 @@ export function AdminBrandingChrome() {
   const admin = useAdminAuthStore((s) => s.admin);
   // The HOST is the fallback source, and the only one available before
   // sign-in: on admin.<tenant-domain> the login screen had no admin to
-  // read a brand from, so the tab said "SachchaSauda Broker Admin" to
+  // read a brand from, so the tab said "RIZING BULL Admin" to
   // people who have never heard of the platform.
   const hostBrand = useHostBranding();
   const role = admin?.role;

@@ -3,7 +3,7 @@
 Measured on production, 2026-10-08. Three live feeds, no others; MetaAPI and
 Infoway are gone.
 
-This file is two things: a map of what SachchaSauda runs today, and enough
+This file is two things: a map of what RIZING BULL runs today, and enough
 detail to rebuild the same data layer somewhere else. The last section is a
 prompt you can hand to Claude in another repo.
 

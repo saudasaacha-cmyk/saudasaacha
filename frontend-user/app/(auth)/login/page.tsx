@@ -323,7 +323,7 @@ function TelegramBanner() {
   );
 }
 
-/** Attractive "Install SachchaSauda App" promo banner used on the auth
+/** Attractive "Install RIZING BULL App" promo banner used on the auth
  *  pages.  Wraps InstallPwaButton's click logic but renders a much
  *  richer surface — gradient ring, app icon tile, headline + sub-line,
  *  arrow chevron — so users actually notice it. */

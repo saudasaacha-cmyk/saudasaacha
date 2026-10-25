@@ -28,10 +28,10 @@ export const revalidate = 0;
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
 const PLATFORM_DEFAULT = {
-  name: "SachchaSauda Broker",
-  short_name: "SachchaSauda",
+  name: "RIZING BULL",
+  short_name: "RIZING BULL",
   description:
-    "Trade with SachchaSauda Broker — live prices, instant execution and transparent charges.",
+    "Trade with RIZING BULL — live prices, instant execution and transparent charges.",
   start_url: "/dashboard",
   scope: "/",
   display: "standalone",

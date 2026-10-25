@@ -112,7 +112,7 @@ export function buildMailtoUrl(
  * The support WhatsApp link, with a message prefilled in the brand the
  * USER is actually signed in to.
  *
- * It used to be the string "Hi, I need help with my SachchaSauda
+ * It used to be the string "Hi, I need help with my RIZING BULL
  * account", repeated at three call sites — so a Rising Bull customer
  * opened a chat with their own broker introducing themselves as a
  * customer of somebody else.

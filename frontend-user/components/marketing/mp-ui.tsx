@@ -1,4 +1,4 @@
-/* SachchaSauda marketing UI primitives.
+/* RIZING BULL marketing UI primitives.
  *
  * Thin, presentational building blocks that read straight from the locked
  * `--mp-*` design tokens (registered in tailwind.config as the `mp` colour

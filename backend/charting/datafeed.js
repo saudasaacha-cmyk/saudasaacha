@@ -1,7 +1,7 @@
 /*
- * SachchaSauda custom Datafeed for TradingView Advanced Charts.
+ * RIZING BULL custom Datafeed for TradingView Advanced Charts.
  *
- * Implements the TradingView "JS Datafeed API" against SachchaSauda's own
+ * Implements the TradingView "JS Datafeed API" against RIZING BULL's own
  * backend instead of a UDF server — so NO new backend endpoints are needed.
  * Historical candles come from:
  *     GET /api/v1/user/instruments/{token}/history?interval=&days=
@@ -41,12 +41,12 @@
     return 300;
   }
 
-  function SachchaSaudaDatafeed() {
+  function RIZING BULLDatafeed() {
     this._subs = {};        // listenerGuid -> { onTick, lastBar, intervalSec }
     this._lastHistBar = null; // most recent bar from the last getBars (per chart)
   }
 
-  SachchaSaudaDatafeed.prototype.onReady = function (cb) {
+  RIZING BULLDatafeed.prototype.onReady = function (cb) {
     setTimeout(function () {
       cb({
         supported_resolutions: ["1", "5", "15", "30", "60", "1D"],
@@ -57,11 +57,11 @@
     }, 0);
   };
 
-  SachchaSaudaDatafeed.prototype.searchSymbols = function (_u, _e, _t, onResult) {
+  RIZING BULLDatafeed.prototype.searchSymbols = function (_u, _e, _t, onResult) {
     onResult([]); // symbol search is driven by the app, not the chart
   };
 
-  SachchaSaudaDatafeed.prototype.resolveSymbol = function (symbolName, onResolve) {
+  RIZING BULLDatafeed.prototype.resolveSymbol = function (symbolName, onResolve) {
     var c = cfg();
     var ps = Number(c.pricescale) || 100;
     var info = {
@@ -86,7 +86,7 @@
     setTimeout(function () { onResolve(info); }, 0);
   };
 
-  SachchaSaudaDatafeed.prototype.getBars = function (
+  RIZING BULLDatafeed.prototype.getBars = function (
     symbolInfo, resolution, periodParams, onResult, onError
   ) {
     var self = this;
@@ -135,7 +135,7 @@
       });
   };
 
-  SachchaSaudaDatafeed.prototype.subscribeBars = function (
+  RIZING BULLDatafeed.prototype.subscribeBars = function (
     symbolInfo, resolution, onTick, guid
   ) {
     this._subs[guid] = {
@@ -153,12 +153,12 @@
     };
   };
 
-  SachchaSaudaDatafeed.prototype.unsubscribeBars = function (guid) {
+  RIZING BULLDatafeed.prototype.unsubscribeBars = function (guid) {
     delete this._subs[guid];
   };
 
   // Called from the RN host on every WS tick (via window.__tick).
-  SachchaSaudaDatafeed.prototype._applyTick = function (price, ts) {
+  RIZING BULLDatafeed.prototype._applyTick = function (price, ts) {
     var p = Number(price);
     if (!isFinite(p) || p <= 0) return;
     var nowSec = Math.floor((ts || Date.now()) / 1000);
@@ -182,7 +182,7 @@
     }
   };
 
-  window.SachchaSaudaDatafeed = SachchaSaudaDatafeed;
+  window.RIZING BULLDatafeed = RIZING BULLDatafeed;
   window.__tick = function (price, ts) {
     if (window.__df) window.__df._applyTick(price, ts);
   };

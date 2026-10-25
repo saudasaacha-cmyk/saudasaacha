@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  SachchaSauda Broker — production deploy script
+#  RIZING BULL — production deploy script
 #  Runs on the EC2 host. Invoked by GitHub Actions over SSH; can also
 #  be run manually:
 #      cd /opt/saudasaacha && bash scripts/deploy.sh
@@ -44,7 +44,7 @@ VENV="$BACKEND_DIR/.venv"
 cd "$REPO_DIR"
 
 echo "═══════════════════════════════════════════════════════════════"
-echo "  SachchaSauda deploy — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+echo "  RIZING BULL deploy — $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 echo "═══════════════════════════════════════════════════════════════"
 
 # ── 1) Pull latest ─────────────────────────────────────────────────
@@ -152,8 +152,8 @@ if [ "$user_changed" = "1" ]; then
   # with no build-time substitution, and because a constant that must be
   # hand-bumped every release is a constant that will not be.
   if [ -f public/sw.js ]; then
-    as_app sed -i -E "s/^const VERSION = \".*\";/const VERSION = \"sachchasauda-pwa-${NEW_SHA:0:12}\";/" public/sw.js
-    echo "  sw.js VERSION → sachchasauda-pwa-${NEW_SHA:0:12}"
+    as_app sed -i -E "s/^const VERSION = \".*\";/const VERSION = \"rizingbull-pwa-${NEW_SHA:0:12}\";/" public/sw.js
+    echo "  sw.js VERSION → rizingbull-pwa-${NEW_SHA:0:12}"
   fi
 
   echo "  building…"

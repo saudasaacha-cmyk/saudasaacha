@@ -23,7 +23,7 @@ export function BrandLogo({ href = "/dashboard", size = "md", showAdminBadge = t
 
   // ── White-label branding override ─────────────────────────────────
   // Branding cascade (matches backend `_branding_fields_for`):
-  //   - SUPER_ADMIN     → platform default ("SachchaSauda Broker")
+  //   - SUPER_ADMIN     → platform default ("RIZING BULL")
   //   - ADMIN           → their OWN brand_name + logo_url
   //   - BROKER / sub-broker → INHERITS parent admin's brand (backend
   //                            already resolves this via assigned_admin_id
@@ -86,12 +86,12 @@ export function BrandLogo({ href = "/dashboard", size = "md", showAdminBadge = t
   );
 
   // Name block — tenant brand_name (single accent line) when set, else
-  // the two-tone "SachchaSauda Broker" platform wordmark.
+  // the two-tone "RIZING BULL" platform wordmark.
   const nameBlock = tenantName ? (
     <span className="truncate text-foreground">{tenantName}</span>
   ) : (
     <span className="truncate text-foreground">
-      Sachcha<span className="text-brand">Sauda</span> Broker
+      RIZING <span className="text-gold">BULL</span>
     </span>
   );
 

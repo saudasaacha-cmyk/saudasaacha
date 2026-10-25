@@ -63,7 +63,7 @@ export default function AdminLoginPage() {
           <CardDescription>
             {hostBrand.brand_name
               ? `${hostBrand.brand_name} control panel`
-              : "SachchaSauda Broker control panel"}{" "}
+              : "RIZING BULL control panel"}{" "}
             — sign in with your admin credentials.
           </CardDescription>
         </CardHeader>

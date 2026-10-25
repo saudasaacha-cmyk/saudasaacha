@@ -8,7 +8,7 @@ import type { HostBranding } from "@/lib/useHostBranding";
  *
  * These two pages run before there is a signed-in admin to read a brand
  * from, so everything used to fall back to the platform: the tab title
- * said "SachchaSauda Broker Admin" and the card showed the platform
+ * said "RIZING BULL Admin" and the card showed the platform
  * wordmark on `admin.<tenant-domain>`, correcting itself only once a
  * client-side fetch landed. Resolving the brand here — from the Host
  * header, before a byte is sent — means the first paint is already the

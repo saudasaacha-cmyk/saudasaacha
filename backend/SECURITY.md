@@ -1,4 +1,4 @@
-# Security hardening — SachchaSauda backend
+# Security hardening — RIZING BULL backend
 
 Practical, do-this-before-production checklist. Ordered by impact. The app
 already has solid defaults (bcrypt passwords, JWT + refresh rotation,

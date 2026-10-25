@@ -19,13 +19,18 @@ from app.utils.time_utils import now_utc
 def _brand_slug() -> str:
     """Filename-safe brand prefix taken from APP_NAME.
 
-    Downloaded report filenames were hard-coded to `sachchasauda_…`, so every user
-    on the current brand still received files stamped with the OLD one. Derive
-    it from config instead: "SachchaSauda Broker" → "sachchasauda".
+    Downloaded report filenames were hard-coded to one brand's name, so
+    every user on the next brand still received files stamped with the old
+    one. Derive it from config instead: "RIZING BULL" → "rizing_bull".
+
+    The whole name is kept. This used to take only the first word, to drop
+    the "Broker" that the brand of the day carried as a suffix — which
+    silently truncated the next brand, whose name is two words, to
+    "rizing".
     """
     raw = (settings.APP_NAME or "").strip().lower()
-    slug = "".join(c if c.isalnum() else "_" for c in raw).strip("_")
-    return slug.split("_")[0] or "report"
+    slug = "_".join("".join(c if c.isalnum() else " " for c in raw).split())
+    return slug or "report"
 
 router = APIRouter(prefix="/reports", tags=["user-reports"])
 

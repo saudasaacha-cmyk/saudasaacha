@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────
-#  SachchaSauda — local MongoDB → Atlas warm-standby backup
+#  RIZING BULL — local MongoDB → Atlas warm-standby backup
 #
 #  WHAT IT DOES
 #    Streams a full mongodump of the LOCAL (primary, fast) MongoDB straight

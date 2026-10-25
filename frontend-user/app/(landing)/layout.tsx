@@ -1,6 +1,6 @@
 // No metadata export here on purpose.
 //
-// This segment used to hard-code "SachchaSauda — India's Modern
+// This segment used to hard-code "RIZING BULL — India's Modern
 // Multi-Segment Trading Platform" plus a market list, a forex claim the
 // platform no longer honours and a "Flat ₹20 brokerage" line that is not
 // every tenant's pricing. Being static, it also overrode the root

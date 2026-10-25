@@ -2,8 +2,8 @@ import { cn } from "@/lib/utils";
 import { BrandGlyph } from "./BrandGlyph";
 
 /**
- * Platform lockup — mark + "Sachcha" (current text colour) + "Sauda" (brand
- * red), matching the brand artwork. Rendered as real text rather than an
+ * Platform lockup — mark + "RIZING" (current text colour) + "BULL" (brand
+ * gold), matching the brand artwork. Rendered as real text rather than an
  * image so it stays crisp at any DPI, picks up the bundled Space Grotesk,
  * and flips ink/white with the surface it sits on.
  *
@@ -23,7 +23,7 @@ export function Wordmark({
     <span className={cn("inline-flex items-center gap-2", className)}>
       <BrandGlyph className={markClassName} />
       <span className={cn("font-display font-bold leading-none tracking-tight", textClassName)}>
-        Sachcha<span className="text-brand">Sauda</span>
+        RIZING <span className="text-gold">BULL</span>
       </span>
     </span>
   );
