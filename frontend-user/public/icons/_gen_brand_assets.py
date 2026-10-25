@@ -47,8 +47,13 @@ SOURCE = os.path.join(HERE, "_brand-source.jpg")   # the artwork as supplied
 NAVY = "#031A41"         # "RIZING", and the bull's body
 GOLD = "#F7CA09"         # "BULL", the arrow, the horns
 PAPER = "#FFFFFF"
-TILE = "#0a0a0a"         # the app's own background, so icons sit on-theme
-TILE_RGB = (10, 10, 10)
+# The icon tile. Light blue rather than the app's own near-black: the
+# bull is navy with gold, so on a dark tile its body loses the edge that
+# separates it from the background, and at launcher size it read as a
+# gold arrow with a smudge behind it. This is `brand-100`, so it is a
+# token the palette already has rather than a colour invented for icons.
+TILE = "#DBEDFF"
+TILE_RGB = (219, 237, 255)
 
 # How much of a tile's width the mark spans. Maskable icons stay inside the
 # 80% safe zone so an OS circle-crop cannot clip the horns or the arrow tip.
