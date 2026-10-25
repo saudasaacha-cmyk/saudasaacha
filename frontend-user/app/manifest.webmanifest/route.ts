@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { ICON_VERSION } from "@/lib/icon-version";
 
 // Dynamic Web App Manifest for the user-facing frontend.
 //
@@ -40,9 +41,9 @@ const PLATFORM_DEFAULT = {
   theme_color: "#0a0a0a",
   categories: ["finance", "business"],
   icons: [
-    { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-    { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-    { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    { src: `/icons/icon-192.png?v=${ICON_VERSION}`, sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: `/icons/icon-512.png?v=${ICON_VERSION}`, sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: `/icons/icon-maskable-512.png?v=${ICON_VERSION}`, sizes: "512x512", type: "image/png", purpose: "maskable" },
   ],
 };
 

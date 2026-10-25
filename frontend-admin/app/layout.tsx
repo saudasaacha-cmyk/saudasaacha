@@ -2,11 +2,12 @@ import type { Metadata, Viewport } from "next";
 import { Providers } from "./providers";
 import { PwaRegister } from "@/components/common/PwaRegister";
 import "./globals.css";
+import { ICON_VERSION } from "@/lib/icon-version";
 
 export const metadata: Metadata = {
   title: { default: "RIZING BULL Admin", template: "%s · RIZING BULL Admin" },
   description: "Super-admin control panel for the RIZING BULL trading platform.",
-  icons: { icon: "/icon.svg" },
+  icons: { icon: `/icon.svg?v=${ICON_VERSION}` },
   // Dynamic manifest — served by app/manifest.webmanifest/route.ts.
   // AdminBrandingChrome rewrites this <link>'s href at runtime to
   // `?u=<USER_CODE>` once auth hydrates so PWA installs pick up the

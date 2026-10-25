@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { ICON_VERSION } from "@/lib/icon-version";
 
 // Dynamic Web App Manifest for the admin panel.
 //
@@ -42,10 +43,13 @@ const PLATFORM_DEFAULT = {
   // by Chromium / Edge desktop), but Android home screens require a
   // 192/512 raster declaration to pass the install criteria. Declaring
   // the SVG at those sizes is valid and gets rasterised by the OS.
+  // `?v=` is the artwork's own hash. Without it the installed PWA kept
+  // serving whatever icon was cached when it was first installed, and a
+  // reinstall did not help because the URL had not changed.
   icons: [
-    { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-    { src: "/icon.svg", sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" },
-    { src: "/icon.svg", sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" },
+    { src: `/icon.svg?v=${ICON_VERSION}`, sizes: "any", type: "image/svg+xml", purpose: "any" },
+    { src: `/icon.svg?v=${ICON_VERSION}`, sizes: "192x192", type: "image/svg+xml", purpose: "any maskable" },
+    { src: `/icon.svg?v=${ICON_VERSION}`, sizes: "512x512", type: "image/svg+xml", purpose: "any maskable" },
   ],
 };
 
