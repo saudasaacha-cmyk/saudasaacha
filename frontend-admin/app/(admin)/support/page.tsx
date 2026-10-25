@@ -41,17 +41,23 @@ export default function AdminSupportPage() {
   // Form state — hydrated from the server on first load, then left alone
   // so a background refetch can't clobber an in-progress edit.
   const [draft, setDraft] = useState<string>("");
+  const [cashDraft, setCashDraft] = useState<string>("");
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (!data || hydrated) return;
     setDraft(data.whatsapp || "");
+    setCashDraft(data.cash_deposit_whatsapp || "");
     setHydrated(true);
   }, [data, hydrated]);
 
   const saveMut = useMutation({
-    mutationFn: (val: string) => SupportAPI.set(val),
+    mutationFn: () =>
+      SupportAPI.set({
+        whatsapp: draft.trim(),
+        cash_deposit_whatsapp: cashDraft.trim(),
+      }),
     onSuccess: (resp) => {
-      toast.success("Support number updated");
+      toast.success("Numbers updated");
       qc.setQueryData(["admin", "support"], resp);
       // Invalidate the user-side support cache so any apk session that
       // hits /user/support next sees the fresh value without waiting
@@ -70,7 +76,8 @@ export default function AdminSupportPage() {
   const waPreview = buildWaPreview(draft);
   const trimmed = draft.trim();
   const serverVal = (data?.whatsapp || "").trim();
-  const isDirty = trimmed !== serverVal;
+  const serverCash = (data?.cash_deposit_whatsapp || "").trim();
+  const isDirty = trimmed !== serverVal || cashDraft.trim() !== serverCash;
   // Brokers can only edit their own support number when the admin granted the
   // `support` permission. Backend returns `can_edit`; default to true while the
   // query is still loading (or for admin/super where it's always true) so the
@@ -81,7 +88,7 @@ export default function AdminSupportPage() {
     <div className="space-y-6">
       <PageHeader
         title="Support contact"
-        description="Per-admin WhatsApp number shown to your users on the Add-funds / Contact-support button. Cascades down the broker hierarchy — leave blank to inherit from your parent admin."
+        description="Per-admin WhatsApp numbers for your users. Both cascade down the broker hierarchy — leave either blank to inherit it from your parent admin."
       />
 
       <Card className="max-w-2xl">
@@ -119,6 +126,33 @@ export default function AdminSupportPage() {
             </p>
           </div>
 
+          {/* Cash-deposit desk. Separate because a cash hand-off carries an
+              amount, a place and a client code — a payments question, not a
+              support one, and often a different person. Blank keeps today's
+              behaviour exactly: it falls back to the support number above. */}
+          <div className="space-y-1.5 border-t border-border pt-4">
+            <label className="text-sm font-medium">
+              Cash-deposit WhatsApp{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <input
+              value={cashDraft}
+              onChange={(e) => setCashDraft(e.target.value)}
+              placeholder="+91 98765 43210"
+              disabled={(isFetching && !hydrated) || !canEdit}
+              className="h-10 w-full rounded-md border border-border bg-muted/20 px-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary disabled:opacity-50"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Where a cash deposit submitted without a receipt is sent. Leave
+              blank to use the support number above.
+            </p>
+            {cashDraft.trim() !== "" && !buildWaPreview(cashDraft) && (
+              <p className="text-[11px] text-loss">
+                Too short to be a valid WhatsApp number. Add the country code.
+              </p>
+            )}
+          </div>
+
           {/* Preview of how the link will resolve. Helps the admin spot a
               missing country code or wrong digit count BEFORE saving. */}
           <div className="rounded-md border border-border bg-muted/10 px-3 py-2 text-xs">
@@ -141,9 +175,15 @@ export default function AdminSupportPage() {
           <div className="flex items-center gap-2">
             <Button
               type="button"
-              onClick={() => saveMut.mutate(trimmed)}
+              onClick={() => saveMut.mutate()}
               loading={saveMut.isPending}
-              disabled={!canEdit || !isDirty || saveMut.isPending || (trimmed !== "" && !waPreview)}
+              disabled={
+                !canEdit ||
+                !isDirty ||
+                saveMut.isPending ||
+                (trimmed !== "" && !waPreview) ||
+                (cashDraft.trim() !== "" && !buildWaPreview(cashDraft))
+              }
             >
               <Save className="size-4" />
               Save
@@ -152,7 +192,10 @@ export default function AdminSupportPage() {
               <Button
                 type="button"
                 variant="ghost"
-                onClick={() => setDraft(serverVal)}
+                onClick={() => {
+                  setDraft(serverVal);
+                  setCashDraft(serverCash);
+                }}
                 disabled={saveMut.isPending}
               >
                 Reset

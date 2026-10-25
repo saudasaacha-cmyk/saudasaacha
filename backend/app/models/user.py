@@ -386,6 +386,19 @@ class User(TimestampMixin):
     # strips non-digits before composing the wa.me link.
     support_whatsapp: str | None = None
 
+    # A SECOND number, for cash-deposit hand-offs only.
+    #
+    # A cash deposit with no receipt is sent to WhatsApp instead of to the
+    # admin queue, carrying the amount, the place and the client code —
+    # that is a payments desk's job, not the support desk's, and the two
+    # are often different people. Resolved through the SAME cascade as
+    # `support_whatsapp` and settable by the same roles, so a broker can
+    # point their own clients' cash at their own number.
+    #
+    # Falls back to `support_whatsapp` when unset, so nothing breaks for
+    # anyone who never sets it — which is the state every pool starts in.
+    cash_deposit_whatsapp: str | None = None
+
     # Per-admin "user carry-forward toggle" feature switch. Default OFF ⇒ the
     # platform's normal auto-carry runs at EOD (affordable MIS → NRML) and users
     # see no per-position toggle. When an admin turns this ON for their pool,

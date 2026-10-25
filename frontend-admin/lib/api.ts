@@ -969,15 +969,20 @@ export const CryptoConfigAPI = {
   }) => unwrap<CryptoConfig>(api.put("/admin/crypto-config", body)),
 };
 
+type SupportNumbers = {
+  whatsapp: string;
+  /** Separate desk for cash-deposit hand-offs. Blank = use `whatsapp`. */
+  cash_deposit_whatsapp: string;
+  role: string;
+  can_edit?: boolean;
+};
+
 export const SupportAPI = {
-  get: () =>
-    unwrap<{ whatsapp: string; role: string; can_edit?: boolean }>(
-      api.get("/admin/support"),
-    ),
-  set: (whatsapp: string) =>
-    unwrap<{ whatsapp: string; role: string; can_edit?: boolean }>(
-      api.put("/admin/support", { whatsapp }),
-    ),
+  get: () => unwrap<SupportNumbers>(api.get("/admin/support")),
+  /** Omit a field to leave it unchanged; send "" to clear it back to
+   *  inheriting from the tier above. */
+  set: (body: { whatsapp: string; cash_deposit_whatsapp?: string }) =>
+    unwrap<SupportNumbers>(api.put("/admin/support", body)),
   getTerms: () =>
     unwrap<{ text: string; enabled: boolean; role: string }>(
       api.get("/admin/support/terms"),

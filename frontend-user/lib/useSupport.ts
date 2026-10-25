@@ -5,6 +5,10 @@ import { APP_NAME } from "@/lib/constants";
 
 export interface SupportContacts {
   whatsapp: string;
+  /** The cash-deposit desk. The server already falls back to `whatsapp`
+   *  when the chain sets no separate one, so this is never empty when
+   *  `whatsapp` is not. */
+  cash_deposit_whatsapp: string;
   email: string;
 }
 
@@ -174,7 +178,11 @@ export function useCashDepositWhatsapp(): (d: {
     if (d.userCode) lines.push(`Client code: ${d.userCode}`);
     if (d.userName) lines.push(`Name: ${d.userName}`);
     lines.push("", "Receipt uploaded in the app. Please verify and approve.");
-    return buildWhatsappUrl(support?.whatsapp, lines.join("\n"));
+    // The cash desk, not support — see `SupportContacts`.
+    return buildWhatsappUrl(
+      support?.cash_deposit_whatsapp || support?.whatsapp,
+      lines.join("\n"),
+    );
   };
 }
 
@@ -206,7 +214,10 @@ export function useCashWithdrawalWhatsapp(): (d: {
     if (d.userCode) lines.push(`Client code: ${d.userCode}`);
     if (d.userName) lines.push(`Name: ${d.userName}`);
     lines.push("", "Awaiting approval. Please confirm the handover.");
-    return buildWhatsappUrl(support?.whatsapp, lines.join("\n"));
+    return buildWhatsappUrl(
+      support?.cash_deposit_whatsapp || support?.whatsapp,
+      lines.join("\n"),
+    );
   };
 }
 

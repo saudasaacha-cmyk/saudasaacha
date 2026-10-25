@@ -59,7 +59,7 @@ def _broker_support_allowed(broker: User) -> bool:
     return level != PermissionLevel.OFF
 
 
-async def _super_admin_whatsapp() -> str:
+async def _super_admin_whatsapp(field: str = "support_whatsapp") -> str:
     """The platform owner's own `support_whatsapp`, or "".
 
     The end of everyone's chain. Sorted by `created_at` so a deployment
@@ -74,10 +74,10 @@ async def _super_admin_whatsapp() -> str:
     )
     if not su:
         return ""
-    return (su[0].support_whatsapp or "").strip()
+    return (getattr(su[0], field, None) or "").strip()
 
 
-async def _resolve_whatsapp_for_user(user: User) -> str:
+async def _resolve_whatsapp_for_user(user: User, field: str = "support_whatsapp") -> str:
     """Walk UP the assignment chain from `user`, returning the first
     non-empty `support_whatsapp` found. Self is checked first so an
     admin/broker hitting the apk against their own login still sees
@@ -101,7 +101,7 @@ async def _resolve_whatsapp_for_user(user: User) -> str:
         if cur.id in seen:
             break
         seen.add(cur.id)
-        val = (cur.support_whatsapp or "").strip()
+        val = (getattr(cur, field, None) or "").strip()
         # Permission gate: a BROKER (incl. sub-broker) node's number is only
         # honoured when the admin has granted it the `support` permission.
         # When that permission is OFF the broker's number is skipped, so the
@@ -292,10 +292,22 @@ async def get_support_contacts(user: CurrentUser):
         # deployments working even when no User row has been updated
         # yet through the new admin Support page.
         whatsapp = await _read_setting("platform.support_whatsapp")
+    # The cash-deposit desk. Same cascade, different column — a cash
+    # hand-off carries an amount, a place and a client code, which is a
+    # payments question rather than a support one, and often a different
+    # person. Falls back to the support number so a pool that never sets
+    # one keeps working exactly as it does today.
+    cash = await _resolve_whatsapp_for_user(user, "cash_deposit_whatsapp")
+    if not cash:
+        cash = await _super_admin_whatsapp("cash_deposit_whatsapp")
+    if not cash:
+        cash = whatsapp
+
     email = await _read_setting("platform.support_email")
     return APIResponse(
         data={
             "whatsapp": whatsapp,
+            "cash_deposit_whatsapp": cash,
             "email": email,
         }
     )
