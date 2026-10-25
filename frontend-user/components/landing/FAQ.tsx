@@ -49,19 +49,19 @@ function FAQItem({ faq, isOpen, onToggle }: FAQItemProps) {
   return (
     <div
       className={`border rounded-2xl overflow-hidden transition-all duration-300 ${
-        isOpen ? 'border-[#C4161C] bg-brand-50/30' : 'border-slate-200 bg-white hover:border-brand-200'
+        isOpen ? 'border-[#006ADB] bg-brand-50/30' : 'border-slate-200 bg-white hover:border-brand-200'
       }`}
     >
       <button
         className="w-full flex items-center justify-between px-5 py-4 text-left gap-4"
         onClick={onToggle}
       >
-        <span className={`text-sm font-semibold font-manrope transition-colors ${isOpen ? 'text-[#C4161C]' : 'text-slate-800'}`}>
+        <span className={`text-sm font-semibold font-manrope transition-colors ${isOpen ? 'text-[#006ADB]' : 'text-slate-800'}`}>
           {faq.q}
         </span>
         <ChevronDown
           size={16}
-          className={`shrink-0 transition-all duration-300 ${isOpen ? 'rotate-180 text-[#C4161C]' : 'text-slate-400'}`}
+          className={`shrink-0 transition-all duration-300 ${isOpen ? 'rotate-180 text-[#006ADB]' : 'text-slate-400'}`}
         />
       </button>
       <div
@@ -102,7 +102,7 @@ export default function FAQ() {
           </div>
           <h2 className="text-4xl md:text-5xl font-bold text-slate-900 tracking-tight font-manrope mb-4">
             Frequently Asked{' '}
-            <span className="text-[#C4161C] gold-underline">Questions</span>
+            <span className="text-[#006ADB] gold-underline">Questions</span>
           </h2>
           <p className="text-lg text-slate-500 font-light">
             Everything you need to know about RIZING BULL.
@@ -128,7 +128,7 @@ export default function FAQ() {
           <div ref={rightRef} className="scroll-reveal-right flex flex-col gap-5">
 
             {/* Still have questions card */}
-            <div className="bg-[#C4161C] rounded-2xl p-7 text-white relative overflow-hidden">
+            <div className="bg-[#006ADB] rounded-2xl p-7 text-white relative overflow-hidden">
               {/* Pattern */}
               <div
                 className="absolute inset-0 opacity-10 pointer-events-none"
@@ -147,7 +147,7 @@ export default function FAQ() {
                 </p>
                 <a
                   href="#contact"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-[#C4161C] text-sm font-bold hover:bg-brand-50 transition-all"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-[#006ADB] text-sm font-bold hover:bg-brand-50 transition-all"
                 >
                   Contact Support
                 </a>
@@ -160,7 +160,7 @@ export default function FAQ() {
               {[
                 { icon: Phone, label: 'Phone Support', value: '+91 98765 43210', color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
                 { icon: Mail, label: 'Email Support', value: 'support@rizingbull.in', color: 'text-brand-600', bg: 'bg-brand-50', border: 'border-brand-100' },
-                { icon: MessageCircle, label: 'Live Chat', value: 'Available 24/7', color: 'text-[#C4161C]', bg: 'bg-brand-50', border: 'border-brand-100' },
+                { icon: MessageCircle, label: 'Live Chat', value: 'Available 24/7', color: 'text-[#006ADB]', bg: 'bg-brand-50', border: 'border-brand-100' },
               ].map((item) => {
                 const Icon = item.icon;
                 return (

@@ -256,6 +256,15 @@ class Settings(BaseSettings):
     INFOWAY_DEFAULT_INDICES: str = "SPX500,NAS100,US30,UK100,DE40,JPN225,HK50"
 
     # ── Email / SMS ──────────────────────────────────────────────────
+    # NOT WIRED. Nothing in the codebase sends mail — `request_otp` in
+    # api/v1/user/auth.py still carries the TODO, and no other caller
+    # opens an SMTP connection. These keys exist so the delivery step can
+    # be added without a config change; leaving SMTP_HOST empty is the
+    # OFF position and is also the default.
+    #
+    # Before turning it on: the FROM domain needs SPF, DKIM and DMARC, or
+    # the mail is spam-foldered or rejected outright. Support contact
+    # today is WhatsApp (see user/support.py), not email.
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""

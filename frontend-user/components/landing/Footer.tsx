@@ -75,11 +75,11 @@ export default function Footer() {
             <input
               type="email"
               placeholder="Enter your email"
-              className="flex-1 md:w-64 px-5 py-3 rounded-full bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#C4161C] transition-all"
+              className="flex-1 md:w-64 px-5 py-3 rounded-full bg-white/10 border border-white/20 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#006ADB] transition-all"
             />
             <button
               type="submit"
-              className="px-6 py-3 rounded-full bg-[#C4161C] text-white font-bold text-sm hover:bg-brand-800 transition-all flex items-center gap-2 shrink-0"
+              className="px-6 py-3 rounded-full bg-[#006ADB] text-white font-bold text-sm hover:bg-brand-800 transition-all flex items-center gap-2 shrink-0"
             >
               Subscribe <ArrowRight size={14} />
             </button>

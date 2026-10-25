@@ -35,14 +35,14 @@ export default function HowItWorks() {
 
         {/* Right — dark panel with 3 service columns */}
         <div className="rounded-3xl p-8 md:p-10 grid sm:grid-cols-3 gap-8 premium-shadow"
-          style={{ background: 'linear-gradient(135deg, #C4161C 0%, #1a1a1a 100%)' }}
+          style={{ background: 'linear-gradient(135deg, #006ADB 0%, #1a1a1a 100%)' }}
         >
           {services.map((s) => {
             const Icon = s.icon;
             return (
               <div key={s.title} className="group">
                 <div className="w-12 h-12 rounded-full bg-[#E6B839] flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
-                  <Icon size={22} className="text-[#C4161C]" />
+                  <Icon size={22} className="text-[#006ADB]" />
                 </div>
                 <h3 className="text-white text-lg font-bold font-manrope mb-2 leading-snug">{s.title}</h3>
                 <p className="text-sm text-slate-300 leading-relaxed">{s.desc}</p>
