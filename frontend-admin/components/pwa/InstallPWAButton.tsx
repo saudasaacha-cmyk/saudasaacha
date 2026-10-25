@@ -197,7 +197,7 @@ function IOSInstallSheet({ onClose }: { onClose: () => void }) {
               3
             </span>
             <span className="leading-snug">
-              Tap <span className="font-medium">Add</span> in the top-right. The MP Admin icon
+              Tap <span className="font-medium">Add</span> in the top-right. The RIZING BULL Admin icon
               will appear on your home screen and open like a native app.
             </span>
           </li>

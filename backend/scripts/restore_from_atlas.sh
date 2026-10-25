@@ -21,7 +21,7 @@
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-/root/marginplant/backend/.env}"
+ENV_FILE="${ENV_FILE:-/opt/saudasaacha/backend/.env}"
 
 get_env() {
   grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- \

@@ -179,7 +179,7 @@ export default function ZerodhaConnectPage() {
   // captured asyncio loop, and drives connect_ws(force=True)
   // synchronously so the admin sees a green tick immediately instead
   // of waiting for self-heal to climb back down. Replaces SSH-ing in
-  // to run `systemctl restart marginplant-backend`.
+  // to run `systemctl restart saudasaacha-backend`.
   const [reconnecting, setReconnecting] = useState(false);
   async function forceReconnectWs() {
     if (reconnecting) return;

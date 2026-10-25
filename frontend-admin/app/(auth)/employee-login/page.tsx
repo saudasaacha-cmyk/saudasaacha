@@ -94,7 +94,7 @@ export default function EmployeeLoginPage() {
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-xs font-semibold">
-                  Install {hostBrand.brand_name || "MP Admin"} app
+                  Install {hostBrand.brand_name || "RIZING BULL Admin"} app
                 </div>
                 <p className="text-[11px] leading-snug text-muted-foreground">
                   One-tap home-screen launcher. Stays signed in like a native app.

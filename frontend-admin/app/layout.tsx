@@ -69,7 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             region so the admin top header starts BELOW the clock / Dynamic
             Island instead of overlapping it in the installed PWA. */}
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="MP Admin" />
+        <meta name="apple-mobile-web-app-title" content="RB Admin" />
         {/* Prevent iOS auto-detection of phone numbers in the UI which
             otherwise wraps user mobiles into blue tappable spans and
             breaks the table layout. We surface explicit tel: links

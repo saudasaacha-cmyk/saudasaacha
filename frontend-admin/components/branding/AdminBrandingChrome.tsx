@@ -140,7 +140,7 @@ export function AdminBrandingChrome() {
     if (manifestEl) {
       // `?u=` once we know who is signed in; `?d=` on a tenant host
       // before that, so an install from the login screen is still named
-      // and iconed for the tenant rather than "MP Admin".
+      // and iconed for the tenant rather than "RB Admin".
       const host = window.location.hostname.toLowerCase();
       // `?u=` keys off `/branding/by-code`, which resolves ADMIN rows
       // only — a broker's or employee's own code 404s there.
@@ -172,7 +172,7 @@ export function AdminBrandingChrome() {
       'meta[name="apple-mobile-web-app-title"]',
     );
     if (appleTitle) {
-      const desired = tenantName || "MP Admin";
+      const desired = tenantName || "RB Admin";
       if (appleTitle.getAttribute("content") !== desired) {
         appleTitle.setAttribute("content", desired);
       }

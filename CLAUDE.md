@@ -170,6 +170,10 @@ stragglers, always in the same four shapes, so sweep for all of them:
   host into an unrecognised tenant.
 - derived strings nobody re-reads: report filenames, the TOTP issuer,
   PDF headers, the mobile user-agent token.
+- **abbreviations.** `MP Admin` — MarginPlant's initials — survived all
+  three renames and was still the admin PWA's `short_name` and iOS
+  home-screen title, because no search for a brand NAME can find it.
+  Grep the initials of every brand this has ever been.
 
 Two things deliberately do NOT move:
 

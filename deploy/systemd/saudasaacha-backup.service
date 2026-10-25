@@ -7,8 +7,8 @@
 #  talks to Atlas — it stays on fast local Mongo; Atlas is the restore-from
 #  copy for when this VPS dies.
 #
-#  ⚠️  PATHS assume the repo lives at /root/sachchasauda. Adjust if yours is
-#      under /opt/saudasaacha (match scripts/deploy.sh / `systemctl cat
+#  ⚠️  PATHS point at /opt/saudasaacha, which is where the live box has
+#      the repo. Keep these in step with scripts/deploy.sh (`systemctl cat
 #      saudasaacha-backend`). Needs mongodump + mongorestore on PATH
 #      (apt-get install -y mongodb-database-tools).
 # ─────────────────────────────────────────────────────────────────────
@@ -21,8 +21,8 @@ Wants=network-online.target
 Type=oneshot
 User=root
 # Point the script at the live backend .env (source + Atlas URIs live there).
-Environment=ENV_FILE=/root/sachchasauda/backend/.env
-ExecStart=/usr/bin/env bash /root/sachchasauda/backend/scripts/backup_to_atlas.sh
+Environment=ENV_FILE=/opt/saudasaacha/backend/.env
+ExecStart=/usr/bin/env bash /opt/saudasaacha/backend/scripts/backup_to_atlas.sh
 # Don't let a stuck dump run forever — a 15-min cadence means a >10-min run
 # is already abnormal; kill it so the next tick gets a clean slate.
 TimeoutStartSec=600

@@ -24,7 +24,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/+$/, "");
 
 const PLATFORM_DEFAULT = {
   name: "RIZING BULL Admin",
-  short_name: "MP Admin",
+  short_name: "RB Admin",
   description: "Super-admin control panel for the RIZING BULL platform.",
   start_url: "/dashboard",
   scope: "/",

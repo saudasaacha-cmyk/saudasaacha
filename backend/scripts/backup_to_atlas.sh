@@ -33,10 +33,10 @@
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-/root/marginplant/backend/.env}"
-LOG_FILE="${LOG_FILE:-/var/log/marginplant-backup.log}"
-HEARTBEAT_FILE="${HEARTBEAT_FILE:-/var/run/marginplant-backup.last-success}"
-LOCK_FILE="${LOCK_FILE:-/var/run/marginplant-backup.lock}"
+ENV_FILE="${ENV_FILE:-/opt/saudasaacha/backend/.env}"
+LOG_FILE="${LOG_FILE:-/var/log/saudasaacha-backup.log}"
+HEARTBEAT_FILE="${HEARTBEAT_FILE:-/var/run/saudasaacha-backup.last-success}"
+LOCK_FILE="${LOCK_FILE:-/var/run/saudasaacha-backup.lock}"
 
 log() { echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] $*" | tee -a "$LOG_FILE" >&2; }
 
