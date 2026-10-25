@@ -181,7 +181,7 @@ export default function Footer() {
       {/* Huge Watermark Text */}
       <div className="flex justify-center items-center py-6 overflow-hidden pointer-events-none select-none">
         <h1 className="text-[12vw] leading-none font-bold font-manrope tracking-tighter text-slate-200 whitespace-nowrap">
-          SACHCHASAUDA
+          RIZING BULL
         </h1>
       </div>
     </footer>

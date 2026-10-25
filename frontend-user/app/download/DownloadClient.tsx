@@ -63,7 +63,8 @@ function DownloadInner() {
       if (ref) b = await fetchBranding(`/branding/by-code/${encodeURIComponent(ref)}`);
       if (!b && typeof window !== "undefined") {
         const host = window.location.hostname;
-        const isPlatform = /(^|\.)sachchasauda\.com$/i.test(host) ||
+        // Keep in step with download/page.tsx and middleware.ts.
+        const isPlatform = /(^|\.)(rizingbull\.in|sachchasauda\.com)$/i.test(host) ||
           host === "localhost" || host === "127.0.0.1" ||
           /\.(vercel|netlify|fly)\.(app|dev)$/i.test(host);
         if (!isPlatform) {

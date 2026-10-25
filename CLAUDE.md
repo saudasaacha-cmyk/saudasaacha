@@ -156,6 +156,43 @@ When a stop-out force-close cannot fully debit the realized loss from the user's
 - Two new audit transaction types: `SETTLEMENT_OUTSTANDING_BOOKED` (accrual) and `SETTLEMENT_OUTSTANDING_RECOVERY` (recovered from deposit).
 - User wallet UI shows the outstanding amount in red when > 0; admin user-detail page mirrors it.
 
+### Renaming the brand (it has happened three times)
+
+MarginPlant → SaudaSaacha → SachchaSauda → RIZING BULL. Each pass left
+stragglers, always in the same four shapes, so sweep for all of them:
+
+- `SachchaSauda` — the obvious one.
+- `SACHCHASAUDA` — a footer watermark and two shell env-var prefixes.
+  A case-sensitive grep misses these.
+- `sachchasauda\.com` **regex-escaped**, in `download/page.tsx` and
+  `DownloadClient.tsx`. A literal search for the domain misses them, and
+  they decide platform-vs-tenant, so a miss silently turns the platform
+  host into an unrecognised tenant.
+- derived strings nobody re-reads: report filenames, the TOTP issuer,
+  PDF headers, the mobile user-agent token.
+
+Two things deliberately do NOT move:
+
+- **Infra identifiers.** `/opt/saudasaacha`, the systemd units, PM2 app
+  names, the nginx conf, the TLS cert dir and `saudasaacha-*-branded-domain.sh`
+  all exist on the live box under those names. Renaming them here without
+  migrating the server breaks the next deploy.
+- **`SEED_SUPER_ADMIN_EMAIL`.** The seed finds the super admin BY that
+  address, so repointing it creates a second one rather than renaming the
+  live account.
+
+The old domain stays listed beside the new one in all five platform-host
+checks (`middleware.ts`, `app/layout.tsx`, `lib/branding-context.tsx`,
+`download/page.tsx`, `DownloadClient.tsx`) and in nginx `server_name`
+until its DNS is retired — a host missing from those lists is treated as
+a tenant's branded domain. The cert must cover every name listed, so
+dropping the old names and reissuing are one change.
+
+Brand assets all come from `frontend-user/public/icons/_gen_brand_assets.py`,
+which writes both apps' tiles, favicons, wordmarks and `BrandGlyph.tsx`
+from one master. `backend/tests/test_brand_name.py` pins the derived
+strings.
+
 ## Conventions
 
 - Use `app.utils.decimal_utils.quantize_money` / `to_decimal` for money — never `float()`.

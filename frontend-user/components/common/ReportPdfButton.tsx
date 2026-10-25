@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { API_URL, STORAGE_KEYS } from "@/lib/constants";
+import { API_URL, APP_NAME, STORAGE_KEYS } from "@/lib/constants";
 
 export type ReportKind = "pnl" | "tradebook" | "brokerage" | "tax" | "margin" | "tradebook/full";
 
@@ -58,7 +58,14 @@ export function ReportPdfButton({ kind, params, label = "Download PDF" }: Props)
       const disp = res.headers.get("Content-Disposition") || "";
       const match = /filename="?([^"]+)"?/i.exec(disp);
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const filename = match?.[1] ?? `sachchasauda_${kind}_${stamp}.pdf`;
+      // Only reached when the header is missing. It used to hard-code one
+      // brand, so after a rename these downloads carried the old name
+      // while the server-named ones carried the new. Same rule as the
+      // backend's _brand_slug.
+      const brand =
+        APP_NAME.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/ /g, "_") ||
+        "report";
+      const filename = match?.[1] ?? `${brand}_${kind.replace("/", "_")}_${stamp}.pdf`;
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

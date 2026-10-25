@@ -41,7 +41,9 @@ async function fetchBranding(path: string): Promise<Branding | null> {
 function isPlatformHost(host: string): boolean {
   const h = host.toLowerCase().split(":")[0];
   return (
-    /(^|\.)sachchasauda\.com$/.test(h) ||
+    // Both the current apex and the pre-rename one, which still
+    // resolves here. An unlisted host is treated as a TENANT domain.
+    /(^|\.)(rizingbull\.in|sachchasauda\.com)$/.test(h) ||
     h === "localhost" ||
     h === "127.0.0.1" ||
     /\.(vercel|netlify|fly)\.(app|dev)$/.test(h)
