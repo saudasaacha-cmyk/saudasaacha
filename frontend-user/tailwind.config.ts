@@ -14,22 +14,27 @@ const config: Config = {
     },
     extend: {
       colors: {
-        // SachchaSauda logo red, as a full scale. Brand identity + platform
-        // accent only — NEVER for trading semantics, where red still means
-        // sell/loss. Single source for the red; public/*.svg and the icon
-        // generator repeat the literals because they render outside Tailwind.
+        // Brand blue, as a full scale. Brand identity + platform accent
+        // ONLY — never for trading semantics, where red still means
+        // sell/loss and green still means buy/profit. That separation is
+        // the reason this move is an improvement rather than a repaint:
+        // the old brand red sat one hue away from the loss red, so a
+        // primary button and a losing position wore nearly the same
+        // colour. Single source for the blue; public/*.svg and the icon
+        // generator repeat the literals because they render outside
+        // Tailwind — they are still RED and need a separate pass.
         brand: {
-          50: "#FEF2F2",
-          100: "#FDE0E1",
-          200: "#FAC2C4",
-          300: "#F5959A",
-          400: "#EE5F66",
-          500: "#E31E24",
-          600: "#C4161C",
-          700: "#A11117",
-          800: "#7D0E13",
-          900: "#5A0A0E",
-          DEFAULT: "#E31E24",
+          50: "#F0F7FF",
+          100: "#DBEDFF",
+          200: "#B2D7FF",
+          300: "#80BDFF",
+          400: "#429EFF",
+          500: "#007DFF",
+          600: "#006ADB",
+          700: "#0056B2",
+          800: "#00438A",
+          900: "#003166",
+          DEFAULT: "#007DFF",
         },
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",

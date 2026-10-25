@@ -12,8 +12,10 @@
 
 @layer base {
   /* ── Light (default) ──────────────────────────────────────────────
-     Clean fintech palette: indigo-blue primary matching the PlutoPay
-     reference. White surfaces, strong contrast, professional look.
+     Clean fintech palette: brand blue (#007DFF) primary. White surfaces,
+     strong contrast, professional look. (It said "indigo matching the
+     PlutoPay reference" through an entire red era — a comment nobody
+     reread, which is its own warning.)
      Buy/sell semantics stay Zerodha-tuned for Indian-trader muscle
      memory. */
   :root {
@@ -28,17 +30,25 @@
     --border: 220 13% 91%;               /* #e2e8f0 soft edge */
     --input: 220 13% 91%;
 
-    /* Brand indigo — #4338CA (indigo-700) */
-    --ring: 358 78% 50%;
-    --primary: 358 78% 50%;               /* #E31E24 — logo red */
-    --primary-foreground: 0 0% 100%;      /* white on red */
+    /* Brand blue — #007DFF.
+       `--primary` is one notch deeper (L 46% = #0071EB) because it is the
+       token that paints a filled button under WHITE text: #007DFF itself
+       scores 3.91:1 there, under the 4.5 AA needs for the 14px semibold
+       these buttons use, while #0071EB scores 4.60 and is indistinguishable
+       by eye. The brand hex is unchanged everywhere it is seen rather than
+       read — `brand.500`, accents, the logo. */
+    --ring: 211 100% 46%;
+    --primary: 211 100% 46%;              /* #0071EB — AA-safe brand blue */
+    --primary-foreground: 0 0% 100%;      /* white on blue */
 
-    --secondary: 358 60% 97%;             /* faint red chip bg */
-    --secondary-foreground: 358 78% 45%;
+    --secondary: 211 100% 97%;            /* faint blue chip bg */
+    --secondary-foreground: 211 100% 35%;
+    /* Stays RED on purpose: destructive is "this deletes something", a
+       different idea from the brand, and red is what people read it as. */
     --destructive: 0 72% 51%;             /* red-600 */
     --destructive-foreground: 0 0% 100%;
-    --accent: 358 60% 97%;
-    --accent-foreground: 358 78% 45%;
+    --accent: 211 100% 97%;
+    --accent-foreground: 211 100% 35%;
 
     /* Trading-domain semantic colors — Zerodha-tuned */
     --buy: 142 65% 38%;                   /* #25a25a */
@@ -73,16 +83,18 @@
     --border: 224 20% 18%;
     --input: 224 20% 18%;
 
-    --ring: 358 80% 62%;
-    --primary: 358 80% 62%;               /* lighter logo red for dark */
+    /* Lighter on dark, as before — 6.91:1 against #0a0a0a, so this one
+       needed no nudge. */
+    --ring: 211 100% 62%;
+    --primary: 211 100% 62%;              /* lighter brand blue for dark */
     --primary-foreground: 224 71% 4%;
 
     --secondary: 224 30% 18%;
-    --secondary-foreground: 358 80% 78%;
+    --secondary-foreground: 211 100% 78%;
     --destructive: 0 72% 58%;
     --destructive-foreground: 0 0% 100%;
     --accent: 224 30% 18%;
-    --accent-foreground: 358 80% 78%;
+    --accent-foreground: 211 100% 78%;
 
     --buy: 142 60% 50%;
     --sell: 354 78% 62%;
