@@ -14,7 +14,6 @@ import {
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { UserWsBridge } from "@/components/common/UserWsBridge";
 import { InstrumentsPanel } from "@/components/trading/InstrumentsPanel";
 import { OptionChainPicker } from "@/components/trading/OptionChainPicker";
@@ -205,7 +204,6 @@ export default function TerminalLayout({ children }: { children: React.ReactNode
             <span className="text-xs font-bold">Option chain</span>
           </Button>
           <div className="hidden items-center gap-1.5 md:flex">
-            <ThemeToggle />
             <Button asChild variant="ghost" size="icon" aria-label="Wallet" className="size-8">
               <Link href="/wallet">
                 <WalletIcon className="size-4" />

@@ -36,8 +36,8 @@ const PLATFORM_DEFAULT = {
   // display_override even when "standalone" is the primary value.
   display_override: ["standalone", "minimal-ui"],
   orientation: "portrait" as const,
-  background_color: "#0a0a0a",
-  theme_color: "#0a0a0a",
+  background_color: "#ffffff",
+  theme_color: "#ffffff",
   categories: ["finance", "business"],
   // Multiple icon entries — the SVG handles any size losslessly (used
   // by Chromium / Edge desktop), but Android home screens require a
@@ -80,9 +80,20 @@ export async function GET(req: NextRequest) {
   const userCode = (req.nextUrl.searchParams.get("u") || "").trim().toUpperCase();
   // Pre-login there is no user code to key off — an install from a
   // tenant's own admin host would land on the home screen named
-  // "MP Admin". The host itself identifies the tenant, so fall back to
+  // "RB Admin". The host itself identifies the tenant, so fall back to
   // it; `?u=` still wins once auth hydrates.
-  const domain = (req.nextUrl.searchParams.get("d") || "").trim().toLowerCase();
+  //
+  // The fallback is the HOST HEADER, not just `?d=`. AdminBrandingChrome
+  // rewrites the <link rel="manifest"> to carry `?d=` once its branding
+  // fetch resolves, but an install tapped before that — or any read of
+  // the bare URL — got the platform default on a tenant's own host. The
+  // host is known on the first byte and needs no client JS at all.
+  const hostHeader = (req.headers.get("host") || "").split(":")[0].toLowerCase();
+  const domain =
+    (req.nextUrl.searchParams.get("d") || "").trim().toLowerCase() ||
+    (hostHeader && hostHeader !== "localhost" && hostHeader !== "127.0.0.1"
+      ? hostHeader
+      : "");
   let manifest: Record<string, unknown> = { ...PLATFORM_DEFAULT };
 
   const lookup = userCode

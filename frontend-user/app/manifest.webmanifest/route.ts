@@ -37,8 +37,8 @@ const PLATFORM_DEFAULT = {
   scope: "/",
   display: "standalone",
   orientation: "portrait" as const,
-  background_color: "#0a0a0a",
-  theme_color: "#0a0a0a",
+  background_color: "#ffffff",
+  theme_color: "#ffffff",
   categories: ["finance", "business"],
   icons: [
     { src: `/icons/icon-192.png?v=${ICON_VERSION}`, sizes: "192x192", type: "image/png", purpose: "any" },

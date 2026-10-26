@@ -7,7 +7,6 @@ import { useAuthStore } from "@/stores/authStore";
 import { api, unwrap, WalletAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { BrandLogo } from "@/components/layout/BrandLogo";
 import { cn, formatINR } from "@/lib/utils";
 import { readWalletSnapshot, writeWalletSnapshot } from "@/lib/walletSnapshot";
@@ -126,10 +125,9 @@ export function TopBar() {
       <SupportShortcut />
 
       {/* ── Desktop-only cluster ────────────────────────────────
-         ThemeToggle / Profile / Logout. Mobile users get these from
-         the Profile bottom-nav tab so the header stays uncluttered. */}
+         Profile / Logout. Mobile users get these from the Profile
+         bottom-nav tab so the header stays uncluttered. */}
       <div className="hidden items-center gap-1 md:flex">
-        <ThemeToggle />
         <Button variant="ghost" size="icon" aria-label="Profile" asChild>
           <Link href="/profile">
             <UserIcon className="size-4" />

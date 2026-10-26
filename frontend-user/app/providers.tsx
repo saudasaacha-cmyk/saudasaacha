@@ -97,9 +97,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    // Light only. `forcedTheme` pins the resolved theme, so the `dark`
+    // class is never applied and every `dark:` variant in the tree is
+    // simply inert — no need to strip hundreds of them, and restoring
+    // the choice later is this one prop.
     <ThemeProvider
       attribute="class"
-      defaultTheme="light"
+      forcedTheme="light"
       enableSystem={false}
       disableTransitionOnChange
     >

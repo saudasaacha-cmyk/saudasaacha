@@ -78,9 +78,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    // Light only — see the note in the user app's providers.tsx. The
+    // panel used to default to DARK, so this flips it.
     <ThemeProvider
       attribute="class"
-      defaultTheme="dark"
+      forcedTheme="light"
       enableSystem={false}
       disableTransitionOnChange
     >

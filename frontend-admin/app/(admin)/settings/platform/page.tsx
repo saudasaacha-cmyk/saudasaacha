@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTheme } from "next-themes";
 import {
   Bell,
   BellOff,
@@ -13,13 +12,10 @@ import {
   Loader2,
   Mail,
   Megaphone,
-  Moon,
   Network,
-  Palette,
   Play,
   ShieldCheck,
   Trash2,
-  Sun,
   User,
   Volume2,
   VolumeX,
@@ -37,13 +33,12 @@ import { playNotifyPing } from "@/lib/notify-sound";
 
 /**
  * Slimmed-down Platform Settings — operator request was to drop every
- * auto-generated platform.* knob and surface only the three controls
- * an admin actually touches day-to-day:
+ * auto-generated platform.* knob and surface only the controls an
+ * admin actually touches day-to-day:
  *
- *   1. Theme        — light / dark / system, via next-themes
- *   2. Profile      — read-only identity card (name / email / mobile /
+ *   1. Profile      — read-only identity card (name / email / mobile /
  *                     role) pulled from the auth store
- *   3. Notifications — master on/off for the WhatsApp-style live
+ *   2. Notifications — master on/off for the WhatsApp-style live
  *                     toast + ping (deposit / withdrawal request
  *                     events from AdminWsBridge). Persisted in
  *                     localStorage under NOTIFY_KEY so the WsBridge
@@ -73,11 +68,10 @@ export default function PlatformSettingsPage() {
     <div className="space-y-4">
       <PageHeader
         title="Platform settings"
-        description="Theme, your profile, and live notification preferences."
+        description="Your profile, and live notification preferences."
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <ThemeCard />
         <ProfileCard />
         <ChangePasswordCard />
         <NotificationsCard />
@@ -397,61 +391,6 @@ function PromoButtonCard() {
             />
           </button>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-
-// ── Theme ────────────────────────────────────────────────────────────
-
-function ThemeCard() {
-  const { resolvedTheme, setTheme, theme: setting } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  const current: "light" | "dark" | "system" = mounted
-    ? (setting as any) || "system"
-    : "system";
-  const effective = mounted ? resolvedTheme : "dark";
-
-  const options: { key: "light" | "dark" | "system"; label: string; Icon: typeof Sun }[] = [
-    { key: "light",  label: "Light",  Icon: Sun },
-    { key: "dark",   label: "Dark",   Icon: Moon },
-    { key: "system", label: "System", Icon: Palette },
-  ];
-
-  return (
-    <Card className="overflow-hidden">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Palette className="size-4 text-primary" /> Theme
-        </CardTitle>
-        <CardDescription>
-          Currently active: <span className="font-semibold capitalize text-foreground">{effective}</span>
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {options.map(({ key, label, Icon }) => {
-          const active = current === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTheme(key)}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-sm transition-colors",
-                active
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
-              )}
-            >
-              <Icon className={cn("size-4", active && "text-primary")} />
-              <span className="flex-1 text-left font-medium">{label}</span>
-              {active && <Check className="size-4 text-primary" />}
-            </button>
-          );
-        })}
       </CardContent>
     </Card>
   );

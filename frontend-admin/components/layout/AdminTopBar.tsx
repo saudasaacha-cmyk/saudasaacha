@@ -5,7 +5,6 @@ import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { useAdminAuthStore } from "@/stores/authStore";
 import { signInPath } from "@/lib/signin-path";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { useMobileNav } from "@/components/layout/MobileNavContext";
 import { BrandLogo } from "@/components/layout/BrandLogo";
@@ -70,7 +69,6 @@ export function AdminTopBar() {
         <RefreshCw className={`size-4 ${fetching > 0 ? "animate-spin" : ""}`} />
       </Button>
       <NotificationBell />
-      <ThemeToggle />
       {/* Desktop sign-out (mobile uses the one inside the drawer). */}
       <Button
         variant="ghost"

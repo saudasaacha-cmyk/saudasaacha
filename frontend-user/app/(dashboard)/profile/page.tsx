@@ -19,7 +19,6 @@ import {
   Lock,
   LogOut,
   MessageCircle,
-  Palette,
   Phone,
   ReceiptText,
   Shield,
@@ -32,7 +31,6 @@ import { ProfileAPI, AuthAPI, SegmentSettingsAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { useAuthStore } from "@/stores/authStore";
 import {
   useBrandName,
@@ -62,7 +60,6 @@ type SubView =
   | "leverage"
   | "terms"
   | "security"
-  | "appearance"
   | "support";
 
 export default function ProfilePage() {
@@ -142,7 +139,6 @@ export default function ProfilePage() {
         {subView === "leverage" && <SegmentOverview kind="leverage" />}
         {subView === "terms" && <TermsScreen />}
         {subView === "security" && <SecurityForm me={me} />}
-        {subView === "appearance" && <AppearanceForm />}
         {subView === "support" && <SupportLinks />}
       </SubScreen>
     );
@@ -237,16 +233,6 @@ export default function ProfilePage() {
         />
       </ListGroup>
 
-      <ListGroup title="Preferences">
-        <ListRow
-          icon={Palette}
-          tone="primary"
-          label="Appearance"
-          sub="Switch between light and dark theme"
-          onClick={() => setSubView("appearance")}
-        />
-      </ListGroup>
-
       <ListGroup title="Support">
         <ListRow
           icon={HelpCircle}
@@ -288,8 +274,6 @@ function subViewTitle(v: SubView): string {
       return "Terms & Conditions";
     case "security":
       return "Security";
-    case "appearance":
-      return "Appearance";
     case "support":
       return "Help & support";
     default:
@@ -676,29 +660,8 @@ function SecurityForm({ me }: { me: any }) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Appearance + Support
+// Support
 // ─────────────────────────────────────────────────────────────────
-function AppearanceForm() {
-  return (
-    <section className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-primary/12 text-primary">
-            <Palette className="size-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-medium">Theme</div>
-            <p className="text-[11px] text-muted-foreground">
-              Switch between light and dark
-            </p>
-          </div>
-        </div>
-        <ThemeToggle />
-      </div>
-    </section>
-  );
-}
-
 function SupportLinks() {
   // The number is shown as text as well as linked.
   const { data: support } = useSupportContacts();
