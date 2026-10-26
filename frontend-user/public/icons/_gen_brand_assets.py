@@ -48,13 +48,12 @@ SOURCE = os.path.join(HERE, "_brand-source.jpg")   # the artwork as supplied
 NAVY = "#031A41"         # "RIZING", and the bull's body
 GOLD = "#F7CA09"         # "BULL", the arrow, the horns
 PAPER = "#FFFFFF"
-# The icon tile. Light blue rather than the app's own near-black: the
-# bull is navy with gold, so on a dark tile its body loses the edge that
-# separates it from the background, and at launcher size it read as a
-# gold arrow with a smudge behind it. This is `brand-100`, so it is a
-# token the palette already has rather than a colour invented for icons.
-TILE = "#DBEDFF"
-TILE_RGB = (219, 237, 255)
+# The icon tile. White, not the app's old near-black: the bull is navy
+# with gold, so on a dark tile its body lost the edge separating it from
+# the background and at launcher size it read as a gold arrow with a
+# smudge behind it. White is also the ground the artwork was drawn on.
+TILE = "#FFFFFF"
+TILE_RGB = (255, 255, 255)
 
 # How much of a tile's width the mark spans. Maskable icons stay inside the
 # 80% safe zone so an OS circle-crop cannot clip the horns or the arrow tip.
@@ -317,7 +316,12 @@ def main() -> None:
     # hardcode. Derived from the mark itself, so it moves exactly when the
     # artwork does and never needs hand-bumping — a constant that must be
     # hand-bumped every release is a constant that will not be.
-    ver = hashlib.sha256(open(MASTER, "rb").read()).hexdigest()[:8]
+    # Hash the RENDERED icon, not the master artwork. The tile colour,
+    # the fill ratio and the canvas all live in this file rather than in
+    # the master, so a version keyed on the master alone stays put when
+    # any of them change — which is the exact stale-cache failure the
+    # version exists to prevent.
+    ver = hashlib.sha256(icon_svg(mark).encode()).hexdigest()[:8]
     for app_dir in ("frontend-user", ADMIN):
         path = os.path.join(
             app_dir if os.path.isabs(app_dir) else os.path.join(ROOT, app_dir),
