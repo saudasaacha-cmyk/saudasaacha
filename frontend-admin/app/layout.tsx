@@ -28,7 +28,7 @@ export const metadata: Metadata = {
 //     browser zoom, which is what admin tools normally do (Bloomberg,
 //     Kite back-office, etc.).
 export const viewport: Viewport = {
-  themeColor: "#0a0a0a",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
   minimumScale: 1,

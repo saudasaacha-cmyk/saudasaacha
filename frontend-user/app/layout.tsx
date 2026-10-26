@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 import { Inter, Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "./providers";
 import { PwaRegister } from "@/components/common/PwaRegister";
-import { ThemeColorSync } from "@/components/common/ThemeColorSync";
 import { API_URL } from "@/lib/constants";
 import "./globals.css";
 
@@ -152,17 +151,12 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export const viewport: Viewport = {
-  // Match the OS chrome (Android status bar / Chrome address bar) to
-  // the app's current theme instead of the brand emerald everywhere.
-  // The two media-keyed entries let the BROWSER pick the right one
-  // when there's no user-set theme; the <ThemeColorSync> client
-  // component below overrides this in real time when the user flips
-  // light/dark from Profile → Preferences so the top safe-area band
-  // never stays green on a light-theme app screen.
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
-  ],
+  // The Android status bar / Chrome address bar band. One value, because
+  // the app is light-only — this used to be two media-keyed entries with
+  // a client component rewriting them whenever the user flipped the
+  // theme. With nothing left to flip, a media-keyed pair just meant a
+  // phone in OS dark mode got a black band above a white app.
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
   // Lock pinch-zoom / double-tap-zoom on mobile so the installed PWA
@@ -198,7 +192,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body className="notranslate font-sans antialiased" translate="no">
         <PwaRegister />
-        <ThemeColorSync />
         <Providers>{children}</Providers>
       </body>
     </html>
