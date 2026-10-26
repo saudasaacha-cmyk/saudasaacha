@@ -138,28 +138,30 @@ export function AdminBrandingChrome() {
     // name + logo. Super-admins / pre-login keep the platform default.
     const manifestEl = head.querySelector<HTMLLinkElement>('link[rel="manifest"]');
     if (manifestEl) {
-      // `?u=` once we know who is signed in; `?d=` on a tenant host
-      // before that, so an install from the login screen is still named
-      // and iconed for the tenant rather than "RB Admin".
       const host = window.location.hostname.toLowerCase();
-      // `?u=` keys off `/branding/by-code`, which resolves ADMIN rows
-      // only — a broker's or employee's own code 404s there.
+      // The BARE url is already right whenever this host implies the
+      // brand — the route derives the tenant from the Host header. So
+      // rewrite ONLY when it does not: a broker or employee signed in on
+      // the platform's own host, who would otherwise install an app
+      // named for the platform while their sidebar, tab and favicon all
+      // said their employer.
       //
-      // For them the auth payload already carries their EMPLOYER's
-      // `custom_domain`, so `?d=` works on any host, including the
-      // platform's own. Without this a broker or employee signing in at
-      // admin.rizingbull.in installed a home-screen app named for the
-      // platform while their sidebar, tab and favicon all said the
-      // tenant — the one surface that stayed wrong after the rest was
-      // fixed. Falls through to the browser's host only when the payload
-      // has no domain (an admin who never connected one).
-      const brandedHost =
-        tenantDomain || (hostBrand.brand_name || hostBrand.logo_url ? host : "");
-      const desired =
-        role === "ADMIN" && userCode
+      // Leaving it bare otherwise matters beyond tidiness: this swap
+      // runs after hydration, and Chrome tracks the manifest URL as part
+      // of an installed PWA's identity. Changing it on every load of a
+      // tenant's own host is churn an installed app has to reconcile.
+      //
+      // `?u=` keys off `/branding/by-code`, which resolves ADMIN rows
+      // only — a broker's or employee's own code 404s there, so they go
+      // through `?d=` with their employer's domain from the auth payload.
+      const hostImpliesBrand =
+        !!tenantDomain && (host === tenantDomain || host === `admin.${tenantDomain}`);
+      const desired = hostImpliesBrand
+        ? "/manifest.webmanifest"
+        : role === "ADMIN" && userCode
           ? `/manifest.webmanifest?u=${encodeURIComponent(userCode)}`
-          : !isSuper && brandedHost
-            ? `/manifest.webmanifest?d=${encodeURIComponent(brandedHost)}`
+          : !isSuper && tenantDomain
+            ? `/manifest.webmanifest?d=${encodeURIComponent(tenantDomain)}`
             : "/manifest.webmanifest";
       if (manifestEl.getAttribute("href") !== desired) {
         manifestEl.setAttribute("href", desired);
