@@ -23,7 +23,6 @@ import { DashboardAPI, OrderAPI, PositionAPI, WalletAPI } from "@/lib/api";
 import { cn, formatINR, formatPrice, pnlColor } from "@/lib/utils";
 import { AddFundsWizard } from "@/components/wallet/AddFundsWizard";
 import { MarketOverview } from "@/components/trading/MarketOverview";
-import { TopMovers } from "@/components/trading/TopMovers";
 import { useHomeTicker } from "@/lib/useSupport";
 
 export default function DashboardPage() {
@@ -256,9 +255,6 @@ export default function DashboardPage() {
           three small stat tiles — same data plumbing as the terminal's
           instruments panel, ticking via the marketdata WS. */}
       <MarketOverview className="sm:hidden" />
-
-      {/* Mobile: live top gainers & losers from a NIFTY large-cap basket. */}
-      <TopMovers className="sm:hidden" />
 
       {/* ── Stat tiles row — desktop only (sm+). Hidden on mobile where
           the MarketOverview above takes their place. ────────────────── */}
