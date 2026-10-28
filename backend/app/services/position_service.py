@@ -1543,6 +1543,32 @@ async def list_holdings(user_id: str | PydanticObjectId) -> list[Holding]:
 
 
 # ── Intraday → carryforward auto-rollover ───────────────────────────
+def carry_capacity(wallet: Any, floating_pnl: Decimal | None) -> Decimal:
+    """What an account can put behind the EXTRA margin an overnight carry needs.
+
+    Equity, not cash. The gate is measured against what the account is worth
+    right now, so an open profit backs an overnight requirement and an open
+    LOSS stops backing one. Cash alone let a book sitting on a large floating
+    loss carry overnight on money it had already lost on paper.
+
+    `used_margin` is deliberately absent. The caller's `delta` is the overnight
+    requirement MINUS the intraday lock, so margin already locked is netted out
+    of the requirement; adding it here would count it a second time.
+
+    Floored at zero. A floating loss larger than cash + credit would otherwise
+    make this negative, and a negative capacity fails even a `need` of zero —
+    squaring off a book that needs no extra margin at all. An account that is
+    genuinely underwater is the risk enforcer's stop-out to handle; this gate
+    only ever asks whether the ADDITIONAL requirement is covered.
+    """
+    capacity = (
+        to_decimal(wallet.available_balance)
+        + to_decimal(wallet.credit_limit)
+        + to_decimal(floating_pnl or 0)
+    )
+    return capacity if capacity > 0 else to_decimal(0)
+
+
 async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> dict[str, int]:
     """At market close for a segment group, flip every open MIS position in
     that group to NRML. For each position we re-resolve the NRML margin
@@ -1813,10 +1839,10 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
 
     # ── Per-user aggregate carry decision ───────────────────────────────────
     # For each user, compare the TOTAL additional margin needed to back the
-    # overnight (CF) carry of their whole open book against what the wallet can
-    # cover (available + credit). If it fits, everything carries. If not, square
-    # off the worst-loss positions FIRST — one at a time, subtracting each
-    # freed requirement — until the remainder fits, then carry the survivors.
+    # overnight (CF) carry of their whole open book against their EQUITY. If it
+    # fits, everything carries. If not, square off the worst-loss positions
+    # FIRST — one at a time, subtracting each freed requirement — until the
+    # remainder fits, then carry the survivors.
     # USED is NEVER re-locked to the overnight amount: the MIS→NRML flip is
     # margin-neutral (the intraday 700× lock stays put), CF is purely a gate.
     from app.models._base import OrderAction as _OA, OrderType as _OT
@@ -1858,10 +1884,38 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             pass
         return True
 
+    # Floating P&L per affected user, across their WHOLE open book — not just
+    # the segment group being rolled. Equity is a wallet-level quantity, and a
+    # loss running in MCX is just as real against an NFO carry.
+    #
+    # `unrealized_pnl` is kept fresh by the risk_enforcer loop, and at EOD the
+    # last tick it saw IS the close price — which is the right mark for an
+    # overnight decision. No USD→INR step: `is_usd_quoted_segment` is False
+    # platform-wide, so these are already one currency (same assumption the
+    # risk enforcer sums under).
+    floating_by_user: dict = {}
+    if by_user:
+        try:
+            for _p in await Position.find(
+                {
+                    "status": PositionStatus.OPEN.value,
+                    "user_id": {"$in": list(by_user.keys())},
+                }
+            ).to_list():
+                floating_by_user[_p.user_id] = floating_by_user.get(
+                    _p.user_id, to_decimal(0)
+                ) + to_decimal(_p.unrealized_pnl or 0)
+        except Exception:  # noqa: BLE001
+            # A failed read must not turn into "everybody carries free" — fall
+            # back to cash-only capacity, which is the stricter of the two for
+            # a book in profit and identical for one that is flat.
+            logger.exception("intraday_to_carry_floating_pnl_read_failed")
+            floating_by_user = {}
+
     for _uid, items in by_user.items():
         try:
             wallet = await wallet_service.get_or_create(_uid)
-            capacity = to_decimal(wallet.available_balance) + to_decimal(wallet.credit_limit)
+            capacity = carry_capacity(wallet, floating_by_user.get(_uid))
         except Exception:  # noqa: BLE001
             skipped += len(items)
             continue
