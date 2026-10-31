@@ -690,32 +690,29 @@ _poller_running: bool = False
 
 
 def _should_fill(order_type: OrderType, action: OrderAction, ltp: Decimal,
-                 limit_price: Decimal, trigger_price: Decimal,
-                 limit_wait_up: bool | None = None) -> bool:
-    """LIMIT: a RESTING price-touch order — fills ONLY once the price
-       REACHES the limit level, regardless of BUY/SELL side (operator
-       spec: "jab tak price waha pe nahi jaye, execute mat ho"). The side
-       the price must approach from is captured at placement:
-         • limit_wait_up=True  → limit was ABOVE market → fill when LTP ≥ limit
-         • limit_wait_up=False → limit was BELOW market → fill when LTP ≤ limit
-       Legacy rows (limit_wait_up=None) fall back to the old action-based
-       rule (BUY fills ≤ limit, SELL fills ≥ limit).
+                 limit_price: Decimal, trigger_price: Decimal) -> bool:
+    """LIMIT fires on LTP, from the side the ACTION implies — operator rule:
+       "if buy is standing as limit order then LTP or LESS price should only
+       trigger buy and vice versa for sell".
+         • BUY  LIMIT → fill when LTP ≤ limit
+         • SELL LIMIT → fill when LTP ≥ limit
+       Unconditional: where the limit sat relative to the market AT PLACEMENT
+       is not consulted, so a BUY limit above market is marketable and fires
+       on the next poll. That replaced a placement-side capture
+       (`Order.limit_wait_up`) which made a LIMIT a price-TOUCH order — it
+       inverted the rule above for every limit placed across the market, and
+       the order sat while the price traded straight through it. The column
+       survives for old rows; nothing reads it. The "wait until price reaches
+       X" order is SL-M, not LIMIT.
 
        SL-M  BUY  fills when LTP ≥ trigger (stop-buy / break-out)
        SL-M  SELL fills when LTP ≤ trigger (stop-loss exit)"""
     if order_type == OrderType.LIMIT:
         if limit_price <= 0:
             return False
-        if limit_wait_up is None:
-            # Legacy / no captured direction — old action-based behaviour.
-            if action == OrderAction.BUY:
-                return ltp <= limit_price
-            return ltp >= limit_price
-        # Touch semantics: wait until price reaches the level from the side
-        # it was placed on.
-        if limit_wait_up:
-            return ltp >= limit_price
-        return ltp <= limit_price
+        if action == OrderAction.BUY:
+            return ltp <= limit_price
+        return ltp >= limit_price
     if order_type == OrderType.SL_M:
         if trigger_price <= 0:
             return False
@@ -837,10 +834,15 @@ async def trigger_pending_orders() -> int:
     LTP-of-the-moment (which after a fast tick down could be 79215, a
     7-rupee discrepancy the user noticed in the Orders tab). Passing
     `expected_price = limit_or_trigger` makes the engine use that value
-    directly. The engine still clamps to ±1% of live bid/ask as an
-    anti-tamper guard, but `_should_fill` only allows fires once LTP
-    has crossed the user's price, so the limit/trigger is always well
-    inside that cap by definition.
+    directly, subject to the engine's ±1% anti-tamper clamp against the
+    live close-side quote. For an order that rested until its price was
+    touched the limit is inside that clamp by definition. For a MARKETABLE
+    limit it is not — a BUY limit placed above market is on the fillable
+    side the instant it lands — and there the clamp is what we want: the
+    fill books at the live quote, so the user never pays their limit for
+    something the market is offering cheaper. That lands as
+    `matching_engine_expected_price_outside_cap` in the log, which on a
+    marketable limit is expected, not a fault.
     """
     triggered = 0
     try:
@@ -932,7 +934,6 @@ async def trigger_pending_orders() -> int:
             trigger_price = to_decimal(o.trigger_price)
             if not _should_fill(
                 o.order_type, o.action, ltp, limit_price, trigger_price,
-                getattr(o, "limit_wait_up", None),
             ):
                 continue
             # Lock the fill at the user's specified price. LIMIT and SL

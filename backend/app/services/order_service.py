@@ -435,20 +435,6 @@ async def place_order(
     )
     applied = AppliedSettings(**validated.settings)
 
-    # LIMIT "touch" direction — capture which side the limit sits on
-    # RELATIVE to the market at placement, so the poller only fires once
-    # the price actually REACHES the level (not immediately for a
-    # "marketable" limit). True = limit above market → wait for price to
-    # rise to it; False = limit below market → wait for price to fall to
-    # it. Independent of BUY / SELL: a limit is a resting price-touch
-    # order per operator spec. None for non-LIMIT / no-LTP (poller then
-    # uses the legacy action-based rule).
-    _limit_wait_up: bool | None = None
-    if order_type == OrderType.LIMIT and price and price > 0:
-        _ref_ltp = validated.ltp
-        if _ref_ltp is not None and _ref_ltp > 0:
-            _limit_wait_up = price >= _ref_ltp
-
     order = Order(
         order_number=_order_number(),
         user_id=user.id,  # type: ignore[arg-type]
@@ -462,7 +448,6 @@ async def place_order(
         pending_quantity=quantity,
         price=Decimal128(str(price)),
         trigger_price=Decimal128(str(trigger)),
-        limit_wait_up=_limit_wait_up,
         margin_blocked=Decimal128(str(margin)),
         status=OrderStatus.PENDING,
         is_amo=is_amo,

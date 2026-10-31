@@ -1065,8 +1065,8 @@ function EditPendingOrderDialog({
   const [synced, setSynced] = useState<string | null>(null);
 
   // Live LTP for the order's instrument — drives the "current market"
-  // hint + the marketable-limit guard below. 1.5 s refetch matches the
-  // OrderPanel cadence so the comparison reference doesn't drift.
+  // hint. 1.5 s refetch matches the OrderPanel cadence so the number the
+  // user edits against doesn't drift from the one the poller fires on.
   const { data: quote } = useQuery<any>({
     queryKey: ["quote", order?.instrument_token ?? order?.token],
     queryFn: () => InstrumentAPI.quote(order!.instrument_token ?? order!.token),
@@ -1128,33 +1128,6 @@ function EditPendingOrderDialog({
     if (Number.isFinite(lotsNum) && lotsNum <= 0) {
       toast.error("Lots must be greater than 0");
       return;
-    }
-
-    // Marketable-LIMIT guard — same logic OrderPanel runs at placement
-    // time. A BUY LIMIT at or above the current ask (or SELL LIMIT at
-    // or below the current bid) would fill IMMEDIATELY on the very
-    // next pending-poller tick — at which point the user might as well
-    // have placed a MARKET. We warn instead of blocking so a trader
-    // who explicitly wants to "lock in better than market" still can,
-    // but the common mistake gets caught.
-    if (isLimit && Number.isFinite(priceNum)) {
-      const side = String(order.action ?? "").toUpperCase();
-      const ask = Number(quote?.ask ?? quote?.ltp ?? 0);
-      const bid = Number(quote?.bid ?? quote?.ltp ?? 0);
-      if (side === "BUY" && ask > 0 && priceNum >= ask) {
-        toast.error(
-          `BUY LIMIT ${priceNum} is at or above the current ask ${ask} — this would fill immediately. To wait for a lower price, lower the limit; to wait for a higher price, switch to an SL-M order.`,
-          { duration: 6000 },
-        );
-        return;
-      }
-      if (side === "SELL" && bid > 0 && priceNum <= bid) {
-        toast.error(
-          `SELL LIMIT ${priceNum} is at or below the current bid ${bid} — this would fill immediately. To wait for a higher price, raise the limit; to wait for a lower price, switch to an SL-M order.`,
-          { duration: 6000 },
-        );
-        return;
-      }
     }
 
     // Lower-bound sanity on the new size if user edited lots.

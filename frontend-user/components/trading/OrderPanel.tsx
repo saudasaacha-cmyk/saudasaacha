@@ -446,7 +446,12 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
   // the close-leg minimum-distance cap, which is always opposite the
   // entry direction regardless of LIMIT vs SL-M.
   const limitAwayPct = Number(effSettings?.limit_percentage ?? 0) || 0;
-  const limitEntryRef = side === "BUY" ? buyPrice : sellPrice;
+  // Entry band is measured from LTP, matching the server. The limit the
+  // trader types is judged against the number on their chart; measuring
+  // from the close-side quote shifts the band by half the spread and
+  // rejects a price they can see is in range. `limitBracketRef` below
+  // keeps the close-side quote — that leg really does transact there.
+  const limitEntryRef = ltp;
   const limitBracketRef =
     orderType !== "MARKET" && Number(price) > 0
       ? Number(price)
@@ -540,41 +545,6 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
     if (orderType === "SL-M" && !Number(trigger)) {
       toast.error("Enter a trigger price");
       return;
-    }
-
-    // ── Marketable-LIMIT guard ────────────────────────────────────────
-    // A BUY LIMIT at a price ≥ the current ask (or a SELL LIMIT ≤ bid)
-    // mirrors the matching engine's `_should_fill` condition — the order
-    // would fire on the very next 1.5 s poller tick. Standard exchange
-    // semantics, but traders kept setting a "wait until price reaches 250"
-    // BUY LIMIT below market and got confused when it filled in 3 s. That
-    // intent is a stop-buy, not a limit. We block here with a clear toast
-    // pointing at SL-M so the user picks the right tool — and the order
-    // never leaves the panel, no optimistic flicker, no surprise position.
-    //
-    // Compare against the close-side price the panel is showing live:
-    //   BUY  → ask (the price you'd pay if you took the offer right now)
-    //   SELL → bid (the price you'd get if you hit the bid right now)
-    // Falls through silently when bid/ask haven't loaded (e.g. fresh
-    // mount, feed lag) — server-side `_should_fill` still catches it.
-    if (orderType === "LIMIT") {
-      const limit = Number(price);
-      const marketRef = side === "BUY" ? buyPrice : sellPrice;
-      if (marketRef > 0 && limit > 0) {
-        const marketable =
-          side === "BUY" ? limit >= marketRef : limit <= marketRef;
-        if (marketable) {
-          const dir = side === "BUY" ? "above" : "below";
-          // Toast is English-only — the previous wording mixed Hinglish
-          // ("yeh order turant fill ho jaayega...") which slipped into
-                // shipped UI per the broker spec.
-          toast.error(
-            `${side} LIMIT ${fmtPrice(limit)} is ${dir} the current price ${fmtPrice(marketRef)} — this order will fill immediately at market. To wait for price to reach ${fmtPrice(limit)} before ${side === "BUY" ? "buying" : "selling"}, use an SL-M order with trigger ${fmtPrice(limit)}.`,
-            { duration: 6000 },
-          );
-          return;
-        }
-      }
     }
 
     // ── Limit-away directional pre-check ─────────────────────────────

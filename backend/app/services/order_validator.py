@@ -690,9 +690,9 @@ async def validate(
     # Bounds every limit-style price the order carries by ±limit_pct of the
     # bid/ask of the side that will actually transact on that leg:
     #
-    #   • Entry leg (LIMIT price / SL-M trigger): user is the maker — BUY
-    #     orders reference the ask (the price they'd cross to fill); SELL
-    #     orders reference the bid.
+    #   • Entry leg (LIMIT price / SL-M trigger): LTP — the number on the
+    #     user's chart, which is what they computed the limit off. See
+    #     `entry_ref` below for why it is not the close-side quote.
     #   • Bracket SL / target: the closing leg trades the opposite side,
     #     so a BUY (long) entry's SL/TP both reference the bid (close = SELL),
     #     and a SELL (short) entry's SL/TP reference the ask (close = BUY).
@@ -764,8 +764,14 @@ async def validate(
                     code=f"{name.upper().replace(' ', '_')}_TOO_CLOSE",
                 )
 
-        entry_side = "BUY" if action == OrderAction.BUY else "SELL"
-        entry_ref = _market_ref(entry_side)
+        # Measured from LTP, not from the close-side quote. A limit the user
+        # read off their chart has to be judged against that same number;
+        # referencing the ask (BUY) or bid (SELL) shifts the band by half the
+        # spread and rejects a price the user can see is in range. Matches
+        # `_should_fill`, which fires the order on LTP too. The bracket
+        # reference below still uses the close-side quote for MARKET orders —
+        # that leg really does transact there.
+        entry_ref = ltp
 
         # Entry: max distance from market
         if order_type != OrderType.MARKET:
