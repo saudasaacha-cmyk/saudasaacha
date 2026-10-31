@@ -135,3 +135,75 @@ def test_sl_still_needs_both_armed_and_inside_its_limit():
 
 def test_market_orders_are_not_this_function_s_business():
     assert not fires(BUY, "100", limit="100", order_type=OrderType.MARKET)
+
+
+# ── the limit-away band: one percentage, two opposite jobs ───────────
+# `limitAwayPercent` caps how FAR from market a parked price may rest
+# (entry leg) and how CLOSE to entry a bracket may sit (SL / TP). Those
+# are opposite comparisons, and the panel once ran the entry leg as a
+# minimum while the server ran it as a maximum — the two accepted sets
+# met only at the boundary, so any non-zero setting refused almost every
+# parked order from one side or the other. It stayed hidden because the
+# field has no admin form and defaults to 0, switching both checks off.
+# These pin the direction on each side of the wire so it cannot drift
+# back.
+import pathlib  # noqa: E402
+import re  # noqa: E402
+
+from app.services.order_validator import validate  # noqa: E402
+
+VALIDATOR_SRC = inspect.getsource(validate)
+PANEL_SRC = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "frontend-user"
+    / "components"
+    / "trading"
+    / "OrderPanel.tsx"
+).read_text()
+
+
+def _body(src: str, start: str, end: str) -> str:
+    i = src.index(start)
+    return src[i : src.index(end, i)]
+
+
+def test_the_server_treats_the_entry_band_as_a_maximum():
+    """Outside ±pct is rejected. `_check_entry` is the entry leg."""
+    body = _body(VALIDATOR_SRC, "def _check_entry", "def _check_sl_tp")
+    assert "if candidate < lower or candidate > upper:" in body
+
+
+def test_the_server_treats_the_bracket_band_as_a_minimum():
+    """Inside the band is rejected — a stop glued to entry. Opposite of
+    the entry leg, deliberately."""
+    body = _body(VALIDATOR_SRC, "def _check_sl_tp", "entry_ref = ltp")
+    assert "if lower < candidate < upper:" in body
+
+
+def test_the_panel_agrees_with_the_server_on_the_entry_band():
+    """Same direction, and symmetric, so neither side can accept a price
+    the other refuses."""
+    i = PANEL_SRC.index("const upperCap")
+    body = PANEL_SRC[i : PANEL_SRC.index("return;", i)]
+    assert "candidate < lowerCap || candidate > upperCap" in body
+    assert "too far from market" in body
+    assert "too close to market" not in body
+
+
+def test_the_entry_band_is_measured_from_ltp_on_both_sides():
+    """Not from the close-side quote — half a spread of drift between the
+    price on the chart and the price the band is drawn around."""
+    assert "entry_ref = ltp" in VALIDATOR_SRC
+    assert re.search(r"const limitEntryRef = ltp;", PANEL_SRC)
+
+
+def test_the_field_is_off_by_default():
+    """Both checks are gated on > 0, and the seeded default is 0. If this
+    ever ships non-zero by default it silently starts refusing orders."""
+    seed = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "app" / "models" / "netting.py"
+    ).read_text()
+    assert "limitAwayPercent: float = 0.0" in seed
+    assert "if limit_pct > 0 and ltp > 0:" in VALIDATOR_SRC
+    assert "if (limitAwayPct > 0 && limitEntryRef > 0" in PANEL_SRC

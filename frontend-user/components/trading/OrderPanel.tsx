@@ -424,27 +424,35 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
   }
 
   // ── Limit-away hints ────────────────────────────────────────────
-  // `limitAwayPercent` is the MINIMUM distance the limit price / SL-M
-  // trigger must sit from the live market reference. Anything inside
-  // the ±pct band is rejected (`order_validator.py:_check`). The
-  // placeholder shown to the trader is the NEAREST allowed boundary —
-  // entering exactly that value, or anything further from market in
-  // the same direction, passes; values between market and the
-  // boundary are rejected as "too close".
+  // `limitAwayPercent` does two different jobs, and getting them the
+  // wrong way round is why this block is spelled out:
   //
-  //   LIMIT semantics (better-price intent):
-  //     • BUY LIMIT  → placed AT or BELOW market × (1 − pct/100)
-  //     • SELL LIMIT → placed AT or ABOVE market × (1 + pct/100)
-  //   SL-M semantics (stop / breakout intent):
-  //     • BUY SL-M  → trigger AT or ABOVE market × (1 + pct/100)
-  //     • SELL SL-M → trigger AT or BELOW market × (1 − pct/100)
+  //   • ENTRY leg (limit price / SL-M trigger) — a MAXIMUM distance.
+  //     The parked price must stay WITHIN ±pct of market; resting it
+  //     further out is rejected as "too far". Admin labels this field
+  //     "Max % away from market".
+  //   • Bracket SL / TP — a MINIMUM distance from entry. A stop glued
+  //     to the entry price is what gets rejected there.
   //
-  // `wantUpperEntry` XORs side with order kind so each combination
-  // points at the correct boundary the trader must reach.
+  // This file used to enforce the entry leg as a minimum too: it
+  // rejected everything INSIDE the band, while `_check_entry` on the
+  // server rejects everything OUTSIDE it. The two accepted sets met only
+  // at the boundary, so with the field set to anything above 0 almost no
+  // parked order could be placed — one side or the other always refused
+  // it. It never surfaced because the field has no admin form and
+  // defaults to 0, which switches both checks off.
   //
-  // Bracket SL / TP placeholders below are unchanged — they describe
-  // the close-leg minimum-distance cap, which is always opposite the
-  // entry direction regardless of LIMIT vs SL-M.
+  // The placeholder is the boundary in the direction the trader is
+  // heading — the FURTHEST they may rest the order, not the nearest they
+  // must reach:
+  //     • BUY LIMIT  → market × (1 − pct/100)   (lowest allowed)
+  //     • SELL LIMIT → market × (1 + pct/100)   (highest allowed)
+  //     • BUY SL-M   → market × (1 + pct/100)
+  //     • SELL SL-M  → market × (1 − pct/100)
+  //
+  // `wantUpperEntry` XORs side with order kind to pick that boundary.
+  // The submit check below is symmetric (both bounds), exactly mirroring
+  // the server, so a price on the unexpected side is caught too.
   const limitAwayPct = Number(effSettings?.limit_percentage ?? 0) || 0;
   // Entry band is measured from LTP, matching the server. The limit the
   // trader types is judged against the number on their chart; measuring
@@ -552,34 +560,20 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
     // SL-M trigger must sit away from the live market reference — the
     // band (lower, upper) immediately around market is rejected, the
     // region BEYOND each boundary is allowed. Direction-aware: for a
-    // BUY LIMIT the trader is pushing the price below market, so the
-    // candidate must be ≤ lower bound; for a SELL LIMIT ≥ upper bound;
-    // BUY SL-M ≥ upper bound; SELL SL-M ≤ lower bound. The XOR rule
-    // below collapses the 4-case table. Backend re-runs the same check
-    // (symmetric, exclusive band) against its own bid/ask snapshot;
-    // this just prevents the optimistic insert + rollback flicker when
-    // the user types a value too close to market.
+    // The parked price has to stay WITHIN ±pct of market — a MAXIMUM
+    // distance, matching `_check_entry` on the server. Kept symmetric
+    // (both bounds, same message) so the two sides can never disagree
+    // about which prices are acceptable; this copy only exists to spare
+    // the user an optimistic insert followed by a server rollback.
     if (limitAwayPct > 0 && limitEntryRef > 0 && (orderType === "LIMIT" || orderType === "SL-M")) {
       const candidate = orderType === "LIMIT" ? Number(price) : Number(trigger);
       if (candidate > 0) {
         const upperCap = _roundPx(limitEntryRef * (1 + limitAwayPct / 100));
         const lowerCap = _roundPx(limitEntryRef * (1 - limitAwayPct / 100));
-        const wantUpper = (side === "BUY") !== (orderType === "LIMIT");
-        const label = orderType === "LIMIT" ? "Limit price" : "Trigger price";
-        // BUY SL-M / SELL LIMIT — must be AT LEAST upperCap (above
-        // market by ≥ pct). Anything below the bound is "too close".
-        if (wantUpper && candidate < upperCap) {
+        if (candidate < lowerCap || candidate > upperCap) {
+          const label = orderType === "LIMIT" ? "Limit price" : "Trigger price";
           toast.error(
-            `${label} ${fmtPrice(candidate)} is too close to market ${fmtPrice(limitEntryRef)}. Must be at least ${limitAwayPct}% away — minimum ${fmtPrice(upperCap)}.`,
-            { duration: 6000 },
-          );
-          return;
-        }
-        // BUY LIMIT / SELL SL-M — must be AT MOST lowerCap (below
-        // market by ≥ pct). Anything above the bound is "too close".
-        if (!wantUpper && candidate > lowerCap) {
-          toast.error(
-            `${label} ${fmtPrice(candidate)} is too close to market ${fmtPrice(limitEntryRef)}. Must be at least ${limitAwayPct}% away — maximum ${fmtPrice(lowerCap)}.`,
+            `${label} ${fmtPrice(candidate)} is too far from market ${fmtPrice(limitEntryRef)}. Must be within ${limitAwayPct}% — between ${fmtPrice(lowerCap)} and ${fmtPrice(upperCap)}.`,
             { duration: 6000 },
           );
           return;
