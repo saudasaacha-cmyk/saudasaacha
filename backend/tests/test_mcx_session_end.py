@@ -1,22 +1,24 @@
-"""The MCX trade-end is one fact, and it used to live in six places.
+"""MCX's close is derived from US daylight saving, not stored.
 
-MCX's non-agri close moves twice a year with US daylight saving — 23:30 IST
-while US DST is in effect, 23:55 IST otherwise — so this value is edited
-roughly every March and November, from an exchange circular.
+MCX's non-agri evening session ends 23:30 IST while US DST is in effect and
+23:55 IST the rest of the year, flipping on the first trading day after each
+US changeover. That used to be a hand-edited literal, copied into four places
+that each do something different with it, and on 2026-11-02 the close moved
+to 23:55 while the copies stayed behind. Every evening after that, until it
+was fixed:
 
-It was copied as a literal into the rollover gate, the new-order gate, the
-feed-health window and the frontend's market-hours table. On 2026-11-02 the
-close moved to 23:55 and those copies did not move together: the rollover
-gate still read 23:40, so for the fifteen minutes between 23:40 and 23:55 —
-with MCX live and printing — the pending-order poller skipped every MCX
-order and the risk enforcer stopped firing stop-outs, while the new-order
-gate turned users away at 23:30 with "MCX is closed".
+  • 23:30-23:55 — order entry refused with "MCX is closed" over a live session
+  • 23:40-23:55 — the pending poller skipped MCX and the risk enforcer stopped
+    firing stop-outs and brackets, because `is_after_close` said so
+  • 23:41      — the EOD rollover swept MCX fourteen minutes early
+  • after 23:30 — a silent Zerodha socket counted as healthy
 
-Nothing raised. Every one of those is a silent no-op.
+Not one of those raises. They are silent no-ops, which is why a stale literal
+survived a close-time change unnoticed.
 
-So these tests pin the invariants rather than the number: one source of
-truth, every consumer reading it, and the one value that would disable the
-rollover outright.
+So the value is now computed from the tz database. The test that matters is
+`test_the_derivation_reproduces_every_circular_we_have` — if the rule ever
+stops matching what MCX publishes, that is where it shows.
 
     pytest -q backend/tests/test_mcx_session_end.py
 """
@@ -26,117 +28,190 @@ from __future__ import annotations
 import inspect
 import pathlib
 import re
-from datetime import datetime, time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
+import pytest
+
+from app.core.config import settings
 from app.services import order_validator, zerodha_service
 from app.services.position_service import intraday_to_carry_loop
 from app.utils import time_utils as tu
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+PANEL = REPO / "frontend-user" / "lib" / "marketHours.ts"
+
+
+def hhmm(t) -> tuple[int, int]:
+    return (t.hour, t.minute)
+
+
+def ist(y: int, m: int, d: int, hh: int = 23, mm: int = 0) -> datetime:
+    return datetime(y, m, d, hh, mm, tzinfo=ZoneInfo("Asia/Kolkata"))
 
 
 def src(module) -> str:
     return pathlib.Path(inspect.getfile(module)).read_text()
 
 
-def hhmm(t: time) -> tuple[int, int]:
-    return (t.hour, t.minute)
+# ── the one that matters ─────────────────────────────────────────────
+# Every MCX circular date we have, and what the exchange published for it.
+# US DST 2026: began Sun 03-08, ended Sun 11-01. US DST 2027: begins Sun 03-14.
+CIRCULARS = [
+    ((2026, 3, 6), (23, 55), "Fri before US DST began"),
+    ((2026, 3, 9), (23, 30), "first trading day after US DST began"),
+    ((2026, 10, 30), (23, 30), "Fri before US DST ended"),
+    ((2026, 11, 2), (23, 55), "first trading day after US DST ended"),
+    ((2027, 3, 12), (23, 55), "last day of the 23:55 window per the circular"),
+    ((2027, 3, 15), (23, 30), "first trading day after US DST begins again"),
+]
 
 
-# ── one source of truth ──────────────────────────────────────────────
-def test_the_rollover_gate_sits_on_the_session_end():
-    """Not a copy of it, and not a buffer past it — see the constant's own
-    comment for why MCX cannot take NSE's 30-minute one."""
-    assert tu.MCX_CLOSE == tu.MCX_SESSION_END
+@pytest.mark.parametrize("day,expected,why", CIRCULARS)
+def test_the_derivation_reproduces_every_circular_we_have(day, expected, why):
+    """If this fails, MCX has decoupled from US daylight saving and the
+    derivation is no longer the authority — set `MCX_CLOSE_TIME` on the box to
+    the published time while the rule is corrected."""
+    assert hhmm(tu.mcx_session_end(ist(*day))) == expected, why
 
 
-def test_the_session_end_is_one_of_the_two_values_the_circular_uses():
-    """A guard against a typo in the twice-yearly edit: 2:55 and 23:05 would
-    both quietly shut MCX trading for most of the day."""
-    assert hhmm(tu.MCX_SESSION_END) in ((23, 30), (23, 55)), (
-        f"{tu.MCX_SESSION_END} is neither MCX close — US-DST 23:30 nor 23:55"
-    )
+def test_the_changeovers_all_fall_on_a_non_trading_day():
+    """Why the rule and the circular cannot disagree: every US changeover is a
+    Sunday, so "US DST in effect" and "the first trading day the circular
+    names" pick out the same sessions."""
+    for (y, m, d), _, _ in CIRCULARS:
+        assert datetime(y, m, d).weekday() != 6, "a circular date landed on a Sunday"
 
 
-def test_nse_is_untouched_by_this():
-    assert hhmm(tu.NSE_BSE_CLOSE) == (16, 0)
-    assert hhmm(tu.NSE_BSE_OPEN) == (9, 15)
-    assert hhmm(tu.MCX_OPEN) == (9, 0)
+def test_only_the_two_published_values_are_ever_returned():
+    """Swept across two full years of IST dates — a bug in the probe or the
+    tz lookup would show up as some third time."""
+    start = ist(2026, 1, 1)
+    seen = {hhmm(tu.mcx_session_end(start + timedelta(days=n))) for n in range(730)}
+    assert seen == {hhmm(tu.MCX_END_US_DST), hhmm(tu.MCX_END_US_STANDARD)}
+
+
+# ── it has to be resolved per call, not per process ──────────────────
+def test_the_session_end_is_a_function_not_a_constant():
+    """The backend master routinely runs for days — it had five days of uptime
+    when this was written. Anything resolved at import time would serve the
+    pre-changeover close until somebody happened to restart, which is the
+    whole failure being replaced here."""
+    assert callable(tu.mcx_session_end)
+    assert not hasattr(tu, "MCX_SESSION_END"), "a frozen constant is back"
+    assert not hasattr(tu, "MCX_CLOSE"), "a frozen constant is back"
+
+
+def test_the_close_lookup_threads_the_instant_through():
+    """`is_after_close(seg, at)` must judge `at`'s own date, not today's —
+    otherwise a backfill or a replayed instant gets the wrong session."""
+    assert hhmm(tu.market_close_time_for_segment("MCX_FUT", ist(2026, 7, 1))) == (23, 30)
+    assert hhmm(tu.market_close_time_for_segment("MCX_FUT", ist(2026, 12, 1))) == (23, 55)
+    assert "market_close_time_for_segment(segment, at)" in src(tu)
+
+
+# ── the escape hatch ─────────────────────────────────────────────────
+def test_an_override_wins_outright(monkeypatch):
+    monkeypatch.setattr(settings, "MCX_CLOSE_TIME", "22:15", raising=False)
+    assert hhmm(tu.mcx_session_end(ist(2026, 7, 1))) == (22, 15)
+
+
+def test_a_malformed_override_falls_back_to_the_derivation(monkeypatch):
+    """A typo in an env var must not shut the session down."""
+    monkeypatch.setattr(settings, "MCX_CLOSE_TIME", "not-a-time", raising=False)
+    assert hhmm(tu.mcx_session_end(ist(2026, 12, 1))) == (23, 55)
+
+
+def test_the_override_is_blank_by_default():
+    """Shipped set, it would freeze the twice-yearly flip it exists to escape."""
+    assert settings.MCX_CLOSE_TIME == ""
 
 
 # ── the value that would disable the rollover ────────────────────────
-def test_the_rollover_can_actually_fire_at_this_close():
+def test_the_rollover_can_fire_at_either_close():
     """`intraday_to_carry_loop` fires the minute AFTER the close. At :59 that
-    used to build minute 60, which is greater than every wall-clock time, so
-    the group's rollover would never run again — no MIS->NRML, no EOD
-    square-off, and not one line in the log to say so."""
-    fire_after = (tu.MCX_CLOSE.hour, min(tu.MCX_CLOSE.minute + 1, 59))
-    assert fire_after <= (23, 59), "the rollover minute is unreachable"
-    assert fire_after > (tu.MCX_CLOSE.hour, tu.MCX_CLOSE.minute - 1)
+    used to build minute 60, greater than every wall-clock time, so the
+    group's rollover would never run again and never log a reason."""
+    for close in (tu.MCX_END_US_DST, tu.MCX_END_US_STANDARD, tu.NSE_BSE_CLOSE):
+        fire_after = (close.hour, min(close.minute + 1, 59))
+        assert fire_after <= (23, 59), f"{close} makes the rollover minute unreachable"
 
 
 def test_the_loop_still_clamps_that_minute():
-    """The clamp is what makes the test above true for ANY close, including a
-    future circular that lands on :59."""
+    assert "min(close_t.minute + 1, 59)" in inspect.getsource(intraday_to_carry_loop)
+
+
+def test_the_loop_resolves_the_close_against_now():
     body = inspect.getsource(intraday_to_carry_loop)
-    assert "min(close_t.minute + 1, 59)" in body, "minute-60 landmine is back"
+    assert "market_close_time_for_segment(next(iter(group_set)), now)" in body
 
 
-# ── every consumer reads the one name ────────────────────────────────
-def test_the_new_order_gate_reads_the_constant():
-    """This is the user-visible one: a stale literal here turns traders away
-    with "MCX is closed" while the exchange is still open."""
+# ── every consumer reads the function ────────────────────────────────
+def test_the_new_order_gate_resolves_per_request():
+    """The user-visible one: a stale close here turns traders away with "MCX
+    is closed" while the exchange is still printing."""
     s = src(order_validator)
-    assert "MCX_SESSION_END" in s
+    assert "mcx_session_end(ist)" in s
     assert "_t(23, 30)" not in s and "_t(23, 55)" not in s
 
 
-def test_the_feed_health_window_reads_the_constant():
+def test_the_feed_health_window_resolves_per_call():
     s = src(zerodha_service)
     window = s[s.index("def _feed_expected_now") : s.index("def _find_account_entry_idx_locked")]
-    assert "MCX_SESSION_END" in window
+    assert "mcx_session_end(n)" in window
     assert "_dtime(23, 30)" not in window
 
 
-def test_the_frontend_table_matches_the_backend():
-    """TypeScript cannot import the Python constant, so the copy in
-    `marketHours.ts` is pinned here instead. This is the assertion that
-    actually catches the drift — the other copies are now derived."""
-    ts = (REPO / "frontend-user" / "lib" / "marketHours.ts").read_text()
-    mcx = ts[ts.index('seg.startsWith("MCX")') :][:400]
-    m = re.search(r"min <= (\d+) \* 60 \+ (\d+)", mcx)
-    assert m, "could not find the MCX close expression in marketHours.ts"
-    assert (int(m.group(1)), int(m.group(2))) == hhmm(tu.MCX_SESSION_END), (
-        "marketHours.ts disagrees with time_utils.MCX_SESSION_END — "
-        "the UI will show MCX closed while the backend accepts orders, or vice versa"
+def test_the_frontend_derives_it_the_same_way():
+    """TypeScript cannot import the Python helper, so the rule is mirrored in
+    `marketHours.ts`. Pin both values AND the DST read — a literal creeping
+    back here shows "Market is closed" over a live session."""
+    ts = PANEL.read_text()
+    # Bounded at the function's own closing brace — a fixed character window
+    # ran into the next helper and picked up its IST offset as a close time.
+    start = ts.index("function _mcxSessionEndMinutes")
+    helper = ts[start : ts.index("\n}", start)]
+    assert '"America/New_York"' in helper and 'timeZoneName: "short"' in helper
+    assert '"EDT"' in helper, "the frontend no longer reads the DST state"
+    found = {
+        (int(h), int(m)) for h, m in re.findall(r"(\d+) \* 60 \+ (\d+)", helper)
+    }
+    assert found == {hhmm(tu.MCX_END_US_DST), hhmm(tu.MCX_END_US_STANDARD)}, (
+        f"marketHours.ts uses {found}, backend uses "
+        f"{hhmm(tu.MCX_END_US_DST)} / {hhmm(tu.MCX_END_US_STANDARD)}"
     )
 
 
-# ── behaviour at the boundary ────────────────────────────────────────
-def _at(h: int, m: int) -> datetime:
-    """A Monday, in IST."""
-    return tu.to_ist(datetime(2026, 11, 2, h, m, tzinfo=tu.IST))
+def test_the_frontend_branch_calls_the_helper():
+    ts = PANEL.read_text()
+    mcx = ts[ts.index('seg.startsWith("MCX")') :][:300]
+    assert "_mcxSessionEndMinutes(now)" in mcx
+    assert "23 * 60" not in mcx, "a literal close is back in the MCX branch"
 
 
-def test_mcx_is_open_the_minute_before_its_close():
-    before = (tu.MCX_CLOSE.hour, tu.MCX_CLOSE.minute - 1)
-    assert not tu.is_after_close("MCX_FUT", _at(*before))
-    assert not tu.is_before_open("MCX_FUT", _at(*before))
+# ── behaviour at the boundary, and the neighbours ────────────────────
+def test_mcx_is_open_the_minute_before_its_close_and_shut_on_it():
+    for (y, m, d), (hh, mm), _ in CIRCULARS:
+        assert not tu.is_after_close("MCX_FUT", ist(y, m, d, hh, mm - 1))
+        assert tu.is_after_close("MCX_FUT", ist(y, m, d, hh, mm))
 
 
-def test_mcx_is_closed_from_its_close_minute():
-    assert tu.is_after_close("MCX_FUT", _at(tu.MCX_CLOSE.hour, tu.MCX_CLOSE.minute))
+def test_nse_is_untouched_by_any_of_this():
+    assert hhmm(tu.NSE_BSE_CLOSE) == (16, 0)
+    assert hhmm(tu.NSE_BSE_OPEN) == (9, 15)
+    assert hhmm(tu.MCX_OPEN) == (9, 0)
+    for (y, m, d), _, _ in CIRCULARS:
+        assert hhmm(tu.market_close_time_for_segment("NFO_FUT", ist(y, m, d))) == (16, 0)
 
 
 def test_mcx_morning_is_still_pre_open():
     """The guard that stopped the enforcer stopping-out against yesterday's
-    last tick at 08:00 — unaffected by a close-time change, pinned so it
-    stays that way."""
-    assert tu.is_before_open("MCX_FUT", _at(8, 0))
-    assert not tu.is_before_open("MCX_FUT", _at(9, 30))
+    last tick at 08:00. A close-time change must not touch it."""
+    assert tu.is_before_open("MCX_FUT", ist(2026, 11, 2, 8, 0))
+    assert not tu.is_before_open("MCX_FUT", ist(2026, 11, 2, 9, 30))
 
 
 def test_forex_and_crypto_have_no_close_to_move():
     for seg in ("FOREX", "CRYPTO", "CDS"):
         assert tu.market_close_time_for_segment(seg) is None
-        assert not tu.is_after_close(seg, _at(23, 59))
+        assert not tu.is_after_close(seg, ist(2026, 11, 2, 23, 59))

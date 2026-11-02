@@ -31,10 +31,10 @@ from app.services import market_data_service, netting_service, wallet_service
 from app.services.instrument_service import infer_instrument_type_from_symbol
 from app.utils.decimal_utils import to_decimal
 from app.utils.time_utils import (
-    MCX_SESSION_END,
     is_weekend,
     is_within_open_grace,
     market_open_time_for_segment,
+    mcx_session_end,
     now_ist,
     parse_hhmm,
     to_ist,
@@ -1225,7 +1225,7 @@ async def validate(
         or "CDS" in seg_upper
         or exch_upper == "CDS"
     )
-    is_mcx = "MCX" in seg_upper  # MCX has its own hours (09:00 → MCX_SESSION_END)
+    is_mcx = "MCX" in seg_upper  # MCX has its own hours (09:00 → mcx_session_end)
 
     # Only SERVER/admin force-closes bypass the market-hours guard — risk
     # auto-flatten (RISK_ENFORCER), admin "Close" (ADMIN / ADMIN_KILL_SWITCH),
@@ -1291,14 +1291,14 @@ async def validate(
             from app.core.config import settings as cfg
 
             if is_mcx:
-                # MCX: 09:00 IST to the circular's trade-end, which moves
-                # with US daylight saving — see `MCX_SESSION_END`. Read from
-                # that one name so this gate can never sit a quarter of an
-                # hour inside a live session, which is what a local 23:30
-                # literal did once the close moved to 23:55.
+                # MCX: 09:00 IST to the trade-end for THIS date, derived from
+                # US daylight saving in time_utils. Resolved per request, not
+                # read from a stored literal — a stale one sat a quarter of an
+                # hour inside the live session and turned traders away with
+                # "MCX is closed" while the exchange was still printing.
                 from datetime import time as _t
 
-                if not (_t(9, 0) <= ist.time() <= MCX_SESSION_END):
+                if not (_t(9, 0) <= ist.time() <= mcx_session_end(ist)):
                     raise MarketClosedError("MCX is closed. Place AMO instead.")
             else:
                 # NSE / BSE equities + F&O: 09:15 – 15:30 IST

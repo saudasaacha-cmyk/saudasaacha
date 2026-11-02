@@ -28,6 +28,34 @@ function _istMinutes(date: Date): number {
   return h * 60 + m;
 }
 
+/**
+ * Minutes since IST midnight of MCX's non-agri evening trade-end.
+ *
+ * MCX follows US daylight saving: the session ends 23:30 IST while US DST is
+ * in effect and 23:55 IST the rest of the year, flipping on the first trading
+ * day after each US changeover (which always falls on a Sunday, so the rule
+ * and the exchange's circular dates cannot disagree). `timeZoneName: "short"`
+ * returns "EDT" or "EST", which is the cheapest reliable DST read in the
+ * browser and needs no tz library. Mirrors
+ * `backend/app/utils/time_utils.mcx_session_end`.
+ */
+function _mcxSessionEndMinutes(date: Date): number {
+  try {
+    const zone = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      timeZoneName: "short",
+    })
+      .formatToParts(date)
+      .find((p) => p.type === "timeZoneName")?.value;
+    // Anything other than a clear "EDT" falls through to the later close,
+    // which is the forgiving direction: the UI stays open and the backend
+    // remains the authority on a rejection.
+    return zone === "EDT" ? 23 * 60 + 30 : 23 * 60 + 55;
+  } catch {
+    return 23 * 60 + 55;
+  }
+}
+
 /** IST day-of-week (0 = Sun, 6 = Sat). */
 function _istDay(date: Date): number {
   // `getDay()` on a UTC date returns UTC weekday — for IST we shift the
@@ -105,15 +133,15 @@ export function isInstrumentMarketOpen(
     return !(etMin >= CLOSE && etMin < REOPEN);
   }
 
-  // MCX commodities: Mon-Fri 09:00 IST to the circular's trade-end
-  // (evening session merged). That end moves twice a year with US daylight
-  // saving — 23:30 while US DST is in effect, 23:55 otherwise — and the
-  // backend holds the authority in `time_utils.MCX_SESSION_END`. This copy
-  // exists only because TypeScript cannot import it; a backend test pins the
-  // two together, so change them in the same commit or that test fails.
+  // MCX commodities: Mon-Fri 09:00 IST to the evening trade-end (sessions
+  // merged). That end tracks US daylight saving — 23:30 IST while US DST is
+  // in effect, 23:55 IST otherwise — so it is derived here the same way the
+  // backend derives it, rather than hard-coded and hand-edited every March
+  // and November. A stale literal here shows "Market is closed" over a live
+  // session; a backend test asserts both sides still use the same rule.
   if (seg.startsWith("MCX") || exch === "MCX") {
     if (!weekday) return false;
-    return min >= 9 * 60 && min <= 23 * 60 + 55;
+    return min >= 9 * 60 && min <= _mcxSessionEndMinutes(now);
   }
 
   // NSE / BSE equity, F&O — Mon-Fri 09:15-15:30 IST.

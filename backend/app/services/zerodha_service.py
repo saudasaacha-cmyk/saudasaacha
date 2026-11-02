@@ -2772,22 +2772,22 @@ class ZerodhaService:
     def _feed_expected_now() -> bool:
         """True during the broad Indian trading window (weekday 09:00 IST to
         the MCX trade-end) when SOME exchange is live (NSE 09:15–15:30, MCX
-        09:00 → `MCX_SESSION_END`), so a connected-but-silent socket is
+        09:00 → `mcx_session_end`), so a connected-but-silent socket is
         genuinely suspect. Outside it, quiet is normal (pre-open / overnight /
-        weekend) → a connected socket is healthy. The MCX end is read from
-        time_utils rather than copied, so a circular that moves the close
-        cannot leave this window short and mark a live feed healthy-by-default
-        while MCX is still printing.
+        weekend) → a connected socket is healthy. The MCX end is resolved from
+        time_utils per call, so a daylight-saving changeover cannot leave this
+        window short and let a silent feed pass as healthy while MCX is still
+        printing.
         """
         from datetime import time as _dtime
 
-        from app.utils.time_utils import MCX_SESSION_END, is_weekend, now_ist
+        from app.utils.time_utils import is_weekend, mcx_session_end, now_ist
 
         try:
             n = now_ist()
             if is_weekend(n.date()):
                 return False
-            return _dtime(9, 0) <= n.time() <= MCX_SESSION_END
+            return _dtime(9, 0) <= n.time() <= mcx_session_end(n)
         except Exception:
             return True  # fail-safe: keep the tick check active
 

@@ -87,32 +87,58 @@ def add_business_days(d: date, n: int) -> date:
 # firing / risk-EOD) — NEW order acceptance is gated by live-feed staleness,
 # so moving these does not open a stale-price trading window.
 
-# MCX non-agri trade-end, per the exchange circular. It moves TWICE A YEAR
-# with US daylight saving: 23:30 IST while US DST is in effect, 23:55 IST
-# the rest of the year. The circular dated 2026-09-29 sets 23:55 for
-# 2026-11-02 → 2027-03-12 inclusive; it reverts to 23:30 from 2027-03-15.
-# Deliberately a literal rather than a DST calculation — MCX publishes
-# explicit dates and they have not always landed on the astronomical
-# changeover, so the circular is the authority. Agri commodities (17:00,
-# or 21:00 for cotton / kapas) are not modelled: this platform does not
-# list them.
+# MCX's non-agri evening session tracks US daylight saving: it ends 23:30 IST
+# while US DST is in effect and 23:55 IST the rest of the year, flipping on
+# the first trading day after each US changeover. So this is DERIVED from the
+# tz database rather than hand-edited twice a year — which is how the stored
+# value came to read 23:40 against a 23:55 close, shutting MCX order entry and
+# risk enforcement fifteen minutes early every evening with nothing in the log
+# to say so.
 #
-# EVERY other MCX hour in this repo derives from this name. It used to be
-# copied as a literal into the new-order gate, the feed-health window and
-# the frontend's market-hours table, and when the close moved they did not
-# all move together — the rollover gate read 23:40 against a 23:55 close,
-# so for fifteen live minutes the poller skipped MCX orders and the risk
-# enforcer stopped firing stop-outs. Change it here only.
-MCX_SESSION_END: time = time(23, 55)
+# Checked against every circular on hand, probing each date's own session:
+#   2026-03-06 Fri → 23:55   2026-03-09 Mon → 23:30  (US DST began Sun 03-08)
+#   2026-10-30 Fri → 23:30   2026-11-02 Mon → 23:55  (US DST ended Sun 11-01)
+#   2027-03-12 Fri → 23:55   2027-03-15 Mon → 23:30  (US DST begins Sun 03-14)
+# Every US changeover falls on a Sunday, so "US DST in effect" and "the first
+# trading day the circular names" cannot disagree. A future change to US DST
+# law then arrives as a tzdata update instead of a code change.
+#
+# Agri commodities (17:00 IST, or 21:00 for cotton / kapas) are not modelled —
+# this platform does not list them.
+MCX_END_US_DST: time = time(23, 30)
+MCX_END_US_STANDARD: time = time(23, 55)
+_US_EASTERN: ZoneInfo = ZoneInfo("America/New_York")
+
+
+def mcx_session_end(at: datetime | None = None) -> time:
+    """MCX non-agri trade-end, in IST, for the IST date of ``at`` (default now).
+
+    This is a FUNCTION on purpose. The backend master process routinely runs
+    for days — it had five days of uptime when this was written — so a value
+    resolved at import time would keep serving the pre-changeover close until
+    somebody happened to restart, which is the failure it replaces.
+
+    ``settings.MCX_CLOSE_TIME`` ("HH:MM") overrides the derivation outright:
+    the escape hatch for a circular that decouples MCX from US DST, settable
+    on the box without a code change. Blank (the default) means derive.
+    """
+    override = (settings.MCX_CLOSE_TIME or "").strip()
+    if override:
+        try:
+            return parse_hhmm(override)
+        except Exception:  # noqa: BLE001 - a typo must not shut the session
+            pass
+    moment = to_ist(at) if at else now_ist()
+    # Probe that IST date's OWN evening session rather than the caller's
+    # instant, so a 00:30 IST call still answers for the session that date
+    # will have. (Both agree except within hours of a changeover, and those
+    # all land on a Sunday — but saying it costs one line.)
+    probe = moment.replace(hour=23, minute=0, second=0, microsecond=0)
+    in_us_dst = bool(probe.astimezone(_US_EASTERN).dst())
+    return MCX_END_US_DST if in_us_dst else MCX_END_US_STANDARD
+
 
 NSE_BSE_CLOSE: time = time(16, 0)
-# The MCX rollover / EOD gate sits exactly ON the session end, where NSE/BSE
-# sits 30 minutes past its 15:30 one. It cannot take the same buffer: the
-# rollover loop fires the minute AFTER this time, so anything from 23:59
-# produces a minute the wall clock never shows and the group's rollover
-# silently never runs again. Sitting on the close also means the enforcer and
-# the poller stop acting on MCX exactly when the exchange does.
-MCX_CLOSE: time = MCX_SESSION_END
 # Session OPEN times — symmetric to the close times above. Needed so the
 # risk enforcer recognises the PRE-OPEN window (weekday midnight → open)
 # as "market closed". Without these, is_after_close() alone returns False
@@ -174,15 +200,26 @@ ROLLOVER_EXEMPT_SEGMENTS: frozenset[str] = frozenset({
 })
 
 
-def market_close_time_for_segment(segment: str | None) -> time | None:
+def market_close_time_for_segment(
+    segment: str | None, at: datetime | None = None
+) -> time | None:
     """IST close time for the segment's exchange group, or None when the
-    segment doesn't have a daily close (forex / crypto)."""
+    segment doesn't have a daily close (forex / crypto).
+
+    ``at`` only matters for MCX, whose close moves with US daylight saving —
+    pass the instant being judged so a caller reasoning about a past or future
+    date gets that date's close rather than today's. NSE/BSE is a fixed
+    operator value (`NSE_BSE_CLOSE`, 30 min past the 15:30 session) and ignores
+    it; MCX has no such buffer because the rollover loop fires the minute AFTER
+    this time, and anything from 23:59 would build a minute the wall clock
+    never shows, disabling that group's rollover for good.
+    """
     if not segment:
         return None
     if segment in INDIAN_EQUITY_FNO_SEGMENTS:
         return NSE_BSE_CLOSE
     if segment in MCX_SEGMENTS:
-        return MCX_CLOSE
+        return mcx_session_end(at)
     # Prefix-based fallback: handles any future variant not yet in the sets above.
     # Forex (CDS_*) starts with "CDS"; crypto starts with "CRYPTO" — neither
     # matches the NSE/BSE/NFO/BFO/MCX prefixes below, so they still get None.
@@ -190,14 +227,14 @@ def market_close_time_for_segment(segment: str | None) -> time | None:
     if seg_up.startswith(("NSE", "BSE", "NFO", "BFO")):
         return NSE_BSE_CLOSE
     if seg_up.startswith("MCX"):
-        return MCX_CLOSE
+        return mcx_session_end(at)
     return None  # ROLLOVER_EXEMPT_SEGMENTS or anything unknown
 
 
 def is_after_close(segment: str, at: datetime | None = None) -> bool:
     """True if the given IST instant is at or past the segment's close.
     Returns False for rollover-exempt segments (forex / crypto)."""
-    close_t = market_close_time_for_segment(segment)
+    close_t = market_close_time_for_segment(segment, at)
     if close_t is None:
         return False
     now = to_ist(at) if at else now_ist()

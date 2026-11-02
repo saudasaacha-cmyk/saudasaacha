@@ -322,6 +322,12 @@ class Settings(BaseSettings):
     DEFAULT_TIMEZONE: str = "Asia/Kolkata"
     MARKET_OPEN_TIME: str = "09:15"
     MARKET_CLOSE_TIME: str = "15:30"
+    # MCX non-agri trade-end override, "HH:MM". Blank (the default) derives it
+    # from US daylight saving in `time_utils.mcx_session_end` — which is what
+    # the exchange's circulars track. Set this only if a circular decouples MCX
+    # from US DST, and clear it again afterwards; while it is set, the twice-
+    # yearly changeover stops happening on its own.
+    MCX_CLOSE_TIME: str = ""
     MUHURAT_OPEN_TIME: str = "18:15"
     MUHURAT_CLOSE_TIME: str = "19:15"
 

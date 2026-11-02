@@ -622,6 +622,24 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             from app.services.matching_engine import pending_order_poller
             from app.services.risk_enforcer import risk_enforcer_loop
 
+            # MCX's close is derived from US daylight saving rather than
+            # stored, so log what this boot resolved it to. The whole point of
+            # deriving it is that nobody edits it twice a year — which also
+            # means nobody SEES it, so this line is how you confirm after a
+            # changeover that the platform agrees with the circular.
+            try:
+                from app.utils.time_utils import mcx_session_end as _mcx_end
+
+                logger.info(
+                    "mcx_session_end_resolved",
+                    extra={
+                        "close_ist": _mcx_end().strftime("%H:%M"),
+                        "override": settings.MCX_CLOSE_TIME or None,
+                    },
+                )
+            except Exception:  # noqa: BLE001 - a log line must never block boot
+                logger.exception("mcx_session_end_log_failed")
+
             subtasks.append(
                 _asyncio.create_task(
                     _supervise(

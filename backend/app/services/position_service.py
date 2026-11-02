@@ -2123,11 +2123,11 @@ async def intraday_to_carry_loop(interval_sec: float = 60.0) -> None:
     """Wake every minute; at each segment group's close minute (once per
     IST day), run `convert_intraday_to_carry` against that group.
 
-    Segment groups + close times come from time_utils — `NSE_BSE_CLOSE` and
-    `MCX_CLOSE`, not the exchange session times, since the operator sets the
-    rollover minute separately:
-        • Indian equity + F&O → NSE_BSE_CLOSE (16:00 IST)
-        • MCX                 → MCX_CLOSE (23:55 IST)
+    Close times come from `time_utils.market_close_time_for_segment`, resolved
+    against the current instant so MCX follows its daylight-saving changeover
+    without a restart:
+        • Indian equity + F&O → 16:00 IST (operator buffer past the 15:30 bell)
+        • MCX                 → 23:30 / 23:55 IST, per US daylight saving
         • Forex (CDS) + crypto → no close, skipped entirely
 
     Weekends are skipped (Indian exchanges are closed). The per-day
@@ -2169,7 +2169,7 @@ async def intraday_to_carry_loop(interval_sec: float = 60.0) -> None:
                 for group_name, group_set in groups:
                     if _last_rollover_day.get(group_name) == day_key:
                         continue
-                    close_t = market_close_time_for_segment(next(iter(group_set)))
+                    close_t = market_close_time_for_segment(next(iter(group_set)), now)
                     if close_t is None:
                         continue
                     # Fire the minute after close — gives any straggler
