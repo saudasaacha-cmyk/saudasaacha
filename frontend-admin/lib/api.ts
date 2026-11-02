@@ -1365,6 +1365,12 @@ export type AdminLoginIpStats = {
   next_purge_at: string;
 };
 
+/** Live market-session state, as the backend's own gates compute it.
+ *  Read-only — there is no setter here on purpose. */
+export const MarketAPI = {
+  status: () => unwrap<any>(api.get("/admin/market/status")),
+};
+
 export const SettingsAPI = {
   platformList: (category?: string) => unwrap<any[]>(api.get("/admin/settings/platform", { params: { category } })),
   updatePlatform: (key: string, setting_value: any) =>

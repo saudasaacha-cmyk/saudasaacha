@@ -172,6 +172,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/settings/platform", label: "Platform settings", icon: Cog },
       { href: "/settings/branding", label: "Branding", icon: Cog, adminTierOnly: true },
       { href: "/download-app", label: "Download App", icon: Download, empPerm: "download_app" },
+      { href: "/market", label: "Market status", icon: Activity, superOnly: true },
       { href: "/holidays", label: "Holiday calendar", icon: Calendar, superOnly: true },
       { href: "/backup", label: "Backup & EOD", icon: DatabaseBackup, superOnly: true },
       { href: "/support", label: "Support", icon: MessageCircle, empPerm: "support", brokerPerm: "support" },

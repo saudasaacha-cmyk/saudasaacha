@@ -19,6 +19,7 @@ from app.api.v1.admin import (
     kyc,
     ledger,
     management,
+    market,
     marketwatch,
     money_transactions,
     netting,
@@ -52,6 +53,7 @@ router.include_router(chart_levels.router)
 router.include_router(crypto_config.router)
 router.include_router(bonuses.router)
 router.include_router(instruments.router)
+router.include_router(market.router)
 router.include_router(marketwatch.router)
 router.include_router(ledger.router)
 router.include_router(money_transactions.router)
