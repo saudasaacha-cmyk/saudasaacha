@@ -80,14 +80,39 @@ def add_business_days(d: date, n: int) -> date:
 # ── Segment-aware market-close helpers ───────────────────────────────
 # Drives the auto MIS→NRML / carry-forward rollover loop (the minute the
 # per-position Carry-Forward decision runs: ON → carry, OFF → square off).
-# Operator-set rollover times for this platform: NSE/BSE 16:00 IST, MCX
-# 23:40 IST. Forex (CDS) is 24/5 and crypto 24/7 — no daily rollover, so
-# those segments are excluded from the loop entirely.
+# Operator-set rollover times for this platform. Forex (CDS) is 24/5 and
+# crypto 24/7 — no daily rollover, so those segments are excluded from the
+# loop entirely.
 # NOTE: these ONLY affect the rollover + `is_after_close` (pending-order
 # firing / risk-EOD) — NEW order acceptance is gated by live-feed staleness,
 # so moving these does not open a stale-price trading window.
+
+# MCX non-agri trade-end, per the exchange circular. It moves TWICE A YEAR
+# with US daylight saving: 23:30 IST while US DST is in effect, 23:55 IST
+# the rest of the year. The circular dated 2026-09-29 sets 23:55 for
+# 2026-11-02 → 2027-03-12 inclusive; it reverts to 23:30 from 2027-03-15.
+# Deliberately a literal rather than a DST calculation — MCX publishes
+# explicit dates and they have not always landed on the astronomical
+# changeover, so the circular is the authority. Agri commodities (17:00,
+# or 21:00 for cotton / kapas) are not modelled: this platform does not
+# list them.
+#
+# EVERY other MCX hour in this repo derives from this name. It used to be
+# copied as a literal into the new-order gate, the feed-health window and
+# the frontend's market-hours table, and when the close moved they did not
+# all move together — the rollover gate read 23:40 against a 23:55 close,
+# so for fifteen live minutes the poller skipped MCX orders and the risk
+# enforcer stopped firing stop-outs. Change it here only.
+MCX_SESSION_END: time = time(23, 55)
+
 NSE_BSE_CLOSE: time = time(16, 0)
-MCX_CLOSE: time = time(23, 40)
+# The MCX rollover / EOD gate sits exactly ON the session end, where NSE/BSE
+# sits 30 minutes past its 15:30 one. It cannot take the same buffer: the
+# rollover loop fires the minute AFTER this time, so anything from 23:59
+# produces a minute the wall clock never shows and the group's rollover
+# silently never runs again. Sitting on the close also means the enforcer and
+# the poller stop acting on MCX exactly when the exchange does.
+MCX_CLOSE: time = MCX_SESSION_END
 # Session OPEN times — symmetric to the close times above. Needed so the
 # risk enforcer recognises the PRE-OPEN window (weekday midnight → open)
 # as "market closed". Without these, is_after_close() alone returns False

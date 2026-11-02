@@ -436,7 +436,7 @@ export default function PositionsPage() {
    */
   function liveLtpFor(row: any, side?: "BUY" | "SELL"): number {
     // Market-closed gate — when the instrument's segment is past its
-    // close-of-day (NSE/BSE 15:30, MCX 23:30, indices session-bound),
+    // close-of-day (NSE/BSE 15:30, MCX 23:55, indices session-bound),
     // we IGNORE every live overlay and return the last stored
     // `row.ltp`. The user reported "market band hai fir bhi PnL move
     // kar raha" — root cause was Zerodha/Infoway replaying the final

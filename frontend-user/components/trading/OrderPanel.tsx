@@ -649,7 +649,7 @@ export function OrderPanel({ instrument, ltp, bid, ask, open, high, low, close, 
     // ── Market-closed pre-check ───────────────────────────────────────
     // The backend's order_validator raises MarketClosedError when the
     // instrument's segment is outside its trading window (NSE/BSE 9:15-
-    // 15:30 IST, MCX 9:00-23:30 IST, Forex 24/5, Crypto 24/7, etc.). The
+    // 15:30 IST, MCX 9:00-23:55 IST, Forex 24/5, Crypto 24/7, etc.). The
     // backend toast says "Market is closed. Place AMO instead." but it
     // only fires AFTER the round-trip — by then the optimistic insert
     // below has already shown the position row in the Positions tab. The

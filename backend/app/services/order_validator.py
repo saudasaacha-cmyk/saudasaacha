@@ -31,6 +31,7 @@ from app.services import market_data_service, netting_service, wallet_service
 from app.services.instrument_service import infer_instrument_type_from_symbol
 from app.utils.decimal_utils import to_decimal
 from app.utils.time_utils import (
+    MCX_SESSION_END,
     is_weekend,
     is_within_open_grace,
     market_open_time_for_segment,
@@ -1224,7 +1225,7 @@ async def validate(
         or "CDS" in seg_upper
         or exch_upper == "CDS"
     )
-    is_mcx = "MCX" in seg_upper  # MCX has its own hours (~09:00-23:30 IST)
+    is_mcx = "MCX" in seg_upper  # MCX has its own hours (09:00 → MCX_SESSION_END)
 
     # Only SERVER/admin force-closes bypass the market-hours guard — risk
     # auto-flatten (RISK_ENFORCER), admin "Close" (ADMIN / ADMIN_KILL_SWITCH),
@@ -1263,7 +1264,7 @@ async def validate(
                 if h.is_full_day:
                     raise MarketClosedError(f"Holiday: {h.description}. Place AMO instead.")
                 # Partial-day holiday with a special session window — e.g. MCX
-                # runs an EVENING-only session (17:00–23:30) on a day NSE/BSE
+                # runs an EVENING-only session (17:00 → close) on a day NSE/BSE
                 # are fully closed. We honour the admin-set open_time/close_time
                 # (stored as "HH:MM" strings on TradingHoliday) so trades are
                 # blocked OUTSIDE that window — and the snapshot-fed feed gate
@@ -1290,11 +1291,14 @@ async def validate(
             from app.core.config import settings as cfg
 
             if is_mcx:
-                # MCX: 09:00 – 23:30 IST (winter) / 23:55 IST (summer evening session)
-                # We use a generous 09:00 – 23:30 window.
+                # MCX: 09:00 IST to the circular's trade-end, which moves
+                # with US daylight saving — see `MCX_SESSION_END`. Read from
+                # that one name so this gate can never sit a quarter of an
+                # hour inside a live session, which is what a local 23:30
+                # literal did once the close moved to 23:55.
                 from datetime import time as _t
 
-                if not (_t(9, 0) <= ist.time() <= _t(23, 30)):
+                if not (_t(9, 0) <= ist.time() <= MCX_SESSION_END):
                     raise MarketClosedError("MCX is closed. Place AMO instead.")
             else:
                 # NSE / BSE equities + F&O: 09:15 – 15:30 IST
