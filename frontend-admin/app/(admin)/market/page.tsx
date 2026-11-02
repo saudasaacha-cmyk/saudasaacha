@@ -18,7 +18,7 @@
  * MCX order entry and risk enforcement early, every evening, in silence.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { MarketAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -26,8 +26,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatusPill } from "@/components/common/StatusPill";
 import { DataTable, type Column } from "@/components/common/DataTable";
+import { SessionHoursCard } from "@/components/market/SessionHoursCard";
 
 export default function MarketStatusPage() {
+  const qc = useQueryClient();
   const { data, isFetching, refetch } = useQuery({
     queryKey: ["admin", "market", "status"],
     queryFn: () => MarketAPI.status(),
@@ -35,6 +37,17 @@ export default function MarketStatusPage() {
     // that leaving the tab open costs the backend almost nothing.
     refetchInterval: 10_000,
   });
+
+  // Super-admin only on the backend; a 403 just leaves the editor hidden.
+  const { data: sessions } = useQuery({
+    queryKey: ["admin", "market", "sessions"],
+    queryFn: () => MarketAPI.sessions(),
+    retry: false,
+  });
+
+  function reloadBoth() {
+    qc.invalidateQueries({ queryKey: ["admin", "market"] });
+  }
 
   const segCols: Column<any>[] = [
     { key: "group", header: "Segment" },
@@ -185,6 +198,22 @@ export default function MarketStatusPage() {
           </CardContent>
         </Card>
       </div>
+
+      {!!sessions?.length && (
+        <section className="space-y-3 pt-2">
+          <div>
+            <h2 className="text-base font-semibold">Session hours</h2>
+            <p className="text-sm text-muted-foreground">
+              Overrides only — a blank field keeps the shipped default, so there is always a
+              known-good floor. Saved changes reach every worker within 30 seconds; the table
+              above will show them land.
+            </p>
+          </div>
+          {sessions.map((r: any) => (
+            <SessionHoursCard key={r.group} row={r} onSaved={reloadBoth} />
+          ))}
+        </section>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -118,16 +119,27 @@ def mcx_session_end(at: datetime | None = None) -> time:
     resolved at import time would keep serving the pre-changeover close until
     somebody happened to restart, which is the failure it replaces.
 
-    ``settings.MCX_CLOSE_TIME`` ("HH:MM") overrides the derivation outright:
-    the escape hatch for a circular that decouples MCX from US DST, settable
-    on the box without a code change. Blank (the default) means derive.
+    Precedence, highest first:
+
+      1. ``settings.MCX_CLOSE_TIME`` ("HH:MM") — the break-glass escape hatch,
+         set on the box by someone with SSH when the admin panel is wrong or
+         unreachable. Highest on purpose, for exactly that case.
+      2. The admin's `MarketSession` override, when `auto_dst` is turned off.
+         Turning it off freezes the twice-yearly flip, which is why the panel
+         says so where it is set.
+      3. Derived from US daylight saving — the default, and what the
+         exchange's circulars track.
     """
-    override = (settings.MCX_CLOSE_TIME or "").strip()
-    if override:
+    env_override = (settings.MCX_CLOSE_TIME or "").strip()
+    if env_override:
         try:
-            return parse_hhmm(override)
+            return parse_hhmm(env_override)
         except Exception:  # noqa: BLE001 - a typo must not shut the session
             pass
+    if not _auto_dst_enabled():
+        pinned = _override_time("MCX", "entry_close")
+        if pinned is not None:
+            return pinned
     moment = to_ist(at) if at else now_ist()
     # Probe that IST date's OWN evening session rather than the caller's
     # instant, so a 00:30 IST call still answers for the session that date
@@ -200,35 +212,137 @@ ROLLOVER_EXEMPT_SEGMENTS: frozenset[str] = frozenset({
 })
 
 
-def market_close_time_for_segment(
-    segment: str | None, at: datetime | None = None
-) -> time | None:
-    """IST close time for the segment's exchange group, or None when the
-    segment doesn't have a daily close (forex / crypto).
+# ── Operator session overrides ───────────────────────────────────────
+# `MarketSession` rows override the times above. They are PUSHED in here by a
+# per-worker refresher rather than read on demand, because every reader below
+# is sync and sits in a one-second loop — `is_after_close` is called by the
+# risk enforcer on every tick, and a DB or even a Redis round trip per call is
+# not available to it.
+#
+# Empty is both the starting state and the safe state: every getter falls back
+# to the code default, so a worker that has never refreshed, or cannot reach
+# Mongo at all, behaves exactly as the platform did before overrides existed.
+# The dangerous direction would be resolving to None and letting
+# `is_after_close` conclude that the market never shuts.
+_session_overrides: dict[str, dict[str, Any]] = {}
 
-    ``at`` only matters for MCX, whose close moves with US daylight saving —
-    pass the instant being judged so a caller reasoning about a past or future
-    date gets that date's close rather than today's. NSE/BSE is a fixed
-    operator value (`NSE_BSE_CLOSE`, 30 min past the 15:30 session) and ignores
-    it; MCX has no such buffer because the rollover loop fires the minute AFTER
-    this time, and anything from 23:59 would build a minute the wall clock
-    never shows, disabling that group's rollover for good.
+
+def set_session_overrides(rows: dict[str, dict[str, Any]] | None) -> None:
+    """Replace the override snapshot. Called by the refresher on every worker.
+
+    Rebinds rather than mutating in place, and the rebind is the point: a
+    reader sees either the whole old snapshot or the whole new one. A
+    `clear()` followed by `update()` has a window where a gate resolves
+    against an empty dict and silently falls back to the code default.
+    """
+    global _session_overrides  # noqa: PLW0603 - the atomic rebind IS the design
+    _session_overrides = rows or {}
+
+
+def get_session_overrides() -> dict[str, dict[str, Any]]:
+    """The snapshot this worker is currently resolving against."""
+    return dict(_session_overrides)
+
+
+def _override_time(group: str | None, field: str) -> time | None:
+    """An override as a `time`, or None to mean "use the default".
+
+    A malformed row resolves to None rather than raising: a typo saved into the
+    collection must not be able to take a session gate down.
+    """
+    if not group:
+        return None
+    raw = (_session_overrides.get(group) or {}).get(field)
+    if not raw:
+        return None
+    try:
+        return parse_hhmm(str(raw))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _auto_dst_enabled() -> bool:
+    """Whether MCX still tracks US daylight saving. Default (and absent-row)
+    is True — the twice-yearly flip keeps happening unless an admin
+    deliberately pins the close."""
+    v = (_session_overrides.get("MCX") or {}).get("auto_dst")
+    return True if v is None else bool(v)
+
+
+def session_group_for_segment(segment: str | None) -> str | None:
+    """"NSE_BSE", "MCX", or None for a segment with no daily session.
+
+    The single place the grouping is decided. It used to be written out twice —
+    once for the close and once for the open — which is one edit away from a
+    segment whose session opens on NSE's clock and closes on MCX's.
+
+    Forex (CDS_*) and crypto (CRYPTO_*) match none of the prefixes and so
+    return None, which is exactly what marks them rollover-exempt.
     """
     if not segment:
         return None
     if segment in INDIAN_EQUITY_FNO_SEGMENTS:
-        return NSE_BSE_CLOSE
+        return "NSE_BSE"
     if segment in MCX_SEGMENTS:
-        return mcx_session_end(at)
-    # Prefix-based fallback: handles any future variant not yet in the sets above.
-    # Forex (CDS_*) starts with "CDS"; crypto starts with "CRYPTO" — neither
-    # matches the NSE/BSE/NFO/BFO/MCX prefixes below, so they still get None.
+        return "MCX"
+    # Prefix fallback: handles any future variant not yet in the sets above.
     seg_up = segment.upper()
     if seg_up.startswith(("NSE", "BSE", "NFO", "BFO")):
-        return NSE_BSE_CLOSE
+        return "NSE_BSE"
     if seg_up.startswith("MCX"):
+        return "MCX"
+    return None
+
+
+def order_entry_close_for_segment(
+    segment: str | None, at: datetime | None = None
+) -> time | None:
+    """The time the validator stops accepting NEW orders for this segment.
+
+    Distinct from `market_close_time_for_segment`, which is when the risk and
+    rollover gate treats the session as over. For NSE/BSE those differ on
+    purpose (15:30 bell vs a 16:00 gate); for MCX they coincide. Treating them
+    as one number is how they drifted fifteen minutes apart and turned traders
+    away over a live MCX session.
+    """
+    group = session_group_for_segment(segment)
+    if group is None:
+        return None
+    override = _override_time(group, "entry_close")
+    if group == "MCX":
+        # `mcx_session_end` already folds in both the env escape hatch and the
+        # admin override, so defer to it rather than re-deciding here.
         return mcx_session_end(at)
-    return None  # ROLLOVER_EXEMPT_SEGMENTS or anything unknown
+    if override is not None:
+        return override
+    try:
+        return parse_hhmm(settings.MARKET_CLOSE_TIME)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def market_close_time_for_segment(
+    segment: str | None, at: datetime | None = None
+) -> time | None:
+    """The RISK / ROLLOVER gate for the segment's group, or None when it has no
+    daily close (forex / crypto). This is what `is_after_close` compares
+    against, so it decides when the pending-order poller stops firing, when the
+    risk enforcer stops acting, and when the EOD rollover sweeps.
+
+    ``at`` matters for MCX, whose close moves with US daylight saving — pass the
+    instant being judged so a caller reasoning about another date gets that
+    date's close. NSE/BSE sits 30 min past its 15:30 bell so late prints settle
+    first; MCX cannot take that buffer, because the rollover loop fires the
+    minute AFTER this value and anything from 23:59 builds a minute the wall
+    clock never shows, disabling that group's rollover for good.
+    """
+    group = session_group_for_segment(segment)
+    if group is None:
+        return None
+    override = _override_time(group, "gate_close")
+    if override is not None:
+        return override
+    return NSE_BSE_CLOSE if group == "NSE_BSE" else mcx_session_end(at)
 
 
 def is_after_close(segment: str, at: datetime | None = None) -> bool:
@@ -242,23 +356,17 @@ def is_after_close(segment: str, at: datetime | None = None) -> bool:
 
 
 def market_open_time_for_segment(segment: str | None) -> time | None:
-    """IST open time for the segment's exchange group, or None when the
-    segment has no daily open (forex / crypto = 24×5 / 24×7).
-
-    Mirror of ``market_close_time_for_segment`` — same membership sets and
-    prefix fallback so both ends of the session window stay in lockstep."""
-    if not segment:
+    """IST open time for the segment's group, or None when it has no daily open
+    (forex / crypto = 24×5 / 24×7). Resolved through the same
+    `session_group_for_segment` the close uses, so both ends of the window can
+    never fall out of lockstep."""
+    group = session_group_for_segment(segment)
+    if group is None:
         return None
-    if segment in INDIAN_EQUITY_FNO_SEGMENTS:
-        return NSE_BSE_OPEN
-    if segment in MCX_SEGMENTS:
-        return MCX_OPEN
-    seg_up = segment.upper()
-    if seg_up.startswith(("NSE", "BSE", "NFO", "BFO")):
-        return NSE_BSE_OPEN
-    if seg_up.startswith("MCX"):
-        return MCX_OPEN
-    return None  # ROLLOVER_EXEMPT_SEGMENTS or anything unknown
+    override = _override_time(group, "open_time")
+    if override is not None:
+        return override
+    return NSE_BSE_OPEN if group == "NSE_BSE" else MCX_OPEN
 
 
 def is_before_open(segment: str, at: datetime | None = None) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from typing import Any
 
@@ -12,11 +13,23 @@ from app.core.dependencies import CurrentAdmin
 from app.models._base import Exchange
 from app.models.audit_log import AuditAction, AuditLog
 from app.models.holiday import TradingHoliday
+from app.models.market_session import SESSION_GROUPS, MarketSession
 from app.models.platform_setting import PlatformSetting, SettingType
 from app.models.user import UserRole
 from app.schemas.admin.common import UpdatePlatformSettingRequest
 from app.schemas.common import APIResponse
 from app.services.audit_service import log_event
+from app.services.market_session_service import refresh_once
+from app.utils.time_utils import (
+    market_close_time_for_segment,
+    market_open_time_for_segment,
+    now_ist,
+    now_utc,
+    order_entry_close_for_segment,
+    parse_hhmm,
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["admin-settings"])
 
@@ -750,3 +763,130 @@ async def eod_reset(admin: CurrentAdmin):
         metadata={"ts": datetime.utcnow().isoformat()},
     )
     return APIResponse(data={"ok": True})
+
+
+# ── Market session hours ──────────────────────────────────────────────
+# One row per segment GROUP, overriding the code defaults in `time_utils`.
+# Super-admin only: these are platform-wide gates that decide when orders are
+# accepted, when the risk enforcer acts and when the EOD rollover sweeps.
+#
+# The rows only OVERRIDE. Clearing a field returns that end of the session to
+# its code default, so there is always a known-good floor and a worker that
+# cannot reach Mongo keeps the behaviour the platform shipped with.
+
+
+def _session_payload(group: str, row, at) -> dict[str, Any]:
+    """What the form needs: the stored override AND the value actually in
+    force, so the operator can see what a blank field resolves to instead of
+    guessing."""
+    probe = "NFO_FUT" if group == "NSE_BSE" else "MCX_FUT"
+
+    def _f(t) -> str | None:
+        return t.strftime("%H:%M") if t else None
+
+    return {
+        "group": group,
+        "label": "NSE / BSE / NFO / BFO" if group == "NSE_BSE" else "MCX",
+        # Stored overrides — blank means "use the default".
+        "open_time": getattr(row, "open_time", None),
+        "entry_close": getattr(row, "entry_close", None),
+        "gate_close": getattr(row, "gate_close", None),
+        "auto_dst": bool(getattr(row, "auto_dst", True)),
+        # What is in force right now, overrides applied.
+        "effective": {
+            "open": _f(market_open_time_for_segment(probe)),
+            "entry_close": _f(order_entry_close_for_segment(probe, at)),
+            "gate_close": _f(market_close_time_for_segment(probe, at)),
+        },
+        "supports_auto_dst": group == "MCX",
+        "updated_at": getattr(row, "updated_at", None),
+    }
+
+
+@router.get("/market-sessions", response_model=APIResponse[list])
+async def list_market_sessions(admin: CurrentAdmin):
+    _require_super_admin(admin)
+    at = now_ist()
+    rows = {r.group: r for r in await MarketSession.find_all().to_list()}
+    return APIResponse(
+        data=[_session_payload(g, rows.get(g), at) for g in SESSION_GROUPS]
+    )
+
+
+@router.put("/market-sessions/{group}", response_model=APIResponse[dict])
+async def update_market_session(group: str, payload: dict, admin: CurrentAdmin):
+    """Upsert one group's overrides.
+
+    Validates every time string here rather than letting a typo reach the
+    collection: `time_utils` is defensive and falls back on an unparseable
+    value, but silently — the operator would see the field saved and the gate
+    unmoved. Reject it at the door instead.
+    """
+    _require_super_admin(admin)
+    if group not in SESSION_GROUPS:
+        raise HTTPException(status_code=400, detail=f"Unknown group {group!r}")
+
+    fields: dict[str, Any] = {}
+    for key in ("open_time", "entry_close", "gate_close"):
+        if key not in payload:
+            continue
+        raw = (payload.get(key) or "").strip()
+        if not raw:
+            fields[key] = None  # explicit clear → back to the code default
+            continue
+        try:
+            parse_hhmm(raw)
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail=f"{key} must be HH:MM, got {raw!r}"
+            ) from None
+        fields[key] = raw
+
+    row = await MarketSession.find_one(MarketSession.group == group)
+    before = (
+        None
+        if row is None
+        else {
+            "open_time": row.open_time,
+            "entry_close": row.entry_close,
+            "gate_close": row.gate_close,
+            "auto_dst": row.auto_dst,
+        }
+    )
+    if row is None:
+        row = MarketSession(group=group)
+    for k, v in fields.items():
+        setattr(row, k, v)
+    if "auto_dst" in payload and group == "MCX":
+        row.auto_dst = bool(payload["auto_dst"])
+    row.updated_at = now_utc()
+    row.updated_by = admin.id
+    await row.save()
+
+    # Install on THIS worker immediately so the response already reflects the
+    # change. Every other worker picks it up on its own 30 s refresh — nobody
+    # changes a market session and needs it live in five seconds.
+    try:
+        await refresh_once()
+    except Exception:  # noqa: BLE001
+        logger.warning("market_session_local_refresh_failed", exc_info=True)
+
+    try:
+        await log_event(
+            action=AuditAction.SETTING_CHANGE,
+            entity_type="MarketSession",
+            entity_id=row.id,
+            actor_id=admin.id,
+            old_values=before,
+            new_values={
+                "open_time": row.open_time,
+                "entry_close": row.entry_close,
+                "gate_close": row.gate_close,
+                "auto_dst": row.auto_dst,
+            },
+            metadata={"group": group},
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("market_session_audit_failed", exc_info=True)
+
+    return APIResponse(data=_session_payload(group, row, now_ist()))

@@ -790,6 +790,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # runs immediately so anything that expired overnight is cleaned at boot.
     from app.services.expiry_cleanup import expiry_cleanup_loop
 
+    # Session-override refresher. Deliberately NOT leader-gated: `time_utils`
+    # resolves every session gate synchronously, from a module-level snapshot,
+    # and EVERY worker validates orders and answers the admin panel — so every
+    # worker needs its own copy. One `find_all` over a two-row collection every
+    # 30 s.
+    from app.services.market_session_service import market_session_refresh_loop
+
+    market_session_task: _asyncio.Task = _asyncio.create_task(
+        _supervise("market_session_refresh", market_session_refresh_loop)
+    )
+    app._market_session_task = market_session_task  # type: ignore[attr-defined]
+
     # TeleCRM reconcile — inert until a super admin configures and enables
     # it, so this costs one `find_one` every six hours when it is off.
     telecrm_task: _asyncio.Task = _asyncio.create_task(
@@ -1062,6 +1074,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         ("app.services.matching_engine", "stop_pending_order_poller"),
         ("app.services.zerodha_auto_login_scheduler", "stop_zerodha_auto_login_scheduler"),
         ("app.services.tick_aggregator", "stop_tick_aggregator"),
+        ("app.services.market_session_service", "stop_market_session_refresh"),
     ):
         try:
             import importlib

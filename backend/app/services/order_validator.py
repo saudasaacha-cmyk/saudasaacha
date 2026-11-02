@@ -34,8 +34,8 @@ from app.utils.time_utils import (
     is_weekend,
     is_within_open_grace,
     market_open_time_for_segment,
-    mcx_session_end,
     now_ist,
+    order_entry_close_for_segment,
     parse_hhmm,
     to_ist,
 )
@@ -1290,22 +1290,27 @@ async def validate(
 
             from app.core.config import settings as cfg
 
-            if is_mcx:
-                # MCX: 09:00 IST to the trade-end for THIS date, derived from
-                # US daylight saving in time_utils. Resolved per request, not
-                # read from a stored literal — a stale one sat a quarter of an
-                # hour inside the live session and turned traders away with
-                # "MCX is closed" while the exchange was still printing.
-                from datetime import time as _t
-
-                if not (_t(9, 0) <= ist.time() <= mcx_session_end(ist)):
-                    raise MarketClosedError("MCX is closed. Place AMO instead.")
-            else:
-                # NSE / BSE equities + F&O: 09:15 – 15:30 IST
+            # One window for both groups, resolved through the SAME helpers the
+            # risk gate uses — so an admin's session override and the
+            # DST-derived MCX close reach order entry too. This used to be two
+            # branches with their own literals: MCX's open was a local
+            # `time(9, 0)` and its close a stored constant that sat a quarter
+            # of an hour inside the live session, turning traders away with
+            # "MCX is closed" while the exchange was still printing.
+            #
+            # A segment that resolves to no group keeps the NSE/BSE env window
+            # it has always had. That fallback is the safe direction: without
+            # it an unrecognised segment would resolve to no gate at all and
+            # accept orders around the clock.
+            open_t = market_open_time_for_segment(seg_upper)
+            close_t = order_entry_close_for_segment(seg_upper, ist)
+            if open_t is None or close_t is None:
                 open_t = parse_hhmm(cfg.MARKET_OPEN_TIME)
                 close_t = parse_hhmm(cfg.MARKET_CLOSE_TIME)
-                if not (open_t <= ist.time() <= close_t):
-                    raise MarketClosedError("Market is closed. Place AMO instead.")
+            if not (open_t <= ist.time() <= close_t):
+                raise MarketClosedError(
+                    f"{'MCX' if is_mcx else 'Market'} is closed. Place AMO instead."
+                )
 
         # ── 11a-2) Open settle-buffer (stale-first-tick protection) ──────
         # We're confirmed in-session above (not weekend/holiday, inside the

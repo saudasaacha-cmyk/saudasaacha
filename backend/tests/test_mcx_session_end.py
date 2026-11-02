@@ -149,10 +149,14 @@ def test_the_loop_resolves_the_close_against_now():
 # ── every consumer reads the function ────────────────────────────────
 def test_the_new_order_gate_resolves_per_request():
     """The user-visible one: a stale close here turns traders away with "MCX
-    is closed" while the exchange is still printing."""
+    is closed" while the exchange is still printing. The gate reaches
+    `mcx_session_end` through `order_entry_close_for_segment`, which also
+    folds in the admin's session override."""
     s = src(order_validator)
-    assert "mcx_session_end(ist)" in s
+    assert "order_entry_close_for_segment(seg_upper, ist)" in s
     assert "_t(23, 30)" not in s and "_t(23, 55)" not in s
+    # The old branch hard-coded MCX's OPEN as a local time(9, 0) too.
+    assert "_t(9, 0)" not in s
 
 
 def test_the_feed_health_window_resolves_per_call():

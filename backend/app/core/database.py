@@ -55,6 +55,7 @@ def _document_models() -> list[type["Document"]]:
     from app.models.user_bonus import UserBonus
     from app.models.holding import Holding
     from app.models.holiday import TradingHoliday
+    from app.models.market_session import MarketSession
     from app.models.instrument import Instrument
     from app.models.tick_snapshot import TickSnapshot
     from app.models.kyc import KycSubmission
@@ -159,6 +160,7 @@ def _document_models() -> list[type["Document"]]:
         PlatformSetting,
         ExpiryOverride,
         TradingHoliday,
+        MarketSession,
         AdminSettlement,
         BrokerSettlement,
         PnlSharingAgreement,

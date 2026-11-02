@@ -1369,6 +1369,12 @@ export type AdminLoginIpStats = {
  *  Read-only — there is no setter here on purpose. */
 export const MarketAPI = {
   status: () => unwrap<any>(api.get("/admin/market/status")),
+  // Session overrides. Each row carries both the STORED override (blank =
+  // use the code default) and the value actually `effective` right now, so
+  // the form can show what a blank field resolves to instead of guessing.
+  sessions: () => unwrap<any[]>(api.get("/admin/market-sessions")),
+  saveSession: (group: string, body: Record<string, unknown>) =>
+    unwrap<any>(api.put(`/admin/market-sessions/${encodeURIComponent(group)}`, body)),
 };
 
 export const SettingsAPI = {
