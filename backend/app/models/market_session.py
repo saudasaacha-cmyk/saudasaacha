@@ -33,6 +33,13 @@ from app.utils.time_utils import now_utc
 # in `time_utils` by `backend/tests/test_market_session_override.py`.
 SESSION_GROUPS: tuple[str, ...] = ("NSE_BSE", "MCX")
 
+# Applied to a group that has no row at all, so the warning works on a
+# fresh database instead of waiting for someone to notice it is off.
+# Named rather than repeated: the loop reads it for groups with no row and
+# the field default reads it for rows that do, and those two silently
+# disagreeing is a warning that fires at a time nobody configured.
+DEFAULT_WARN_LEAD_MINUTES: tuple[int, ...] = (30,)
+
 
 class MarketSession(Document):
     group: str  # one of SESSION_GROUPS
@@ -54,6 +61,16 @@ class MarketSession(Document):
     # above are then ignored for the closes. Turning it off freezes the twice-
     # yearly flip, so the admin UI says so where it is set.
     auto_dst: bool = True
+
+    # Minutes before `gate_close` to warn users who could not fund their
+    # overnight carry. Several are allowed — [30, 10] gives one ping with time
+    # to move money and one last call — and each fires at most once a day, and
+    # only to users still short AT THAT MOMENT, so a user who funds after the
+    # first never receives the second. Empty disables the warning for the
+    # group; that is the off switch, so the UI says so.
+    warn_lead_minutes: list[int] = Field(
+        default_factory=lambda: list(DEFAULT_WARN_LEAD_MINUTES)
+    )
 
     updated_at: datetime = Field(default_factory=now_utc)
     updated_by: PydanticObjectId | None = None

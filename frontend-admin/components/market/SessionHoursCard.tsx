@@ -33,6 +33,7 @@ type Row = {
   gate_close: string | null;
   auto_dst: boolean;
   supports_auto_dst: boolean;
+  warn_lead_minutes: number[];
   effective: { open: string | null; entry_close: string | null; gate_close: string | null };
 };
 
@@ -41,6 +42,7 @@ export function SessionHoursCard({ row, onSaved }: { row: Row; onSaved: () => vo
   const [entry, setEntry] = useState(row.entry_close ?? "");
   const [gate, setGate] = useState(row.gate_close ?? "");
   const [auto, setAuto] = useState(row.auto_dst);
+  const [warn, setWarn] = useState((row.warn_lead_minutes ?? []).join(", "));
   const [saving, setSaving] = useState(false);
 
   // Re-seed when the server sends a fresh row (another admin saved, or our own
@@ -50,7 +52,8 @@ export function SessionHoursCard({ row, onSaved }: { row: Row; onSaved: () => vo
     setEntry(row.entry_close ?? "");
     setGate(row.gate_close ?? "");
     setAuto(row.auto_dst);
-  }, [row.open_time, row.entry_close, row.gate_close, row.auto_dst]);
+    setWarn((row.warn_lead_minutes ?? []).join(", "));
+  }, [row.open_time, row.entry_close, row.gate_close, row.auto_dst, row.warn_lead_minutes]);
 
   async function save() {
     setSaving(true);
@@ -59,6 +62,7 @@ export function SessionHoursCard({ row, onSaved }: { row: Row; onSaved: () => vo
         open_time: open,
         entry_close: entry,
         gate_close: gate,
+        warn_lead_minutes: warn,
         ...(row.supports_auto_dst ? { auto_dst: auto } : {}),
       });
       toast.success(`${row.label} hours saved`);
@@ -135,6 +139,23 @@ export function SessionHoursCard({ row, onSaved }: { row: Row; onSaved: () => vo
           )}
         </div>
 
+        <div className="space-y-1.5">
+          <Label htmlFor={`warn-${row.group}`}>Margin warning, minutes before the gate</Label>
+          <Input
+            id={`warn-${row.group}`}
+            value={warn}
+            onChange={(e) => setWarn(e.target.value)}
+            placeholder="30, 10"
+            className="font-tabular sm:max-w-[16rem]"
+          />
+          <p className="text-xs text-muted-foreground">
+            {warn.trim()
+              ? `Users who still cannot fund their overnight carry are told how much to add, ${warn
+                  .trim()} minute(s) before ${row.effective.gate_close ?? "the gate"}. Only users who are actually short are messaged, and only once per mark per day — someone who funds after the first ping does not get the second.`
+              : "Blank — no warning is sent. Users find out when the position is squared off."}
+          </p>
+        </div>
+
         {row.supports_auto_dst && (
           <label className="flex items-start gap-2 text-sm">
             <input
@@ -157,7 +178,8 @@ export function SessionHoursCard({ row, onSaved }: { row: Row; onSaved: () => vo
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
             In force now: opens {row.effective.open ?? "—"} · entry closes{" "}
-            {row.effective.entry_close ?? "—"} · gate closes {row.effective.gate_close ?? "—"}
+            {row.effective.entry_close ?? "—"} · gate closes {row.effective.gate_close ?? "—"} ·{" "}
+            {warn.trim() ? `warns ${warn.trim()} min before` : "no margin warning"}
           </p>
           <Button onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}

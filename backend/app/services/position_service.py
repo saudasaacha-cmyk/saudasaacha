@@ -1543,6 +1543,47 @@ async def list_holdings(user_id: str | PydanticObjectId) -> list[Holding]:
 
 
 # ── Intraday → carryforward auto-rollover ───────────────────────────
+def overnight_margin_for(pos: Any, settings: dict) -> Decimal:
+    """What `pos` would have to lock to be carried overnight.
+
+    Reads the `overnight_*` triple, NOT the product-aware `leverage` /
+    `margin_percentage` / `fixed_margin_per_lot`. In Times mode the resolver
+    deliberately keeps those product-aware fields on the INTRADAY value (the
+    "symmetric-Times patch"), so reading them gave 500x for an MCX FUT row
+    whose admin had set 500x intraday / 70x overnight — the rollover then saw
+    delta=0 and silently skipped a force-close it owed.
+
+    Shared so the EOD gate and the pre-close warning cannot quote different
+    requirements for the same position. They did once, one level up, and a
+    user who topped up by the figure they were shown was force-closed anyway.
+    """
+    qty_abs = to_decimal(abs(pos.quantity))
+    fixed_per_lot = to_decimal(settings.get("overnight_fixed_margin_per_lot") or 0)
+
+    if settings.get("margin_calc_mode") == "fixed" and fixed_per_lot > 0:
+        # Already admin-entered in INR, so no FX step.
+        lot_size = max(1, int(pos.instrument.lot_size or 1))
+        return quantize_money(fixed_per_lot * (qty_abs / to_decimal(lot_size)))
+
+    notional = to_decimal(pos.avg_price) * qty_abs
+    pct = to_decimal(settings.get("overnight_margin_percentage") or 100.0) / to_decimal(100)
+    lev = to_decimal(settings.get("overnight_leverage") or 1.0) or to_decimal(1)
+    margin = notional * pct / lev
+
+    # USD-quoted instruments lock margin in INR; same conversion as
+    # order_validator.validate.
+    from app.services.market_data_service import (
+        get_usd_inr_rate,
+        is_usd_quoted_segment,
+    )
+
+    if is_usd_quoted_segment(pos.segment_type) or is_usd_quoted_segment(
+        pos.instrument.segment
+    ):
+        margin = margin * to_decimal(get_usd_inr_rate())
+    return quantize_money(margin)
+
+
 def carry_capacity(wallet: Any, floating_pnl: Decimal | None) -> Decimal:
     """What an account can put behind the EXTRA margin an overnight carry needs.
 
@@ -1597,6 +1638,270 @@ def carry_shortfall(
     return short if short > 0 else to_decimal(0)
 
 
+async def overnight_settings_for(pos: Any) -> dict:
+    """The segment settings that govern this position's overnight carry.
+
+    The option-type sniff matters: an NFO row whose symbol ends CE/PE must
+    resolve the admin's per-side option overrides (Opt Sell Mode=Fixed, Opt
+    Sell Overnight=15000/lot) rather than the generic segment Times/% margin.
+    Falling back silently under-computed the carry margin to roughly a fifth
+    of the configured amount, so `delta` looked affordable and an under-funded
+    option position was never force-closed — it rolled into NRML uncovered.
+
+    Shared by the gate and the pre-close warning so the two cannot resolve
+    different settings for the same position.
+    """
+    from app.services import netting_service
+
+    sym = (pos.instrument.symbol or "").upper()
+    otype = (
+        ("CE" if sym.endswith("CE") else "PE" if sym.endswith("PE") else None)
+        if len(sym) >= 3 and sym[-3].isdigit()
+        else None
+    )
+    resolved = await netting_service.get_effective_settings(
+        pos.user_id,
+        pos.instrument.segment,
+        action="BUY" if pos.quantity >= 0 else "SELL",
+        option_type=otype,
+        product_type="NRML",
+        symbol=pos.instrument.symbol,
+    )
+    return resolved.get("settings") or {}
+
+
+def group_carry_shortfall(
+    need: Decimal, available: Decimal, floating: Decimal, credit_limit: Decimal
+) -> Decimal:
+    """The deposit that lets one closing group's `need` clear `carry_capacity`.
+
+    `need` is already net of the intraday lock — it is a sum of per-position
+    `overnight - locked` shortfalls — so the lock itself never appears here.
+    It cancels: the gate compares `need` against `available + credit +
+    floating`, none of which contains it.
+
+    The zero case is not a rounding detail. `carry_capacity` floors at zero
+    precisely so a `need` of nothing passes however far underwater the wallet
+    is, which is the gate deliberately leaving a genuinely insolvent account
+    to the risk enforcer's stop-out rather than squaring off a book that needs
+    no extra margin. Subtracting capacity anyway would bill a user who owes
+    nothing for the whole of their floating loss — a five-figure demand
+    attached to a position the gate was always going to carry.
+    """
+    if to_decimal(need) <= 0:
+        return to_decimal(0)
+    short = (
+        to_decimal(need)
+        - to_decimal(available)
+        - to_decimal(floating)
+        - to_decimal(credit_limit)
+    )
+    return short if short > 0 else to_decimal(0)
+
+
+async def carry_requirement_for(
+    pos: Any, *, toggle_on: bool
+) -> tuple[Decimal, Decimal] | None:
+    """`(overnight requirement, currently locked)` for one position, or None
+    when the gate will close it whatever the wallet holds.
+
+    Both exclusions belong here rather than at the call site: a position no
+    deposit can save must not be billed for in a shortfall quote, or the user
+    is asked for more than the amount that actually clears the gate.
+
+      * the pool runs the per-position Carry-Forward toggle and this position
+        was never switched on, so only opted-in positions carry;
+      * the segment forbids overnight carry outright (`selling_overnight`).
+    """
+    if toggle_on and not bool(getattr(pos, "user_carry_forward", False)):
+        return None
+    s = await overnight_settings_for(pos)
+    if not bool(s.get("selling_overnight", True)):
+        return None
+    return overnight_margin_for(pos, s), to_decimal(pos.margin_used)
+
+
+async def carry_shortfall_by_user(segment_set: frozenset[str] | set[str]) -> dict:
+    """What each user would be short if this group's close happened right now.
+
+    Reads only. This is the arithmetic `convert_intraday_to_carry` is about to
+    do, done early so a user can still act on it — so it has to agree with the
+    gate exactly, which is why it shares `overnight_settings_for`,
+    `overnight_margin_for` and `carry_shortfall` with it rather than restating
+    any of them. A warning that quotes a number the gate then disagrees with is
+    worse than no warning: the user funds the account and is closed anyway.
+
+    Scoped to the group that is closing, not the whole book. Only these
+    positions are gated at this bell, and their own locked margin is the only
+    lock that offsets their requirement — counting an MCX lock against an NSE
+    carry would quote a shortfall smaller than the one the gate enforces.
+    Floating P&L is the exception and is summed wallet-wide, because equity is
+    a wallet-level quantity and that is how `carry_capacity` reads it.
+
+    Positions the gate will close regardless of funding are left out. No
+    deposit saves them, so charging the user for their margin would quote a
+    top-up larger than the one that actually clears the gate.
+
+    Returns {user_id: {"required", "need", "shortfall", "positions"}} for every
+    user with positions in the group — including those with no shortfall, so
+    callers can tell "covered" from "not looked at".
+    """
+    from app.models.user import User as _User
+    from app.services import user_service as _usvc
+    from app.services import wallet_service
+
+    if not segment_set:
+        return {}
+
+    rows = await Position.find(
+        {
+            "status": PositionStatus.OPEN.value,
+            "product_type": {"$in": [ProductType.MIS.value, ProductType.NRML.value]},
+            "instrument.segment": {"$in": list(segment_set)},
+        }
+    ).to_list()
+    if not rows:
+        return {}
+
+    # Resolve the per-position carry opt-out once per user, as the gate does.
+    _toggle: dict = {}
+
+    per_user: dict = {}
+    for pos in rows:
+        try:
+            uid = pos.user_id
+            if uid not in _toggle:
+                _ud = await _User.get(uid)
+                _toggle[uid] = bool(_ud and await _usvc.carry_toggle_enabled_for(_ud))
+            req = await carry_requirement_for(pos, toggle_on=_toggle[uid])
+            if req is None:
+                continue  # closing regardless of funds — not the user's to cover
+            ovn, locked = req
+            d = per_user.setdefault(
+                uid,
+                {
+                    "required": to_decimal(0),
+                    "need": to_decimal(0),
+                    "locked": to_decimal(0),
+                    "positions": 0,
+                },
+            )
+            d["required"] += ovn
+            d["locked"] += locked
+            # Only genuine shortfalls count, exactly as the gate sums `need`.
+            if ovn > locked:
+                d["need"] += ovn - locked
+            d["positions"] += 1
+        except Exception:  # noqa: BLE001
+            # One unreadable position must not blank the whole sweep — the
+            # rest of the book still deserves its warning.
+            logger.exception(
+                "carry_shortfall_position_failed",
+                extra={"position_id": str(getattr(pos, "id", None))},
+            )
+
+    if not per_user:
+        return {}
+
+    # Floating P&L wallet-wide — a loss running in MCX is just as real against
+    # an NFO carry. A failed read falls back to cash-only, which is stricter
+    # for a book in profit and identical for a flat one, never a free pass.
+    floating: dict = {}
+    try:
+        for _p in await Position.find(
+            {
+                "status": PositionStatus.OPEN.value,
+                "user_id": {"$in": list(per_user.keys())},
+            }
+        ).to_list():
+            floating[_p.user_id] = floating.get(_p.user_id, to_decimal(0)) + to_decimal(
+                _p.unrealized_pnl or 0
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("carry_shortfall_floating_read_failed")
+        floating = {}
+
+    out: dict = {}
+    for uid, d in per_user.items():
+        try:
+            wallet = await wallet_service.get_or_create(uid)
+        except Exception:  # noqa: BLE001
+            logger.exception("carry_shortfall_wallet_failed", extra={"user_id": str(uid)})
+            continue
+        shortfall = group_carry_shortfall(
+            d["need"],
+            to_decimal(wallet.available_balance),
+            floating.get(uid, to_decimal(0)),
+            to_decimal(wallet.credit_limit),
+        )
+        out[uid] = {
+            "required": d["required"],
+            "need": d["need"],
+            "shortfall": shortfall,
+            "positions": d["positions"],
+        }
+    return out
+
+
+async def warn_carry_shortfalls(
+    segment_set: frozenset[str] | set[str],
+    *,
+    group_label: str,
+    deadline: str,
+) -> int:
+    """Tell everyone who would be short at this group's close, while they can
+    still act. Returns how many users were warned.
+
+    Quietly does nothing when nobody is short, which is the common case and
+    the point: a channel that fires daily whether or not anything is wrong
+    gets muted, and the same channel carries the warning that matters.
+
+    The deadline quoted is the GATE close, not the trading bell. On NSE those
+    are 16:00 and 15:30 — funds that land at 15:45 still count, and telling a
+    user the cutoff was 15:30 would cost them half an hour they actually had.
+    """
+    from app.models.notification import NotificationLevel, NotificationType
+    from app.services import notification_service
+    from app.utils.decimal_utils import format_inr
+
+    shortfalls = await carry_shortfall_by_user(segment_set)
+
+    items: list = []
+    for uid, d in shortfalls.items():
+        if d["shortfall"] <= 0:
+            continue
+        n = d["positions"]
+        items.append(
+            (
+                uid,
+                f"Add {format_inr(d['shortfall'])} before {deadline}",
+                f"{group_label} closes at {deadline}. Carrying your "
+                f"{n} open position{'' if n == 1 else 's'} overnight needs "
+                f"{format_inr(d['required'])} margin — "
+                f"{format_inr(d['shortfall'])} more than your account covers. "
+                f"Add funds or reduce positions before {deadline}, or the "
+                f"positions furthest in loss will be squared off automatically.",
+            )
+        )
+
+    if not items:
+        return 0
+
+    sent = await notification_service.send_many(
+        items,
+        type=NotificationType.MARGIN,
+        level=NotificationLevel.WARNING,
+        link="/positions",
+        data={"source": "carry_warning", "group": group_label},
+        tag=f"mp-carry-{group_label}",
+    )
+    logger.info(
+        "carry_shortfall_warned",
+        extra={"group": group_label, "users": sent, "deadline": deadline},
+    )
+    return sent
+
+
 async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> dict[str, int]:
     """At market close for a segment group, flip every open MIS position in
     that group to NRML. For each position we re-resolve the NRML margin
@@ -1622,11 +1927,9 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
     from app.models.audit_log import AuditAction
     from app.services import (
         audit_service,
-        netting_service,
         order_service,
         wallet_service,
     )
-    from app.services.market_data_service import is_usd_quoted_segment
 
     if not segment_set:
         return {"converted": 0, "force_closed": 0, "skipped": 0}
@@ -1735,24 +2038,10 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             # configured ₹15000/lot), so `delta` looks affordable and an
             # under-funded option position is NEVER force-closed at EOD —
             # it rolls into NRML uncovered. Mirrors the positions endpoint.
-            _osym = (pos.instrument.symbol or "").upper()
-            _otype = (
-                ("CE" if _osym.endswith("CE") else "PE" if _osym.endswith("PE") else None)
-                if len(_osym) >= 3 and _osym[-3].isdigit()
-                else None
-            )
-            resolved = await netting_service.get_effective_settings(
-                pos.user_id,
-                pos.instrument.segment,
-                action="BUY" if pos.quantity >= 0 else "SELL",
-                option_type=_otype,
-                product_type="NRML",
-                symbol=pos.instrument.symbol,
-            )
+            s = await overnight_settings_for(pos)
         except Exception:  # noqa: BLE001
             skipped += 1
             continue
-        s = resolved.get("settings") or {}
 
         # Hard close-out path: admin disabled overnight carrying for this
         # segment (`allowOvernight=false`). Nothing carries past close —
@@ -1824,32 +2113,7 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
         # explicit overnight fields gives the rollover the right
         # requirement so a wallet that can't cover the carry actually
         # triggers the force-squareoff branch below.
-        cur_avg = to_decimal(pos.avg_price)
-        cur_qty_abs = to_decimal(abs(pos.quantity))
-        notional = cur_avg * cur_qty_abs
-
-        ovn_fixed_per_lot = to_decimal(s.get("overnight_fixed_margin_per_lot") or 0)
-        if (s.get("margin_calc_mode") == "fixed") and ovn_fixed_per_lot > 0:
-            lot_size = max(1, int(pos.instrument.lot_size or 1))
-            lots = cur_qty_abs / to_decimal(lot_size)
-            new_margin = ovn_fixed_per_lot * lots
-        else:
-            ovn_margin_pct = to_decimal(s.get("overnight_margin_percentage") or 100.0) / to_decimal(100)
-            ovn_leverage = to_decimal(s.get("overnight_leverage") or 1.0) or to_decimal(1)
-            new_margin = notional * ovn_margin_pct / ovn_leverage
-
-        # USD-quoted instruments lock margin in INR; same conversion as
-        # order_validator.validate. Skipped for fixed-per-lot (already INR).
-        if (
-            is_usd_quoted_segment(pos.segment_type)
-            or is_usd_quoted_segment(pos.instrument.segment)
-        ):
-            if not ((s.get("margin_calc_mode") == "fixed") and ovn_fixed_per_lot > 0):
-                from app.services.market_data_service import get_usd_inr_rate
-
-                new_margin = new_margin * to_decimal(get_usd_inr_rate())
-
-        new_margin = quantize_money(new_margin)
+        new_margin = overnight_margin_for(pos, s)
         old_margin = to_decimal(pos.margin_used)
         delta = new_margin - old_margin
 
@@ -2147,6 +2411,107 @@ async def settle_expiring_today(segment_group: frozenset[str] | set[str]) -> dic
     return {"settled": settled, "instruments": len(expiring)}
 
 
+# Per-(group, lead) bookkeeping so each warning fires at most once a day,
+# mirroring `_last_rollover_day`. Keyed "GROUP:LEAD" — two lead times are two
+# independent pings, and the later one must not be suppressed by the earlier.
+# Bounded by (groups x configured leads), and each day overwrites the same
+# keys, so it never needs pruning.
+#
+# ponytail: in-memory, like `_last_rollover_day` beside it. The loop is
+# leader-gated, so only one worker keeps this — but leadership moving mid-
+# window (a deploy, or the leader dying between 15:30 and 16:00) hands a fresh
+# worker an empty dict and the warning goes out twice. Cost is one duplicate
+# notification, not a money error, which is why it is not worth a round trip
+# per tick. If it starts happening, claim each mark with a day-scoped
+# `SET key NX EX 86400` on the Redis that already runs the leader election.
+_last_warn_day: dict[str, str] = {}
+
+
+async def _warn_before_close(
+    group_name: str,
+    group_set: frozenset[str] | set[str],
+    close_t: Any,
+    now: Any,
+    day_key: str,
+    exchange: Any,
+) -> None:
+    """Fire this group's configured pre-close warnings, if one is due.
+
+    Lead times are read from the `market_sessions` row each time rather than
+    cached: they are read once a minute by one leader, and an operator who
+    changes them wants the change to apply today, not after a restart.
+
+    A group with no row falls back to `DEFAULT_WARN_LEAD_MINUTES` rather than
+    to silence, so the warning works on a fresh database. Clearing the field
+    to an empty list is the off switch, and it is a different state from never
+    having configured the group.
+    """
+    from datetime import timedelta as _timedelta
+
+    from app.models.market_session import (
+        DEFAULT_WARN_LEAD_MINUTES,
+        MarketSession as _MS,
+    )
+    from app.utils.time_utils import session_group_for_segment
+
+    session_group = session_group_for_segment(next(iter(group_set)))
+    if session_group is None:
+        return
+    row = await _MS.find_one(_MS.group == session_group)
+    raw = row.warn_lead_minutes if row else DEFAULT_WARN_LEAD_MINUTES
+    # An empty list is the off switch: it simply yields no due marks below.
+    leads = {int(m) for m in (raw or [])}
+
+    close_dt = now.replace(
+        hour=close_t.hour, minute=close_t.minute, second=0, microsecond=0
+    )
+    # Open at the mark, closed at the bell. The loop wakes once a minute and
+    # drifts, so a window narrowed to the exact minute would be stepped over
+    # and the warning silently never sent; and a message saying there is still
+    # time, delivered as the gate runs, is worse than none.
+    due = [
+        lead
+        for lead in leads
+        if _last_warn_day.get(f"{group_name}:{lead}") != day_key
+        and close_dt - _timedelta(minutes=lead) <= now < close_dt
+    ]
+    if not due:
+        return
+
+    # Every due mark is stamped, but only ONE message goes out. If the loop
+    # was down across both the 30 and the 10, firing them back to back would
+    # deliver two identical messages a second apart.
+    for lead in due:
+        _last_warn_day[f"{group_name}:{lead}"] = day_key
+
+    # Full-day holiday → the gate will not run, so there is nothing to warn
+    # about. FAIL-OPEN like the rollover's own check: if the lookup breaks we
+    # warn anyway, because a missed warning on a trading day costs a user a
+    # force-close and a spurious one on a holiday costs a notification.
+    try:
+        from app.models.holiday import TradingHoliday as _TH
+
+        if exchange is not None and await _TH.find_one(
+            _TH.holiday_date == now.date(),
+            _TH.exchange == exchange,
+            _TH.is_full_day == True,  # noqa: E712
+        ):
+            return
+    except Exception:  # noqa: BLE001
+        pass
+
+    await warn_carry_shortfalls(
+        group_set,
+        group_label=_GROUP_LABEL.get(group_name, group_name),
+        deadline=f"{close_t.hour:02d}:{close_t.minute:02d}",
+    )
+
+
+# What a user is told the group is called. Their screens say NSE / BSE, not
+# the internal segment-set name.
+_GROUP_LABEL = {"INDIAN_EQUITY_FNO": "NSE/BSE", "MCX": "MCX"}
+
+
 async def intraday_to_carry_loop(interval_sec: float = 60.0) -> None:
     """Wake every minute; at each segment group's close minute (once per
     IST day), run `convert_intraday_to_carry` against that group.
@@ -2200,6 +2565,23 @@ async def intraday_to_carry_loop(interval_sec: float = 60.0) -> None:
                     close_t = market_close_time_for_segment(next(iter(group_set)), now)
                     if close_t is None:
                         continue
+
+                    # Heads-up BEFORE the gate, while a user can still fund or
+                    # reduce. Never allowed to break the rollover that follows.
+                    try:
+                        await _warn_before_close(
+                            group_name,
+                            group_set,
+                            close_t,
+                            now,
+                            day_key,
+                            _group_exchange.get(group_name),
+                        )
+                    except Exception:  # noqa: BLE001
+                        _log.exception(
+                            "carry_warning_failed", extra={"group": group_name}
+                        )
+
                     # Fire the minute after close — gives any straggler
                     # orders one tick to settle before we sweep. Clamped at
                     # :59, because a close at :59 would otherwise build the

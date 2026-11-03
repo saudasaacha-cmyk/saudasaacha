@@ -382,3 +382,88 @@ async def notify_payment_details_changed(actor, what: str) -> int:
         len(recipients),
     )
     return len(recipients)
+
+
+# ── Per-user fan-out (each recipient gets their OWN message) ─────────
+async def send_many(
+    items: list[tuple[PydanticObjectId, str, str]],
+    *,
+    type: NotificationType,
+    level: NotificationLevel = NotificationLevel.INFO,
+    link: str | None = None,
+    data: dict[str, Any] | None = None,
+    tag: str | None = None,
+) -> int:
+    """Deliver one notification per `(user_id, title, message)` across all
+    three channels, and return how many rows were persisted.
+
+    Unlike the admin broadcast this does NOT share one body between everybody
+    — a margin warning that does not name the recipient's own number is not a
+    warning. So the rows are built per user and the live pushes are addressed
+    individually.
+
+    The DB rows are the source of truth and are written FIRST; the socket and
+    Web Push are best-effort wake-ups on top. A user whose socket is closed
+    and whose browser never registered for push still finds the notification
+    waiting on their next fetch, which is the whole reason the row exists.
+    Push matters here more than it does for a broadcast: the thing being
+    warned about happens whether or not the app is open.
+
+    One timestamp for the whole send rather than `created_at`'s per-row
+    default, so the admin "sent" history groups it as a single event instead
+    of splitting it across a second boundary.
+    """
+    if not items:
+        return 0
+
+    sent_at = now_utc()
+    rows = [
+        Notification(
+            user_id=uid,
+            created_at=sent_at,
+            type=type,
+            level=level,
+            title=title,
+            message=message,
+            data={**(data or {}), **({"link": link} if link else {})},
+        )
+        for uid, title, message in items
+    ]
+    await Notification.insert_many(rows)
+
+    try:
+        await publish_batch(
+            [
+                (
+                    f"user:{uid}:notification",
+                    {
+                        "type": "notification",
+                        "payload": {
+                            "title": title,
+                            "message": message,
+                            "link": link,
+                            "level": level.value,
+                        },
+                    },
+                )
+                for uid, title, message in items
+            ]
+        )
+    except Exception:
+        logger.exception("send_many_ws_push_failed count=%s", len(items))
+
+    try:
+        from app.services import push_service
+
+        for uid, title, message in items:
+            await push_service.send_to_users(
+                [uid],
+                title=title,
+                body=message,
+                url=link or "/notifications",
+                tag=tag or "mp-alert",
+            )
+    except Exception:
+        logger.exception("send_many_webpush_failed count=%s", len(items))
+
+    return len(rows)

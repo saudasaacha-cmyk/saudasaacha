@@ -13,7 +13,11 @@ from app.core.dependencies import CurrentAdmin
 from app.models._base import Exchange
 from app.models.audit_log import AuditAction, AuditLog
 from app.models.holiday import TradingHoliday
-from app.models.market_session import SESSION_GROUPS, MarketSession
+from app.models.market_session import (
+    DEFAULT_WARN_LEAD_MINUTES,
+    SESSION_GROUPS,
+    MarketSession,
+)
 from app.models.platform_setting import PlatformSetting, SettingType
 from app.models.user import UserRole
 from app.schemas.admin.common import UpdatePlatformSettingRequest
@@ -775,6 +779,58 @@ async def eod_reset(admin: CurrentAdmin):
 # cannot reach Mongo keeps the behaviour the platform shipped with.
 
 
+def _parse_lead_minutes(raw: Any) -> list[int]:
+    """Minutes-before-close, from either a list or a "30, 10" string.
+
+    Accepts the string because the field is one text input; parsing it here
+    rather than in the browser means a typo comes back as a message instead of
+    silently becoming an empty list, which is the OFF state and would turn the
+    warning off without saying so.
+
+    Bounded at 240 so a stray 600 cannot schedule a "market closes soon"
+    notification for breakfast, and at 4 entries so nobody can pager a user
+    ten times before one bell.
+    """
+    if raw is None:
+        return []
+    items = (
+        str(raw).replace(",", " ").split() if isinstance(raw, str) else list(raw)
+    )
+    out: set[int] = set()
+    for it in items:
+        try:
+            n = int(str(it).strip())
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail=f"warn_lead_minutes: {it!r} is not a number"
+            ) from None
+        if not (1 <= n <= 240):
+            raise HTTPException(
+                status_code=400,
+                detail=f"warn_lead_minutes: {n} must be between 1 and 240",
+            )
+        out.add(n)
+    if len(out) > 4:
+        raise HTTPException(
+            status_code=400, detail="warn_lead_minutes: at most 4 values"
+        )
+    return sorted(out, reverse=True)
+
+
+def _lead_minutes_in_force(row) -> list[int]:
+    """What the loop will actually use for this group.
+
+    Three states, and the screen has to tell them apart: no row at all falls
+    back to the shipped default, a saved list is used as-is, and an empty
+    saved list is the operator switching the warning OFF. Reporting the
+    default for that last one would show a schedule next to a warning that
+    never fires.
+    """
+    if row is None:
+        return list(DEFAULT_WARN_LEAD_MINUTES)
+    return list(row.warn_lead_minutes or [])
+
+
 def _session_payload(group: str, row, at) -> dict[str, Any]:
     """What the form needs: the stored override AND the value actually in
     force, so the operator can see what a blank field resolves to instead of
@@ -792,6 +848,10 @@ def _session_payload(group: str, row, at) -> dict[str, Any]:
         "entry_close": getattr(row, "entry_close", None),
         "gate_close": getattr(row, "gate_close", None),
         "auto_dst": bool(getattr(row, "auto_dst", True)),
+        # Minutes before the GATE close that a shortfall warning goes out.
+        # Reported even when no row exists, so the screen shows what is
+        # actually running rather than an empty field next to a live warning.
+        "warn_lead_minutes": _lead_minutes_in_force(row),
         # What is in force right now, overrides applied.
         "effective": {
             "open": _f(market_open_time_for_segment(probe)),
@@ -851,6 +911,7 @@ async def update_market_session(group: str, payload: dict, admin: CurrentAdmin):
             "entry_close": row.entry_close,
             "gate_close": row.gate_close,
             "auto_dst": row.auto_dst,
+            "warn_lead_minutes": list(row.warn_lead_minutes or []),
         }
     )
     if row is None:
@@ -859,6 +920,8 @@ async def update_market_session(group: str, payload: dict, admin: CurrentAdmin):
         setattr(row, k, v)
     if "auto_dst" in payload and group == "MCX":
         row.auto_dst = bool(payload["auto_dst"])
+    if "warn_lead_minutes" in payload:
+        row.warn_lead_minutes = _parse_lead_minutes(payload["warn_lead_minutes"])
     row.updated_at = now_utc()
     row.updated_by = admin.id
     await row.save()
@@ -883,6 +946,7 @@ async def update_market_session(group: str, payload: dict, admin: CurrentAdmin):
                 "entry_close": row.entry_close,
                 "gate_close": row.gate_close,
                 "auto_dst": row.auto_dst,
+                "warn_lead_minutes": list(row.warn_lead_minutes or []),
             },
             metadata={"group": group},
         )
