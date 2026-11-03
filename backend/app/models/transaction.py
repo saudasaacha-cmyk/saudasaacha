@@ -109,6 +109,11 @@ class PaymentMode(StrEnum):
 class DepositRequest(TimestampMixin):
     user_id: PydanticObjectId
     amount: Money
+    # What the USER asked for, kept only when an admin approved a different
+    # figure. `amount` always means the money that actually moved, so every
+    # existing aggregation over it stays correct; this is the other half of
+    # the story, and None means the two were the same.
+    requested_amount: Money | None = None
     payment_mode: PaymentMode = PaymentMode.UPI
     utr_number: str | None = None
     screenshot_url: str | None = None
@@ -182,6 +187,11 @@ class BankSnapshot(BaseModel):
 class WithdrawalRequest(TimestampMixin):
     user_id: PydanticObjectId
     amount: Money
+    # What the USER asked for, kept only when an admin approved a different
+    # figure. `amount` always means the money that actually moved, so every
+    # existing aggregation over it stays correct; this is the other half of
+    # the story, and None means the two were the same.
+    requested_amount: Money | None = None
     bank: BankSnapshot
     remarks: str | None = None
     utr_number: str | None = None  # filled by admin after disbursal

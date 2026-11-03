@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -40,8 +42,13 @@ from app.schemas.common import APIResponse
 from app.services import wallet_service
 from app.services.audit_service import log_event
 from app.services.notification_service import notify_payment_details_changed
-from app.utils.decimal_utils import to_decimal
+from app.utils.decimal_utils import quantize_money, to_decimal, to_decimal128
 from app.utils.time_utils import now_utc
+
+# Used by the payment-details notifier below, which referenced it without it
+# ever being defined in this module — inside an `except`, so the NameError
+# would have replaced whatever error it was logging.
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["admin-payin-out"])
 
@@ -167,6 +174,12 @@ async def list_deposits(
                     "id": str(r.id),
                     "user_id": str(r.user_id),
                     "amount": str(r.amount),
+                    # Present only when an admin approved a different figure,
+                    # so the row can show both without every ordinary one
+                    # carrying a redundant second amount.
+                    "requested_amount": (
+                        str(r.requested_amount) if r.requested_amount is not None else None
+                    ),
                     "payment_mode": r.payment_mode.value,
                     "utr_number": r.utr_number,
                     # Crypto details so the admin sees the user's on-chain tx id
@@ -250,6 +263,98 @@ async def gateway_summary(
     )
 
 
+def _apply_amount_override(row: Any, amount: Decimal, original: Decimal | None) -> dict:
+    """Stamp an overridden amount onto the in-memory row and return the fields
+    that have to go into the claim with it.
+
+    One function for both halves on purpose. The row has to be updated so the
+    audit entry and the response describe what was stored, and the same two
+    fields have to ride inside the compare-and-set so the record can never
+    show one figure while the wallet moved another. Doing those separately is
+    two chances to do only one.
+
+    Empty dict when nothing was overridden, so an ordinary approval writes
+    exactly the fields it always wrote.
+    """
+    if original is None:
+        return {}
+    row.amount = to_decimal128(amount)
+    row.requested_amount = to_decimal128(original)
+    return {"amount": row.amount, "requested_amount": row.requested_amount}
+
+
+def _resolve_approved_amount(raw: Any, requested: Decimal) -> tuple[Decimal, Decimal | None]:
+    """`(what to move, what to preserve)` for an approval.
+
+    Returns `(requested, None)` whenever the admin changed nothing — blank,
+    absent, or the same figure typed back. A row only grows a
+    `requested_amount` when the two genuinely differ, so an untouched approval
+    reads exactly as it did before this field existed and nothing downstream
+    has to learn a new shape for the ordinary case.
+
+    The ceiling is a typo guard, not a policy: an admin who may approve a
+    deposit may approve a large one, but an extra keystroke turning 50,000
+    into 50,000,000 should not be a silent credit. Real limits live in the
+    deposit / withdrawal rules and, for a withdrawal, in the balance check
+    that this figure then has to clear.
+    """
+    if raw is None or str(raw).strip() == "":
+        return requested, None
+    try:
+        amount = quantize_money(to_decimal(str(raw).strip()))
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail=f"Approved amount {raw!r} is not a number"
+        ) from None
+    if amount <= 0:
+        raise HTTPException(
+            status_code=400, detail="Approved amount must be more than zero"
+        )
+    if amount > Decimal("1000000000"):
+        raise HTTPException(
+            status_code=400, detail="Approved amount looks like a typo (over 100 crore)"
+        )
+    if amount == requested:
+        return requested, None
+    return amount, requested
+
+
+async def _tell_user_amount_changed(
+    user_id, *, kind: str, requested: Decimal, approved: Decimal, ref: str
+) -> None:
+    """The user asked for one figure and a different one moved. They are owed
+    that in writing, not just a wallet balance that does not match what they
+    typed. Best-effort — never allowed to fail an approval that already
+    moved money."""
+    try:
+        from app.models.notification import NotificationLevel, NotificationType
+        from app.services import notification_service
+        from app.utils.decimal_utils import format_inr
+
+        direction = "more than" if approved > requested else "less than"
+        await notification_service.send_many(
+            [
+                (
+                    user_id,
+                    f"{kind} approved for {format_inr(approved)}",
+                    f"You requested {format_inr(requested)}. Your {kind.lower()} was "
+                    f"approved for {format_inr(approved)} — {format_inr(abs(approved - requested))} "
+                    f"{direction} you asked for. Reference {ref}. "
+                    f"Contact support if this looks wrong.",
+                )
+            ],
+            type=NotificationType.DEPOSIT
+            if kind == "Deposit"
+            else NotificationType.WITHDRAWAL,
+            level=NotificationLevel.WARNING,
+            link="/wallet",
+            data={"source": "amount_changed", "kind": kind},
+            tag="mp-amount-changed",
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("amount_change_notify_failed user=%s ref=%s", user_id, ref)
+
+
 @router.post("/deposits/{deposit_id}/approve", response_model=APIResponse[dict])
 async def approve_deposit(
     deposit_id: str,
@@ -273,25 +378,30 @@ async def approve_deposit(
     # twice. The fix: only the request that WINS this compare-and-set
     # (matches a still-PENDING row) proceeds to credit — the loser
     # matches zero docs and bails out as "Already processed".
+    # An admin may credit a figure other than the one the user typed. It goes
+    # into the SAME compare-and-set as the status, so the row can never record
+    # one amount while the wallet is credited another — the claim is the only
+    # moment at which this request is the one that wins.
+    amount, original = _resolve_approved_amount(
+        payload.approved_amount, to_decimal(r.amount)
+    )
     processed_at = now_utc()
+    claim_fields: dict[str, Any] = {
+        "status": DepositStatus.APPROVED.value,
+        "processed_by": admin.id,
+        "processed_at": processed_at,
+        "admin_remark": payload.admin_remark,
+        "updated_at": processed_at,
+    }
+    claim_fields.update(_apply_amount_override(r, amount, original))
     claimed = await DepositRequest.get_motor_collection().find_one_and_update(
         {"_id": r.id, "status": DepositStatus.PENDING.value},
-        {
-            "$set": {
-                "status": DepositStatus.APPROVED.value,
-                "processed_by": admin.id,
-                "processed_at": processed_at,
-                "admin_remark": payload.admin_remark,
-                "updated_at": processed_at,
-            }
-        },
+        {"$set": claim_fields},
     )
     if claimed is None:
         # Lost the race — another request (the first click) already
         # claimed and credited this deposit.
         raise HTTPException(status_code=400, detail="Already processed")
-
-    amount = to_decimal(r.amount)
     try:
         await wallet_service.adjust(
             r.user_id,
@@ -372,8 +482,22 @@ async def approve_deposit(
         entity_id=r.id,
         actor_id=admin.id,
         target_user_id=r.user_id,
-        metadata={"amount": str(amount)},
+        metadata={
+            "amount": str(amount),
+            # Only present when the admin overrode it, so an ordinary approval
+            # audits exactly as it always did and a changed one is impossible
+            # to read as ordinary.
+            **({"requested_amount": str(original)} if original is not None else {}),
+        },
     )
+    if original is not None:
+        await _tell_user_amount_changed(
+            r.user_id,
+            kind="Deposit",
+            requested=original,
+            approved=amount,
+            ref=r.utr_number or str(r.id),
+        )
     # Notify every other admin dashboard so a colleague watching the same
     # Deposits inbox sees the row move from PENDING → APPROVED without F5.
     try:
@@ -696,6 +820,9 @@ async def list_withdrawals(
                     "id": str(r.id),
                     "user_id": str(r.user_id),
                     "amount": str(r.amount),
+                    "requested_amount": (
+                        str(r.requested_amount) if r.requested_amount is not None else None
+                    ),
                     "bank": r.bank.model_dump(),
                     "status": r.status.value,
                     "remarks": r.remarks,
@@ -748,7 +875,11 @@ async def approve_withdrawal(
     # ── Balance pre-check ────────────────────────────────────────
     from app.models.wallet import Wallet
 
-    amount = to_decimal(r.amount)
+    # Resolve the override BEFORE the balance check — paying out more than the
+    # user asked for still has to be money they actually have.
+    amount, original = _resolve_approved_amount(
+        payload.approved_amount, to_decimal(r.amount)
+    )
     wallet = await Wallet.find_one(Wallet.user_id == r.user_id)
     if wallet is None:
         raise HTTPException(status_code=400, detail="User wallet not found")
@@ -769,17 +900,17 @@ async def approve_withdrawal(
     # code debited the wallet twice. Only the request that wins this
     # compare-and-set proceeds to debit; the loser bails out.
     processed_at = now_utc()
+    claim_fields: dict[str, Any] = {
+        "status": WithdrawalStatus.COMPLETED.value,
+        "utr_number": payload.utr_number,
+        "processed_by": admin.id,
+        "processed_at": processed_at,
+        "updated_at": processed_at,
+    }
+    claim_fields.update(_apply_amount_override(r, amount, original))
     claimed = await WithdrawalRequest.get_motor_collection().find_one_and_update(
         {"_id": r.id, "status": WithdrawalStatus.PENDING.value},
-        {
-            "$set": {
-                "status": WithdrawalStatus.COMPLETED.value,
-                "utr_number": payload.utr_number,
-                "processed_by": admin.id,
-                "processed_at": processed_at,
-                "updated_at": processed_at,
-            }
-        },
+        {"$set": claim_fields},
     )
     if claimed is None:
         raise HTTPException(status_code=400, detail="Already processed")
@@ -824,7 +955,19 @@ async def approve_withdrawal(
         entity_id=r.id,
         actor_id=admin.id,
         target_user_id=r.user_id,
+        metadata={
+            "amount": str(amount),
+            **({"requested_amount": str(original)} if original is not None else {}),
+        },
     )
+    if original is not None:
+        await _tell_user_amount_changed(
+            r.user_id,
+            kind="Withdrawal",
+            requested=original,
+            approved=amount,
+            ref=payload.utr_number or str(r.id),
+        )
     try:
         from app.services.admin_events import publish_admin_event
 

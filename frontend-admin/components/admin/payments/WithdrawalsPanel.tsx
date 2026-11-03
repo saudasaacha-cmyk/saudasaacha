@@ -8,6 +8,7 @@ import { Check, Copy, X } from "lucide-react";
 import { PayinOutAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { StatusPill } from "@/components/common/StatusPill";
 import {
@@ -103,7 +104,11 @@ export function WithdrawalsPanel() {
   }, [searchInput]);
   const [page, setPage] = useState(1);
   const pageSize = 15;
-  const [approving, setApproving] = useState<{ id: string; utr: string } | null>(null);
+  // `asked` is what the user requested; `amount` is what will actually be
+  // paid out and starts equal to it. They diverge only if the admin types.
+  const [approving, setApproving] = useState<
+    { id: string; utr: string; asked: string; amount: string } | null
+  >(null);
   const [rejecting, setRejecting] = useState<{ id: string; reason: string } | null>(null);
   // Ledger drawer target — pops the LedgerSheet from the per-row L
   // button so admin can review wallet timeline before approving.
@@ -129,7 +134,11 @@ export function WithdrawalsPanel() {
   async function approve() {
     if (!approving) return;
     try {
-      await PayinOutAPI.approveWithdrawal(approving.id, { utr_number: approving.utr || undefined });
+      const changed = approving.amount.trim() !== approving.asked.trim();
+      await PayinOutAPI.approveWithdrawal(approving.id, {
+        utr_number: approving.utr || undefined,
+        ...(changed ? { approved_amount: approving.amount.trim() } : {}),
+      });
       toast.success("Approved + wallet debited");
       setApproving(null);
       qc.invalidateQueries({ queryKey: ["admin", "withdrawals"] });
@@ -168,7 +177,25 @@ export function WithdrawalsPanel() {
       ),
     },
     { key: "owner", header: "Owner", render: (r) => <OwnerBadge row={r} me={me} /> },
-    { key: "amount", header: "Amount", align: "right", render: (r) => formatINR(r.amount) },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      render: (r) =>
+        r.requested_amount ? (
+          <div className="flex flex-col items-end leading-tight">
+            <span>{formatINR(r.amount)}</span>
+            <span
+              className="text-[10px] text-amber-600 line-through dark:text-amber-400"
+              title={`User requested ${formatINR(r.requested_amount)}; an admin approved ${formatINR(r.amount)}.`}
+            >
+              asked {formatINR(r.requested_amount)}
+            </span>
+          </div>
+        ) : (
+          formatINR(r.amount)
+        ),
+    },
     // ── Destination columns ─────────────────────────────────────
     // The single "Destination" cell used to cram holder · bank · IFSC
     // · UPI together, which was fine to read but painful to act on —
@@ -304,7 +331,7 @@ export function WithdrawalsPanel() {
               aria-label="Approve"
               disabled={!canMutate}
               title={canMutate ? undefined : "View-only access"}
-              onClick={() => canMutate && setApproving({ id: r.id, utr: "" })}
+              onClick={() => canMutate && setApproving({ id: r.id, utr: "", asked: String(r.amount ?? ""), amount: String(r.amount ?? "") })}
             >
               <Check className="size-4 text-primary" />
             </Button>
@@ -376,7 +403,7 @@ export function WithdrawalsPanel() {
             r={r}
             me={me}
             canMutate={canMutate}
-            onApprove={() => setApproving({ id: r.id, utr: "" })}
+            onApprove={() => setApproving({ id: r.id, utr: "", asked: String(r.amount ?? ""), amount: String(r.amount ?? "") })}
             onReject={() => setRejecting({ id: r.id, reason: "" })}
             onProofDone={() => qc.invalidateQueries({ queryKey: ["admin", "withdrawals"] })}
           />
@@ -428,16 +455,40 @@ export function WithdrawalsPanel() {
           <DialogHeader>
             <DialogTitle>Approve withdrawal</DialogTitle>
           </DialogHeader>
-          <Input
-            placeholder="UTR / payment reference (optional)"
-            value={approving?.utr ?? ""}
-            onChange={(e) => setApproving((r) => (r ? { ...r, utr: e.target.value } : r))}
-          />
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="wd-amount">Amount to pay out</Label>
+              <Input
+                id="wd-amount"
+                inputMode="decimal"
+                value={approving?.amount ?? ""}
+                onChange={(e) =>
+                  setApproving((r) => (r ? { ...r, amount: e.target.value } : r))
+                }
+                className="font-tabular"
+              />
+              <p className="text-xs text-muted-foreground">
+                {approving && approving.amount.trim() !== approving.asked.trim()
+                  ? `User requested ${formatINR(approving.asked)} — they will be told it was approved for a different amount.`
+                  : "Change this to pay out something other than what was requested. It still has to clear the user's available balance."}
+              </p>
+            </div>
+            <Input
+              placeholder="UTR / payment reference (optional)"
+              value={approving?.utr ?? ""}
+              onChange={(e) => setApproving((r) => (r ? { ...r, utr: e.target.value } : r))}
+            />
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproving(null)}>
               Cancel
             </Button>
-            <Button onClick={approve}>Approve & debit</Button>
+            <Button
+              disabled={!approving || !(Number(approving.amount) > 0)}
+              onClick={approve}
+            >
+              Approve & debit
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

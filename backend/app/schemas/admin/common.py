@@ -48,6 +48,10 @@ class UpsertUserOverrideRequest(BaseModel):
 
 class ApproveDepositRequest(BaseModel):
     admin_remark: str | None = None
+    # Credit something other than what the user typed — the UTR came in for a
+    # different figure, usually. Omitted or blank keeps the requested amount,
+    # so every existing caller behaves exactly as before.
+    approved_amount: str | float | None = None
 
 
 class RejectDepositRequest(BaseModel):
@@ -57,6 +61,9 @@ class RejectDepositRequest(BaseModel):
 class ApproveWithdrawalRequest(BaseModel):
     utr_number: str | None = None
     admin_remark: str | None = None
+    # Pay out something other than what the user asked for. Still has to clear
+    # the same available-balance check, against the NEW figure.
+    approved_amount: str | float | None = None
 
 
 class RejectWithdrawalRequest(BaseModel):

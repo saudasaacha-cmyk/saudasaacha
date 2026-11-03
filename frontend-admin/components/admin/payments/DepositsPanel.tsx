@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Check, Image as ImageIcon, X } from "lucide-react";
+import { Check, Image as ImageIcon, Pencil, X } from "lucide-react";
 import { PayinOutAPI } from "@/lib/api";
 import { API_URL } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,12 @@ export function DepositsPanel() {
   const pageSize = 15;
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<{ id: string; remark: string } | null>(null);
+  // Approving a figure other than the one the user typed. Separate from the
+  // one-click approve on purpose: the common case stays one click, and
+  // changing someone's money is a thing you have to mean to do.
+  const [editing, setEditing] = useState<
+    { id: string; asked: string; amount: string; remark: string } | null
+  >(null);
   // Per-row in-flight guard. A slow network made admins double-click
   // Approve before the first request resolved, which double-credited the
   // user's wallet. removeLocally() only hides the row on the PENDING
@@ -106,19 +112,27 @@ export function DepositsPanel() {
     });
   }
 
-  async function approve(id: string) {
+  async function approve(
+    id: string,
+    body?: { admin_remark?: string; approved_amount?: string },
+  ) {
     if (busy.has(id)) return; // second click while first is in flight
     markBusy(id);
     if (status === "PENDING") removeLocally(id);
     try {
-      await PayinOutAPI.approveDeposit(id);
-      toast.success("Approved + wallet credited");
+      await PayinOutAPI.approveDeposit(id, body);
+      toast.success(
+        body?.approved_amount
+          ? `Approved for ₹${body.approved_amount} + wallet credited`
+          : "Approved + wallet credited",
+      );
       qc.invalidateQueries({ queryKey: ["admin", "deposits"] });
     } catch (e: any) {
       toast.error(e.message);
       qc.invalidateQueries({ queryKey: ["admin", "deposits"] });
     } finally {
       clearBusy(id);
+      setEditing(null);
     }
   }
 
@@ -171,16 +185,30 @@ export function DepositsPanel() {
         // chip without the "will be recovered" tooltip that promised
         // auto-deduction the backend no longer does.
         const settlement = Number(r.user_settlement_outstanding ?? 0);
-        if (settlement <= 0) return formatINR(r.amount);
+        // An approved-for figure that differs from the request is the single
+        // most important thing on this row — it must never be the number
+        // alone, or a later reader cannot tell it was changed.
+        const asked = r.requested_amount;
+        if (settlement <= 0 && !asked) return formatINR(r.amount);
         return (
           <div className="flex flex-col items-end leading-tight">
             <span>{formatINR(r.amount)}</span>
-            <span
-              className="text-[10px] text-amber-600 dark:text-amber-400"
-              title={`User has ₹${settlement.toFixed(2)} settlement on record (informational — not auto-recovered).`}
-            >
-              ⓘ ₹{settlement.toFixed(0)} settlement
-            </span>
+            {asked && (
+              <span
+                className="text-[10px] text-amber-600 line-through dark:text-amber-400"
+                title={`User requested ${formatINR(asked)}; an admin approved ${formatINR(r.amount)}.`}
+              >
+                asked {formatINR(asked)}
+              </span>
+            )}
+            {settlement > 0 && (
+              <span
+                className="text-[10px] text-amber-600 dark:text-amber-400"
+                title={`User has ₹${settlement.toFixed(2)} settlement on record (informational — not auto-recovered).`}
+              >
+                ⓘ ₹{settlement.toFixed(0)} settlement
+              </span>
+            )}
           </div>
         );
       },
@@ -257,6 +285,24 @@ export function DepositsPanel() {
               onClick={() => canMutate && approve(r.id)}
             >
               <Check className="size-4 text-primary" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Approve a different amount"
+              title={canMutate ? "Approve a different amount" : "View-only access"}
+              disabled={!canMutate || busy.has(r.id)}
+              onClick={() =>
+                canMutate &&
+                setEditing({
+                  id: r.id,
+                  asked: String(r.amount ?? ""),
+                  amount: String(r.amount ?? ""),
+                  remark: "",
+                })
+              }
+            >
+              <Pencil className="size-4 text-amber-600" />
             </Button>
             <Button
               variant="ghost"
@@ -388,6 +434,68 @@ export function DepositsPanel() {
               className="max-h-[70vh] w-full rounded-md object-contain"
             />
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Approve a different amount</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              The user requested{" "}
+              <span className="font-semibold text-foreground">
+                {formatINR(editing?.asked ?? 0)}
+              </span>
+              . Whatever you enter here is what gets credited, and the user is
+              told their request was approved for a different figure.
+            </p>
+            <Input
+              autoFocus
+              inputMode="decimal"
+              value={editing?.amount ?? ""}
+              onChange={(e) =>
+                setEditing((p) => (p ? { ...p, amount: e.target.value } : p))
+              }
+              placeholder="Amount to credit"
+              className="font-tabular"
+            />
+            <Input
+              value={editing?.remark ?? ""}
+              onChange={(e) =>
+                setEditing((p) => (p ? { ...p, remark: e.target.value } : p))
+              }
+              placeholder="Remark (why the amount differs) — optional"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              disabled={
+                !editing ||
+                busy.has(editing.id) ||
+                !(Number(editing.amount) > 0)
+              }
+              onClick={() => {
+                if (!editing) return;
+                const amt = editing.amount.trim();
+                if (
+                  !window.confirm(
+                    `Credit ${formatINR(amt)} instead of the ${formatINR(
+                      editing.asked,
+                    )} requested? This cannot be undone.`,
+                  )
+                )
+                  return;
+                approve(editing.id, {
+                  approved_amount: amt,
+                  admin_remark: editing.remark.trim() || undefined,
+                });
+              }}
+            >
+              Approve for this amount
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -607,6 +607,13 @@ async def my_deposits(user: CurrentUser):
             {
                 "id": str(r.id),
                 "amount": str(r.amount),
+                # What they originally asked for, when an admin approved a
+                # different figure. The user is the one person who definitely
+                # noticed the number changed, so the history has to say so
+                # rather than quietly showing the new one as if it were theirs.
+                "requested_amount": (
+                    str(r.requested_amount) if r.requested_amount is not None else None
+                ),
                 "payment_mode": r.payment_mode.value,
                 "utr_number": r.utr_number,
                 "screenshot_url": r.screenshot_url,
@@ -938,6 +945,13 @@ async def my_withdrawals(user: CurrentUser):
             {
                 "id": str(r.id),
                 "amount": str(r.amount),
+                # What they originally asked for, when an admin approved a
+                # different figure. The user is the one person who definitely
+                # noticed the number changed, so the history has to say so
+                # rather than quietly showing the new one as if it were theirs.
+                "requested_amount": (
+                    str(r.requested_amount) if r.requested_amount is not None else None
+                ),
                 "bank": r.bank.model_dump(),
                 "status": r.status.value,
                 "remarks": r.remarks,

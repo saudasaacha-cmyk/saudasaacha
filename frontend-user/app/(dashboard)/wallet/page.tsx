@@ -1547,6 +1547,15 @@ function RequestList({
                   <StatusIcon className={cn("size-4", tone)} />
                   <div>
                     <div className="font-tabular font-semibold">{formatINR(r.amount)}</div>
+                    {/* An admin approved a figure other than the one this user
+                        typed. They are the one person who definitely noticed,
+                        so the row says so instead of quietly showing the new
+                        number as if it had always been theirs. */}
+                    {r.requested_amount ? (
+                      <div className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                        you asked for {formatINR(r.requested_amount)}
+                      </div>
+                    ) : null}
                     <div className="text-[10px] text-muted-foreground">
                       {new Date(r.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
                     </div>

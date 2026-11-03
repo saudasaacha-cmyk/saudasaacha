@@ -569,8 +569,12 @@ export const PayinOutAPI = {
     unwrap<{ enabled: boolean; today_total: string; today_count: number; week_total: string; week_count: number }>(
       api.get("/admin/gateway-summary"),
     ),
-  approveDeposit: (id: string, admin_remark?: string) =>
-    unwrap<any>(api.post(`/admin/deposits/${id}/approve`, { admin_remark })),
+  /** `approved_amount` credits a figure other than the one the user typed;
+   *  omit it to credit what was requested. */
+  approveDeposit: (
+    id: string,
+    body?: { admin_remark?: string; approved_amount?: string },
+  ) => unwrap<any>(api.post(`/admin/deposits/${id}/approve`, body ?? {})),
   rejectDeposit: (id: string, admin_remark: string) =>
     unwrap<any>(api.post(`/admin/deposits/${id}/reject`, { admin_remark })),
   // Settlement requests — queued by wallet_service when an auto-OFF
