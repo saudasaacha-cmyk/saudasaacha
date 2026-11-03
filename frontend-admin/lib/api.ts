@@ -763,8 +763,15 @@ export const NotificationsAPI = {
   // user in the actor's own pool at once.
   broadcastRecipients: () =>
     unwrap<{ count: number }>(api.get("/admin/notifications/broadcast/recipients")),
-  broadcast: (body: { title: string; message: string; link?: string; level?: string }) =>
-    unwrap<{ count: number }>(api.post("/admin/notifications/broadcast", body)),
+  /** Omit `user_ids` to reach the whole pool; a list means only those, and
+   *  the server intersects it with the pool again before sending. */
+  broadcast: (body: {
+    title: string;
+    message: string;
+    link?: string;
+    level?: string;
+    user_ids?: string[];
+  }) => unwrap<{ count: number }>(api.post("/admin/notifications/broadcast", body)),
   /**
    * History of what went out TO USERS, newest first — broadcasts an admin
    * typed plus the automatic ones (chart lines, payment details).

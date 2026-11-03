@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
+import { RecipientPicker, type Recipient } from "@/components/notifications/RecipientPicker";
 
 const LEVELS = [
   { k: "INFO", label: "Info", tone: "border-blue-500/40 text-blue-500" },
@@ -23,6 +24,9 @@ export default function SendNotificationPage() {
   const [message, setMessage] = useState("");
   const [link, setLink] = useState("");
   const [level, setLevel] = useState("INFO");
+  // `null` = the whole pool, which is what this page did before and what
+  // leaving `user_ids` out of the request still means to the server.
+  const [picked, setPicked] = useState<Recipient[] | null>(null);
 
   // How many users this actor's broadcast reaches (their own pool).
   const { data: rec } = useQuery({
@@ -38,6 +42,7 @@ export default function SendNotificationPage() {
         message: message.trim(),
         link: link.trim() || undefined,
         level,
+        ...(picked ? { user_ids: picked.map((r) => r.id) } : {}),
       }),
     onSuccess: (r) => {
       toast.success(`Sent to ${r.count} user${r.count === 1 ? "" : "s"}`);
@@ -45,19 +50,26 @@ export default function SendNotificationPage() {
       setMessage("");
       setLink("");
       setLevel("INFO");
+      setPicked(null);
     },
     onError: (e: any) => toast.error(e?.message || "Failed to send"),
   });
 
-  const canSend = title.trim().length > 0 && message.trim().length > 0 && !mut.isPending;
+  const targets = picked === null ? count : picked.length;
+  const canSend =
+    title.trim().length > 0 && message.trim().length > 0 && targets > 0 && !mut.isPending;
 
   function submit() {
     if (!canSend) return;
-    if (
-      !window.confirm(
-        `Send this notification to all ${count} of your users? This cannot be undone.`,
-      )
-    )
+    // Name the recipients when there are few enough to read. "Send to 2
+    // users?" is not a check an admin can fail safely; the names are.
+    const who =
+      picked === null
+        ? `all ${count} of your users`
+        : picked.length <= 5
+          ? picked.map((r) => r.label).join(", ")
+          : `${picked.length} selected users`;
+    if (!window.confirm(`Send this notification to ${who}? This cannot be undone.`))
       return;
     mut.mutate();
   }
@@ -66,18 +78,44 @@ export default function SendNotificationPage() {
     <div className="space-y-4">
       <PageHeader
         title="Send Notification"
-        description="Broadcast a message (with an optional link) to all your users at once."
+        description="Message everyone in your pool, or pick the users it should reach."
       />
 
       <Card className="max-w-2xl">
         <CardContent className="space-y-5 p-5">
-          {/* Recipient count */}
-          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-            <Users className="size-4 text-primary" />
-            <span className="text-muted-foreground">
-              Goes to <span className="font-semibold text-foreground">{count}</span> user
-              {count === 1 ? "" : "s"} in your pool
-            </span>
+          {/* Who it goes to */}
+          <div className="space-y-2.5 rounded-md border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-2 text-sm">
+              <Users className="size-4 text-primary" />
+              <span className="font-medium">Recipients</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPicked(null)}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                  picked === null
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Everyone in my pool ({count})
+              </button>
+              <button
+                type="button"
+                onClick={() => setPicked(picked ?? [])}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                  picked !== null
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Specific users
+              </button>
+            </div>
+            {picked !== null && (
+              <RecipientPicker selected={picked} onChange={setPicked} />
+            )}
           </div>
 
           <div className="space-y-1.5">

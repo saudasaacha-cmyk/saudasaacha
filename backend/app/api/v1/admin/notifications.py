@@ -136,6 +136,11 @@ class BroadcastBody(BaseModel):
     message: str = Field(min_length=1, max_length=1000)
     link: str | None = Field(default=None, max_length=500)
     level: NotificationLevel = NotificationLevel.INFO
+    # Omit to reach the whole pool, which is what every existing caller does
+    # and must keep doing. A LIST means "only these" — and an empty list is
+    # rejected rather than treated as absent, because "I picked nobody" and "I
+    # picked everybody" must never be the same request.
+    user_ids: list[str] | None = Field(default=None, max_length=500)
 
 
 @router.get("/broadcast/recipients", response_model=APIResponse[dict])
@@ -147,6 +152,42 @@ async def broadcast_recipient_count(
     the composer so the admin knows the blast radius before sending."""
     ids = await scoped_user_ids(admin)
     return APIResponse(data={"count": len(ids)})
+
+
+def _narrow_to_picked(picked: list[str], pool: list) -> list:
+    """Intersect an explicit recipient list with the actor's own pool.
+
+    An intersection rather than a lookup, and the direction matters: the
+    picker in the UI is scoped, but the REQUEST is not, and an id pasted by
+    hand or left over from a previous admin's session must not deliver into
+    somebody else's pool. Anything not in `pool` is dropped silently — telling
+    the caller which ids exist elsewhere would answer a question they are not
+    allowed to ask.
+
+    An empty selection is an error, not a broadcast. Falling through to the
+    whole pool there would turn "I deselected everyone" into a message to
+    every user the admin has.
+    """
+    if not picked:
+        raise HTTPException(
+            status_code=400,
+            detail="Pick at least one user, or send to everyone instead",
+        )
+    wanted = []
+    for raw in picked:
+        try:
+            wanted.append(PydanticObjectId(raw))
+        except Exception:
+            raise HTTPException(
+                status_code=400, detail=f"Not a user id: {raw!r}"
+            ) from None
+    allowed = set(pool)
+    out = [uid for uid in dict.fromkeys(wanted) if uid in allowed]
+    if not out:
+        raise HTTPException(
+            status_code=403, detail="None of those users are in your pool"
+        )
+    return out
 
 
 @router.post("/broadcast", response_model=APIResponse[dict])
@@ -165,6 +206,8 @@ async def broadcast_notification(
     link = (body.link or "").strip() or None
 
     recipients = await scoped_user_ids(admin)
+    if body.user_ids is not None:
+        recipients = _narrow_to_picked(body.user_ids, recipients)
     if not recipients:
         return APIResponse(data={"count": 0})
 
@@ -234,7 +277,19 @@ async def broadcast_notification(
             action=AuditAction.CREATE,
             entity_type="Notification",
             actor_id=admin.id,
-            metadata={"action": "broadcast", "count": len(recipients), "title": title, "has_link": bool(link)},
+            metadata={
+                "action": "broadcast",
+                "count": len(recipients),
+                "title": title,
+                "has_link": bool(link),
+                # Whether this was the whole pool or a hand-picked list, and
+                # who. A count alone cannot answer "did an admin message this
+                # one client", which is the question an audit gets asked.
+                "targeted": body.user_ids is not None,
+                "recipient_ids": (
+                    [str(u) for u in recipients] if body.user_ids is not None else None
+                ),
+            },
         )
     except Exception:
         logger.exception("broadcast_audit_failed")
