@@ -1569,6 +1569,34 @@ def carry_capacity(wallet: Any, floating_pnl: Decimal | None) -> Decimal:
     return capacity if capacity > 0 else to_decimal(0)
 
 
+def carry_shortfall(
+    cf_required: Decimal, equity: Decimal, credit_limit: Decimal
+) -> Decimal:
+    """The deposit that turns a failing carry gate into a passing one.
+
+    Lives next to `carry_capacity` because it is the same rule read backwards,
+    and the two drifting apart is exactly what went wrong once already: the
+    gate moved to equity and the two screens that predict it did not follow,
+    so a losing book was quoted a top-up smaller than the one that would have
+    saved it, by exactly the size of its floating loss.
+
+    The gate asks `need <= carry_capacity(wallet, floating)`, i.e.
+    `cf_required - used <= available + credit + floating`. A deposit raises
+    `available`, so the smallest one that satisfies it is
+
+        cf_required - (available + used + floating) - credit
+      = cf_required - equity - credit
+
+    which is why the figure a user is shown is measured against EQUITY and not
+    cash. `carry_capacity`'s floor at zero never moves this answer: once enough
+    has been added the capacity is positive anyway.
+
+    Floored at zero — an account that already covers its carry needs nothing.
+    """
+    short = to_decimal(cf_required) - to_decimal(equity) - to_decimal(credit_limit)
+    return short if short > 0 else to_decimal(0)
+
+
 async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> dict[str, int]:
     """At market close for a segment group, flip every open MIS position in
     that group to NRML. For each position we re-resolve the NRML margin

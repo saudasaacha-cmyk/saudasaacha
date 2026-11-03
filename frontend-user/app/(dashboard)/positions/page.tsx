@@ -1702,19 +1702,21 @@ function WalletStatusStrip({
   const used = Number(wallet?.used_margin ?? 0);
   const balance = available + used;
   const equity = balance + m2m;
-  // CF Extra Needed — the actual CASH SHORTFALL to carry the position(s)
-  // overnight. To roll into NRML the user needs `cfRequired` locked; the
-  // intraday `used` margin is released and re-locked, so the funds that can
-  // meet it are the FULL balance (available + used). If the balance already
-  // covers cfRequired the user needs to add nothing → ₹0 (green); otherwise
-  // it's the deposit they must top up → red.
-  //   balance = ₹12,687, cfRequired = ₹7,500 → extra needed ₹0 (affordable)
-  //   balance = ₹5,000,  cfRequired = ₹7,500 → extra needed ₹2,500
-  // (Earlier this showed `cfRequired - used` = the additional margin that
-  // would be blocked at rollover, but that read as a scary red number even
-  // when the wallet could easily afford the carry — operator flagged it as
-  // wrong. The shortfall against balance is the meaningful "needed" figure.)
-  const cfExtraNeeded = Math.max(0, cfRequired - balance);
+  // CF Extra Needed — the deposit that flips the EOD carry gate from fail to
+  // pass, so this tile predicts what the platform will actually do at the
+  // close instead of guessing alongside it.
+  //
+  // That gate compares `cfRequired - used` against `available + credit +
+  // floating` (position_service.carry_capacity), which rearranges to
+  // `cfRequired <= equity + credit`. So the shortfall is measured against
+  // EQUITY — cash plus what the open book is worth right now — not cash alone.
+  //
+  // Measuring it against `balance` understated it by exactly the floating
+  // P&L, and always in the dangerous direction: a book sitting on a ₹3.0L
+  // loss was told to add ₹2.4L when the amount that would actually save it
+  // from an EOD force-close was ₹5.4L.
+  const credit = Number(wallet?.credit_limit ?? 0);
+  const cfExtraNeeded = Math.max(0, cfRequired - equity - credit);
   return (
     <div
       className={cn(
@@ -1735,7 +1737,7 @@ function WalletStatusStrip({
           <WalletTile
             label="CF Required"
             value={formatINR(cfRequired)}
-            valueClass={cfRequired > balance ? "text-red-500" : undefined}
+            valueClass={cfExtraNeeded > 0 ? "text-red-500" : undefined}
           />
           <WalletTile
             label="CF Extra Needed"

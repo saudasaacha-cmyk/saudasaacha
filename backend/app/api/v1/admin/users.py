@@ -1657,7 +1657,8 @@ async def live_trade_stats(user_id: str, admin: CurrentAdmin):
       • equity           — available + used + floating P&L
       • cf_total_eod     — sum of overnight margin needed for every
                            currently-open MIS/NRML position at EOD rates
-      • cf_extra_needed  — max(0, cf_total_eod − wallet free balance)
+      • cf_extra_needed  — max(0, cf_total_eod − equity − credit_limit):
+                           the deposit that makes the EOD carry gate pass
       • weekly_net_pnl   — realised P&L this IST week
       • weekly_trades    — closed-position count this IST week
                            (also split into wins / losses)
@@ -1851,9 +1852,19 @@ async def live_trade_stats(user_id: str, admin: CurrentAdmin):
             }
         )
 
-    free_balance = available + credit_limit
-    cf_extra_needed = max(0.0, cf_total_eod - free_balance)
+    # The deposit that flips the EOD carry gate from fail to pass, so this
+    # number predicts what `convert_intraday_to_carry` will actually do at the
+    # close instead of guessing alongside it. That gate compares
+    # `cf_total_eod - used` against `available + credit + floating`
+    # (position_service.carry_capacity), which rearranges to
+    # `cf_total_eod <= equity + credit` — so the shortfall is measured against
+    # EQUITY, not cash. Measuring it against `available + credit` understated it
+    # by exactly `used + floating`: a book sitting on a floating loss was told
+    # it needed far less than the amount that would save it from a force-close.
     equity = available + used_margin + floating_pnl
+    cf_extra_needed = float(
+        position_service.carry_shortfall(cf_total_eod, equity, credit_limit)
+    )
 
     return APIResponse(
         data={
