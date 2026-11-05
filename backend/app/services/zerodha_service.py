@@ -81,6 +81,49 @@ FAILOVER_CMD_CHANNEL = "zerodha:failover:cmd"
 WS_POOL_KEY = "zerodha:ws_pool"
 
 
+def is_bad_tick(
+    ltp: float,
+    prev_ltp: float,
+    age_sec: float | None,
+    day_low: float,
+    day_high: float,
+    *,
+    max_jump: float = 0.5,
+    stale_sec: float = 30.0,
+) -> bool:
+    """True when this tick is feed garbage rather than a price.
+
+    A jump of more than `max_jump` from the last good tick used to be enough
+    on its own, and that was wrong for options: a deep strike doubles or
+    halves on a single trade. Measured on 2026-11-05, with the market open,
+    it rejected 2,629 ticks in one morning and left NINE of ten sampled
+    strikes sitting at 0.00 while Kite quoted them normally — SENSEX
+    75000CE read 0 against 3,818, and the price only "arrived" when a gap
+    in the tape finally let one through, which is the 200-to-2000 point jump
+    the operator kept seeing.
+
+    So the jump alone no longer condemns a tick. A price INSIDE the day's
+    traded range is one of the trades that FORMED that range, whatever the
+    distance from the previous print. Garbage is not: the ticks that
+    phantom-closed positions were 68%-99% off and nowhere near the band
+    (NIFTY BANK at Rs 28 against a 58,000 low, UKOIL at $120 against $71).
+
+    The band carries 5% of slack so the tick that sets a NEW extreme is not
+    itself refused, and when the feed sends no OHLC at all the old
+    jump-only rule still applies.
+    """
+    if ltp <= 0 or prev_ltp <= 0:
+        return False
+    if age_sec is None or age_sec >= stale_sec:
+        # The last good price is old enough that a big move is believable.
+        return False
+    if abs(ltp - prev_ltp) / prev_ltp <= max_jump:
+        return False
+    if day_low > 0 and day_high >= day_low and day_low * 0.95 <= ltp <= day_high * 1.05:
+        return False  # it traded today — not garbage
+    return True
+
+
 class ZerodhaService:
     """Kite Connect REST + WebSocket wrapper.
 
@@ -2260,11 +2303,14 @@ class ZerodhaService:
             if ltp > 0 and _prev:
                 _prev_ltp = float(_prev.get("ltp") or 0)
                 _prev_at = _prev.get("received_at")
-                if (
-                    _prev_ltp > 0
-                    and abs(ltp - _prev_ltp) / _prev_ltp > self._MAX_TICK_SPIKE_PCT
-                    and _prev_at is not None
-                    and (received_at_mono - _prev_at) < self._SPIKE_STALE_SEC
+                if is_bad_tick(
+                    ltp,
+                    _prev_ltp,
+                    (received_at_mono - _prev_at) if _prev_at is not None else None,
+                    float(payload["low"] or 0),
+                    float(payload["high"] or 0),
+                    max_jump=self._MAX_TICK_SPIKE_PCT,
+                    stale_sec=self._SPIKE_STALE_SEC,
                 ):
                     logger.warning(
                         "zerodha_tick_spike_rejected",
