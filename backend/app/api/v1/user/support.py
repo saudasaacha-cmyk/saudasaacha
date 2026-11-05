@@ -25,6 +25,8 @@ shape no longer works once cascade is in play.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter
 
@@ -33,7 +35,7 @@ from app.models._base import PermissionLevel
 from app.models.platform_setting import PlatformSetting
 from app.models.user import User, UserRole
 from app.schemas.common import APIResponse
-from app.utils.time_utils import now_utc
+from app.utils.time_utils import now_ist, now_utc, to_ist
 
 router = APIRouter(prefix="/support", tags=["user-support"])
 
@@ -172,6 +174,24 @@ async def get_ticker_for_user(user: CurrentUser):
     return APIResponse(data={"messages": await _resolve_ticker_for_user(user)})
 
 
+def accepted_today(ts: datetime | None) -> bool:
+    """True when this acceptance was given on TODAY's IST date.
+
+    Consent is dated, not permanent: the acceptance covers the trading day
+    it was given on, so midnight IST starts a new day and the first login
+    after it asks again. A timestamp from 23:59 is yesterday's at 00:01 —
+    that is the point of it, not an edge case.
+
+    Rows written before this existed are UTC-aware; anything naive is read
+    as UTC, which is how every other timestamp in this codebase is stored.
+    """
+    if ts is None:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return to_ist(ts).date() == now_ist().date()
+
+
 @router.get("/terms", response_model=APIResponse[dict])
 async def get_terms_for_user(user: CurrentUser):
     """Effective T&C for the calling user — text + enabled flag from
@@ -179,21 +199,25 @@ async def get_terms_for_user(user: CurrentUser):
     tells the app whether to show the modal (enabled AND user hasn't
     accepted yet OR admin reset acceptance after a text update)."""
     text, enabled = await _resolve_terms_for_user(user)
-    needs_accept = bool(enabled and not user.terms_accepted_at)
+    needs_accept = bool(enabled and not accepted_today(user.terms_accepted_at))
     return APIResponse(
         data={
             "text": text,
             "enabled": enabled,
             "needs_accept": needs_accept,
             "accepted_at": user.terms_accepted_at,
+            # So the app can say "accepted today" rather than guessing from
+            # a timestamp it would have to re-zone itself.
+            "accepted_today": accepted_today(user.terms_accepted_at),
         }
     )
 
 
 @router.post("/terms/accept", response_model=APIResponse[dict])
 async def accept_terms(user: CurrentUser):
-    """Stamp `terms_accepted_at = now()` on the calling user so the
-    modal stops appearing until admin updates the text."""
+    """Stamp `terms_accepted_at = now()` on the calling user so the modal
+    stops appearing for the rest of TODAY (IST). It returns tomorrow, and
+    sooner if the admin updates the text and resets acceptance."""
     user.terms_accepted_at = now_utc()
     await user.save()
     return APIResponse(data={"accepted_at": user.terms_accepted_at})

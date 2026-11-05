@@ -28,8 +28,12 @@ export function useUserTerms(enabled = true) {
     queryKey: ["user", "terms"],
     queryFn: () => unwrap<UserTerms>(api.get("/user/support/terms")),
     enabled,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
+    // Acceptance lasts one IST day, so this answer goes stale at midnight.
+    // A short window plus a re-check when the tab comes back means a
+    // session left open overnight is asked again on the next interaction,
+    // not only after a reload.
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
 }
 

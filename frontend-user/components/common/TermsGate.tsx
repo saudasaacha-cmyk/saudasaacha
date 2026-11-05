@@ -8,15 +8,16 @@ import { useAcceptTerms, useUserTerms } from "@/lib/useSupport";
 import { Button } from "@/components/ui/button";
 
 /**
- * Renders a modal Terms & Conditions popup once per user, gated by
+ * Renders a modal Terms & Conditions popup ONCE A DAY per user, gated by
  * the admin-side toggle. Visibility logic:
  *
  *   - GET /user/support/terms returns `needs_accept=true` when the
- *     resolved (cascaded) admin has enabled T&C AND the user hasn't
- *     accepted the current version yet.
+ *     resolved (cascaded) admin has enabled T&C AND the user has not
+ *     accepted TODAY. Consent is dated: midnight IST starts a new day,
+ *     so the first login after 12 AM asks again.
  *   - On Accept: POST /user/support/terms/accept stamps the user's
- *     `terms_accepted_at`; modal closes and never reappears until
- *     the admin updates the text.
+ *     `terms_accepted_at`; the modal closes for the rest of that day,
+ *     and returns tomorrow (or sooner if the admin updates the text).
  *   - On Close (Skip): modal is hidden for this session only — the
  *     next page load will show it again because the backend still
  *     reports `needs_accept=true`. Operator choice: hard-stop vs
