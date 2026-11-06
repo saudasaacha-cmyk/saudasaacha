@@ -775,7 +775,20 @@ export const NotificationsAPI = {
     link?: string;
     level?: string;
     user_ids?: string[];
+    image_url?: string;
   }) => unwrap<{ count: number }>(api.post("/admin/notifications/broadcast", body)),
+  /** Upload one image for a broadcast (PNG / JPG / WEBP, max 2 MB) and get
+   *  back the path to send with it. Separate call so the composer can show a
+   *  preview, and so a failed send doesn't re-upload the file. */
+  uploadAttachment: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return unwrap<{ image_url: string; bytes: number }>(
+      api.post("/admin/notifications/attachment", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      }),
+    );
+  },
   /**
    * History of what went out TO USERS, newest first — broadcasts an admin
    * typed plus the automatic ones (chart lines, payment details).

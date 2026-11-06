@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Send, Users, Link2 } from "lucide-react";
+import { Image as ImageIcon, Link2, Send, Users, X } from "lucide-react";
 import { NotificationsAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,11 @@ export default function SendNotificationPage() {
   // `null` = the whole pool, which is what this page did before and what
   // leaving `user_ids` out of the request still means to the server.
   const [picked, setPicked] = useState<Recipient[] | null>(null);
+  // An attached picture, already uploaded — the send carries its path, not
+  // the bytes, so a retry never re-uploads 2 MB.
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // How many users this actor's broadcast reaches (their own pool).
   const { data: rec } = useQuery({
@@ -42,6 +47,7 @@ export default function SendNotificationPage() {
         message: message.trim(),
         link: link.trim() || undefined,
         level,
+        ...(imageUrl ? { image_url: imageUrl } : {}),
         ...(picked ? { user_ids: picked.map((r) => r.id) } : {}),
       }),
     onSuccess: (r) => {
@@ -51,9 +57,38 @@ export default function SendNotificationPage() {
       setLink("");
       setLevel("INFO");
       setPicked(null);
+      setImageUrl(null);
     },
     onError: (e: any) => toast.error(e?.message || "Failed to send"),
   });
+
+  const MAX_IMAGE_MB = 2;
+
+  async function attach(file: File) {
+    // Checked here as well as on the server: telling someone their 9 MB
+    // photo is too big after they have waited for it to upload is a worse
+    // way to say the same thing.
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      toast.error("Attach a PNG, JPG or WEBP image");
+      return;
+    }
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      toast.error(
+        `That image is ${(file.size / 1024 / 1024).toFixed(1)} MB — the limit is ${MAX_IMAGE_MB} MB`,
+      );
+      return;
+    }
+    setUploading(true);
+    try {
+      const r = await NotificationsAPI.uploadAttachment(file);
+      setImageUrl(r.image_url);
+    } catch (e: any) {
+      toast.error(e?.message || "Could not upload that image");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   const targets = picked === null ? count : picked.length;
   const canSend =
@@ -153,6 +188,52 @@ export default function SendNotificationPage() {
               maxLength={500}
               onChange={(e) => setLink(e.target.value)}
               placeholder="https://…  (users can tap to open)"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5">
+              <ImageIcon className="size-3.5" /> Image{" "}
+              <span className="text-muted-foreground">(optional · PNG, JPG or WEBP · max 2 MB)</span>
+            </Label>
+            {imageUrl ? (
+              <div className="relative w-fit">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imageUrl}
+                  alt="Attachment preview"
+                  className="max-h-40 rounded-md border border-border object-contain"
+                />
+                <button
+                  type="button"
+                  onClick={() => setImageUrl(null)}
+                  title="Remove image"
+                  className="absolute -right-2 -top-2 grid size-6 place-items-center rounded-full border border-border bg-background text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                className="gap-2"
+                loading={uploading}
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+              >
+                <ImageIcon className="size-4" /> Attach image
+              </Button>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void attach(f);
+              }}
             />
           </div>
 

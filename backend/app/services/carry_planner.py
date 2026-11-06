@@ -183,6 +183,81 @@ def affordable_carry(
     return max(min(keep, qty - step), Decimal(0))
 
 
+def carry_outcome_message(
+    cut: list[tuple[str, Any, str, Any]],
+    carried: list[tuple[str, Any]],
+    group_label: str,
+) -> tuple[str, str]:
+    """What to tell a user after the close acted on their book.
+
+    `cut` is `[(symbol, qty_closed, reason, qty_before)]`, `carried` is
+    `[(symbol, qty)]`. Written for somebody who has just lost a position they
+    expected to still hold in the morning: WHAT went, what is still there,
+    and why — in that order, because that is the order they ask in.
+
+    A position cut BACK is reported as "5 of 10", never as a plain close: the
+    difference between "my gold is gone" and "half my gold is gone" is the
+    whole reason the sweep does partials at all.
+    """
+    whole = [(sym, q) for sym, q, r, before in cut if _is_whole(q, before)]
+    partial = [(sym, q, before) for sym, q, r, before in cut if not _is_whole(q, before)]
+
+    n = len(cut)
+    title = (
+        f"{n} position{'' if n == 1 else 's'} squared off at close"
+        if not partial or whole
+        else f"{len(partial)} position{'' if len(partial) == 1 else 's'} cut back at close"
+    )
+
+    lines = [
+        f"{group_label} has closed and your account did not cover the "
+        f"overnight margin for the whole book."
+    ]
+    if whole:
+        lines.append(
+            "Squared off: " + _join(f"{s_} ({_fmt_qty(q)})" for s_, q in whole) + "."
+        )
+    if partial:
+        lines.append(
+            "Cut back: "
+            + _join(
+                f"{s_} ({_fmt_qty(q)} of {_fmt_qty(b)})" for s_, q, b in partial
+            )
+            + " — the rest still carries."
+        )
+    if carried:
+        lines.append(
+            "Still carrying: " + _join(f"{s_} ({_fmt_qty(q)})" for s_, q in carried) + "."
+        )
+    lines.append(
+        "The oldest positions are cut first. Add funds before the close to "
+        "carry everything next time."
+    )
+    return title, " ".join(lines)
+
+
+def _is_whole(qty_closed: Any, qty_before: Any) -> bool:
+    try:
+        return Decimal(str(qty_closed)) >= Decimal(str(qty_before))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _join(parts: Any, limit: int = 4) -> str:
+    """At most `limit` names, then a count — a notification is read on a
+    phone, not audited."""
+    items = list(parts)
+    head = ", ".join(items[:limit])
+    rest = len(items) - limit
+    return f"{head} and {rest} more" if rest > 0 else head
+
+
+def _fmt_qty(q: Any) -> str:
+    """Quantity without the trailing zeros a Decimal drags along."""
+    d = Decimal(str(q))
+    return str(d.quantize(Decimal(1)) if d == d.to_integral_value() else d.normalize())
+
+
 def rollover_fire_time(close: time, delay_min: int) -> time:
     """Close + delay, as a wall-clock time.
 

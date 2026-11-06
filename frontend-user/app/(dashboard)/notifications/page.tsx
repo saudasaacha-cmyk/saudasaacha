@@ -57,6 +57,21 @@ export default function NotificationsPage() {
                     {!n.is_read && <span className="size-1.5 rounded-full bg-primary" />}
                   </div>
                   <div className="text-sm text-muted-foreground">{n.message}</div>
+                  {/* An image the admin attached. Served from our own
+                      /uploads, so no remote address can be injected here —
+                      the API rejects anything else. Opens full size on tap,
+                      because a chart or a notice is unreadable at 160px. */}
+                  {n.data?.image_url && (
+                    <a href={n.data.image_url} target="_blank" rel="noopener noreferrer">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={n.data.image_url}
+                        alt=""
+                        loading="lazy"
+                        className="mt-1 max-h-48 w-auto rounded-md border border-border object-contain"
+                      />
+                    </a>
+                  )}
                   {n.data?.link && (
                     <a
                       href={n.data.link}

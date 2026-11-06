@@ -81,3 +81,44 @@ def test_fire_time():
     assert rollover_fire_time(time(15, 30), 12) == time(15, 42)
     assert rollover_fire_time(time(15, 55), 10) == time(16, 5)
     assert rollover_fire_time(time(23, 55), 10) == time(23, 59)
+
+
+# ── what the user is told afterwards ─────────────────────────────────
+from app.services.carry_planner import carry_outcome_message  # noqa: E402
+
+
+def test_a_whole_close_names_what_went_and_what_stayed():
+    title, body = carry_outcome_message(
+        [("ZINC26NOVFUT", D(5000), "CARRY_FORWARD_TRIM", D(5000))],
+        [("NIFTY26NOVFUT", D(65))],
+        "MCX",
+    )
+    assert title == "1 position squared off at close"
+    assert "Squared off: ZINC26NOVFUT (5000)." in body
+    assert "Still carrying: NIFTY26NOVFUT (65)." in body
+    assert "oldest" in body
+
+
+def test_a_partial_says_how_much_is_left():
+    """"My gold is gone" and "half my gold is gone" are different messages,
+    and the partial exists precisely so the second one is true."""
+    title, body = carry_outcome_message(
+        [("GOLDM26DECFUT", D(5), "CARRY_FORWARD_PARTIAL", D(10))], [], "MCX"
+    )
+    assert title == "1 position cut back at close"
+    assert "GOLDM26DECFUT (5 of 10)" in body
+    assert "the rest still carries" in body
+
+
+def test_a_long_list_is_summarised_not_dumped():
+    cut = [(f"SYM{i}", D(1), "x", D(1)) for i in range(7)]
+    _title, body = carry_outcome_message(cut, [], "MCX")
+    assert "and 3 more" in body
+    assert "SYM6" not in body
+
+
+def test_quantities_lose_their_decimal_tail():
+    _t, body = carry_outcome_message(
+        [("BTCUSD", D("0.50"), "x", D("0.50"))], [], "Crypto"
+    )
+    assert "(0.5)" in body

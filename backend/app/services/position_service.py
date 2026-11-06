@@ -1888,8 +1888,9 @@ async def warn_carry_shortfalls(
                 f"{n} open position{'' if n == 1 else 's'} overnight needs "
                 f"{format_inr(d['required'])} margin — "
                 f"{format_inr(d['shortfall'])} more than your account covers. "
-                f"Add funds or reduce positions before {deadline}, or the "
-                f"positions furthest in loss will be squared off automatically.",
+                f"Add funds or reduce positions before {deadline}. Whatever "
+                f"your account covers is carried; the shortfall is taken off "
+                f"the OLDEST positions first, and only as much as it takes.",
             )
         )
 
@@ -1938,7 +1939,9 @@ class _PlanItem:
         self.settings = settings
 
 
-async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> dict[str, int]:
+async def convert_intraday_to_carry(
+    segment_set: frozenset[str] | set[str], group_label: str | None = None
+) -> dict[str, int]:
     """At a group's close, carry as much of each user's book as their funds
     cover and square off only the rest.
 
@@ -2466,6 +2469,21 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             charged += 1
         return "done"
 
+    # What each user is told afterwards. A position that disappears overnight
+    # with no word is the complaint behind every "mera trade kyun cut gaya";
+    # the pre-close warning says it MIGHT happen, this says what did.
+    outcome: dict = {}
+
+    def _note_cut(uid, pos, qty_closed, qty_before) -> None:
+        outcome.setdefault(uid, {"cut": [], "carried": []})["cut"].append(
+            (pos.instrument.symbol, qty_closed, "", qty_before)
+        )
+
+    def _note_carried(uid, pos) -> None:
+        outcome.setdefault(uid, {"cut": [], "carried": []})["carried"].append(
+            (pos.instrument.symbol, abs(to_decimal(pos.quantity)))
+        )
+
     # ── Per-user plan: carry what the funds cover, oldest cut first ─────
     for _uid, items in by_user.items():
         # Portfolio FIFO. The position held longest is cut before one opened
@@ -2535,6 +2553,7 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             close_qty = qty if whole else qty - keep
             try:
                 if await _square(it.pos, close_qty, reason, it.mark):
+                    _note_cut(_uid, it.pos, close_qty, qty)
                     if whole:
                         force_closed += 1
                     else:
@@ -2557,12 +2576,13 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             if fresh is None or fresh.status != PositionStatus.OPEN:
                 continue
             margin_now = overnight_margin_for(fresh, it.settings, mark=it.mark)
-            outcome = await _carry(fresh, margin_now, it.mark, it.settings)
-            if outcome == "done":
+            result = await _carry(fresh, margin_now, it.mark, it.settings)
+            if result == "done":
+                _note_carried(_uid, fresh)
                 if fresh.product_type == _PT.NRML and it.pos.product_type == _PT.MIS:
                     converted += 1
                     converted_user_ids.add(fresh.user_id)
-            elif outcome == "deferred":
+            elif result == "deferred":
                 deferred.append((it, margin_now))
             else:
                 skipped += 1
@@ -2574,6 +2594,7 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             if fresh is None or fresh.status != PositionStatus.OPEN:
                 continue
             if await _carry(fresh, margin_now, it.mark, it.settings) == "done":
+                _note_carried(_uid, fresh)
                 converted += 1
                 converted_user_ids.add(fresh.user_id)
                 continue
@@ -2591,16 +2612,19 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
                 keep = to_decimal(0)
             if keep >= it.step:
                 if await _square(fresh, qty - keep, "CARRY_FORWARD_PARTIAL", it.mark):
+                    _note_cut(_uid, fresh, qty - keep, qty)
                     trimmed += 1
                 fresh2 = await Position.get(fresh.id)
                 if fresh2 is not None and fresh2.status == PositionStatus.OPEN:
                     m2 = overnight_margin_for(fresh2, it.settings, mark=it.mark)
                     if await _carry(fresh2, m2, it.mark, it.settings) == "done":
+                        _note_carried(_uid, fresh2)
                         converted += 1
                         converted_user_ids.add(fresh2.user_id)
                         continue
             # Nothing fits: never leave it MIS overnight at intraday leverage.
             if await _force_close_carry(fresh):
+                _note_cut(_uid, fresh, qty, qty)
                 force_closed += 1
             else:
                 skipped += 1
@@ -2642,6 +2666,37 @@ async def convert_intraday_to_carry(segment_set: frozenset[str] | set[str]) -> d
             await consolidate_open_positions(_uid)
         except Exception:  # noqa: BLE001
             logger.exception("intraday_to_carry_consolidate_failed user=%s", _uid)
+
+    # Tell each affected user what happened to their book. Only those who
+    # actually lost something are messaged — a user whose whole book carried
+    # hears nothing, which is how a channel stays worth reading.
+    try:
+        from app.models.notification import NotificationLevel, NotificationType
+        from app.services import notification_service
+
+        items_msg = []
+        for _uid, o in outcome.items():
+            if not o["cut"]:
+                continue
+            title, body = carry_planner.carry_outcome_message(
+                o["cut"], o["carried"], group_label or "The market"
+            )
+            items_msg.append((_uid, title, body))
+        if items_msg:
+            sent = await notification_service.send_many(
+                items_msg,
+                type=NotificationType.MARGIN,
+                level=NotificationLevel.WARNING,
+                link="/positions",
+                data={"source": "carry_outcome", "group": group_label or ""},
+                tag=f"mp-carry-done-{group_label or 'market'}",
+            )
+            logger.info(
+                "carry_outcome_notified",
+                extra={"group": group_label, "users": sent},
+            )
+    except Exception:  # noqa: BLE001 — a notification must never fail a sweep
+        logger.exception("carry_outcome_notify_failed")
 
     # Every touched user's lock is rebuilt from their open book — a partial
     # square and a re-lock in the same sweep is exactly where a drift would
@@ -3037,7 +3092,9 @@ async def intraday_to_carry_loop(interval_sec: float = 60.0) -> None:
                         if not await _claim_rollover_day(group_name, day_key):
                             _last_rollover_day[group_name] = day_key
                             continue
-                        summary = await convert_intraday_to_carry(group_set)
+                        summary = await convert_intraday_to_carry(
+                            group_set, _GROUP_LABEL.get(group_name, group_name)
+                        )
                         _last_rollover_day[group_name] = day_key
                         _log.info(
                             "intraday_to_carry_rolled",

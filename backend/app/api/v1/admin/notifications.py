@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.dependencies import (
@@ -141,6 +141,78 @@ class BroadcastBody(BaseModel):
     # rejected rather than treated as absent, because "I picked nobody" and "I
     # picked everybody" must never be the same request.
     user_ids: list[str] | None = Field(default=None, max_length=500)
+    # A picture the admin attached, as returned by /notifications/attachment.
+    # Deliberately NOT a free URL: this is pushed to every user in the pool,
+    # so an arbitrary address here would let one admin's typo — or worse —
+    # load a remote image inside everyone's app.
+    image_url: str | None = Field(default=None, max_length=300)
+
+
+# A picture is worth attaching, but this goes to every phone in a pool and
+# is served from our own disk, so it is bounded on both sides: 2 MB (a photo
+# straight off a phone compresses well below that) and three image types.
+# Anything bigger belongs in a link, not in a notification.
+MAX_NOTIF_IMAGE_BYTES = 2 * 1024 * 1024
+ALLOWED_NOTIF_IMAGE: dict[str, str] = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+}
+
+
+_ATTACHMENT_RE = re.compile(r"/uploads/notifications/[A-Za-z0-9._-]{1,200}")
+
+
+def is_own_attachment(url: str) -> bool:
+    """True only for a path THIS endpoint wrote.
+
+    The broadcast pushes this address into every phone in a pool, so it is
+    not a free URL field: a remote one would let a single admin load — or
+    track — whatever they liked inside everyone's app, and `..` in the name
+    would walk off the uploads directory.
+    """
+    return bool(_ATTACHMENT_RE.fullmatch((url or "").strip()))
+
+
+@router.post("/attachment", response_model=APIResponse[dict])
+async def upload_attachment(
+    admin: CurrentAdmin,
+    file: UploadFile = File(description="PNG / JPEG / WEBP, max 2 MB"),
+    _: None = Depends(require_perm("users", "read")),
+):
+    """Store one image for a broadcast and hand back its URL.
+
+    Separate from the send itself so the composer can show a preview — and
+    so a 2 MB upload is not repeated for every retry of a failed send.
+    """
+    from pathlib import Path as _Path
+
+    mime = (file.content_type or "").lower()
+    if mime not in ALLOWED_NOTIF_IMAGE:
+        raise HTTPException(
+            status_code=400,
+            detail="Attach a PNG, JPG or WEBP image.",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="That file is empty.")
+    if len(content) > MAX_NOTIF_IMAGE_BYTES:
+        mb = len(content) / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image is {mb:.1f} MB — the limit is 2 MB.",
+        )
+
+    out_dir = _Path("uploads") / "notifications"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = f"notif-{admin.id}-{int(datetime.now(UTC).timestamp() * 1000)}{ALLOWED_NOTIF_IMAGE[mime]}"
+    (out_dir / name).write_bytes(content)
+    url = f"/uploads/notifications/{name}"
+    logger.info(
+        "notification_attachment_uploaded",
+        extra={"admin_id": str(admin.id), "bytes": len(content), "url": url},
+    )
+    return APIResponse(data={"image_url": url, "bytes": len(content)})
 
 
 @router.get("/broadcast/recipients", response_model=APIResponse[dict])
@@ -214,6 +286,15 @@ async def broadcast_notification(
     data: dict[str, Any] = {"source": "admin_broadcast", "sender_id": str(admin.id)}
     if link:
         data["link"] = link
+    # Only a path we wrote ourselves — see the field's note on BroadcastBody.
+    img = (body.image_url or "").strip()
+    if img:
+        if not is_own_attachment(img):
+            raise HTTPException(
+                status_code=400,
+                detail="Attach the image through the upload button.",
+            )
+        data["image_url"] = img
 
     # ONE stamp for the whole send, instead of `created_at`'s per-row
     # default. `/sent` below regroups these rows by their second, and
