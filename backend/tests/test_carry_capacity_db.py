@@ -154,6 +154,6 @@ async def test_the_production_query_shape_is_what_is_tested(db):
     Pin the two parts that matter: filtered by OPEN status and by a
     `user_id` `$in`."""
     src = inspect.getsource(convert_intraday_to_carry)
-    window = src[src.index("floating_by_user") : src.index("for _uid, items in by_user.items():")]
+    window = src[src.index("funds_by_user") : src.index("for _uid, items in by_user.items():")]
     assert '"status": PositionStatus.OPEN.value' in window
     assert '"user_id": {"$in": list(by_user.keys())}' in window

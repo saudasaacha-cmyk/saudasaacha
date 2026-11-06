@@ -158,6 +158,20 @@ const CLOSE_REASON_META: Record<
     label: "CF · Insufficient funds",
     cls: "bg-amber-500/10 text-amber-400 ring-amber-500/30",
   },
+  // The carry gate kept part of this position and squared the rest: the
+  // funds covered some of the overnight requirement, not all of it. Distinct
+  // from a FAIL (nothing could be carried) so a user can see they still hold
+  // the remainder.
+  CARRY_FORWARD_PARTIAL: {
+    label: "CF · Part carried",
+    cls: "bg-amber-500/10 text-amber-400 ring-amber-500/30",
+  },
+  // Too small to keep: what the funds covered was below one tradable step,
+  // so the position went whole rather than leaving an unsellable stub.
+  CARRY_FORWARD_TRIM: {
+    label: "CF · Trimmed out",
+    cls: "bg-amber-500/10 text-amber-400 ring-amber-500/30",
+  },
   // Segment doesn't allow overnight at all (intraday-only product).
   EOD_OVERNIGHT_DISABLED: {
     label: "EOD · Intraday only",

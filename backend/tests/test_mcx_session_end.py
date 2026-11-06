@@ -132,13 +132,24 @@ def test_the_rollover_can_fire_at_either_close():
     """`intraday_to_carry_loop` fires the minute AFTER the close. At :59 that
     used to build minute 60, greater than every wall-clock time, so the
     group's rollover would never run again and never log a reason."""
+    from app.services.carry_planner import rollover_fire_time
+
     for close in (tu.MCX_END_US_DST, tu.MCX_END_US_STANDARD, tu.NSE_BSE_CLOSE):
-        fire_after = (close.hour, min(close.minute + 1, 59))
-        assert fire_after <= (23, 59), f"{close} makes the rollover minute unreachable"
+        fire = rollover_fire_time(close, 1)
+        assert (fire.hour, fire.minute) <= (23, 59), (
+            f"{close} makes the rollover minute unreachable"
+        )
+        # A :59 close rolls the HOUR rather than inventing minute 60.
+        if close.minute == 59 and close.hour < 23:
+            assert fire.hour == close.hour + 1 and fire.minute == 0
 
 
 def test_the_loop_still_clamps_that_minute():
-    assert "min(close_t.minute + 1, 59)" in inspect.getsource(intraday_to_carry_loop)
+    """The clamp moved into `rollover_fire_time`, which does it with divmod.
+    What must not come back is the loop doing its own minute arithmetic."""
+    body = inspect.getsource(intraday_to_carry_loop)
+    assert "rollover_fire_time(close_t" in body
+    assert "close_t.minute + 1" not in body
 
 
 def test_the_loop_resolves_the_close_against_now():

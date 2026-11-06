@@ -91,22 +91,36 @@ SRC = textwrap.dedent(inspect.getsource(convert_intraday_to_carry))
 
 
 def test_the_gate_calls_the_rule_rather_than_inlining_it():
+    """The funds rule lives in ONE function. Inlined, it drifts from the
+    screens that predict it — which is how a user once topped up by the
+    figure they were shown and was squared off anyway.
+
+    The rule moved to `carry_planner.carry_funds` when the sweep started
+    planning against the FULL overnight requirement rather than the delta
+    over the intraday lock: funds now include the margin the book already
+    holds, and exclude the credit limit.
+    """
     tree = ast.parse(SRC)
     calls = {
-        node.func.id
+        node.func.attr
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
-    assert "carry_capacity" in calls
+    assert "carry_funds" in calls
 
 
 def test_floating_pnl_is_summed_over_the_whole_book_not_one_segment():
     """Equity is a wallet-level quantity. A loss running in MCX is just as
     real against an NFO carry, so the lookup must not be restricted to the
     segment group being rolled — which is what `rows` holds."""
-    i = SRC.index("floating_by_user")
-    window = SRC[i : SRC.index("for _uid, items in by_user.items():")]
-    assert '"user_id": {"$in"' in window, "the floating-P&L query is not per user"
+    # Just the funds-building section: the executors below it legitimately
+    # mention a segment (they resolve settings per position), and widening
+    # the window to them made this assert on the wrong code.
+    i = SRC.index("funds_by_user: dict = {}")
+    window = SRC[i : SRC.index("async def _square(")]
+    assert '"user_id": {"$in": list(by_user.keys())}' in window, (
+        "the floating-P&L query is not per user"
+    )
     assert "segment" not in window, "the query was narrowed to the rolled segment"
 
 
@@ -115,7 +129,7 @@ def test_a_failed_read_falls_back_to_cash_rather_than_to_free_carry():
     account is judged on cash alone — stricter than equity for a book in
     profit, identical for a flat one. The dangerous direction would be
     treating an unknown as a credit."""
-    i = SRC.index("floating_by_user")
+    i = SRC.index("funds_by_user")
     window = SRC[i : SRC.index("for _uid, items in by_user.items():")]
     assert "except Exception" in window
-    assert "floating_by_user = {}" in window
+    assert "funds_by_user = {}" in window

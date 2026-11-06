@@ -1026,6 +1026,35 @@ async def validate(
 
     _expiry = _effective_expiry(instrument)
     is_expiry_today = bool(_expiry and _expiry == now_ist().date())
+
+    # 8a) NRML locks the OVERNIGHT tier from the start.
+    # A carry order that locks the intraday figure is under-margined the
+    # moment it is filled, and the EOD sweep then finds a shortfall it did
+    # not create and squares the position off — the user is charged for a
+    # gap the platform let them open. Only the Indian exchanges have a carry
+    # tier; crypto and forex trade one leverage around the clock. Expiry day
+    # keeps its own rule, which is stricter and runs below.
+    from app.utils.time_utils import (
+        INDIAN_EQUITY_FNO_SEGMENTS as _IDX_SEGS,
+        MCX_SEGMENTS as _MCX_SEGS,
+    )
+
+    if (
+        product_type == ProductType.NRML
+        and not is_expiry_today
+        and str(instrument.segment) in (set(_IDX_SEGS) | set(_MCX_SEGS))
+    ):
+        _ov_lev = float(s.get("overnight_leverage") or 0)
+        _ov_pct = float(s.get("overnight_margin_percentage") or 0)
+        _ov_fix = float(s.get("overnight_fixed_margin_per_lot") or 0)
+        if (s.get("margin_calc_mode") or "").lower() == "fixed":
+            if _ov_fix > 0:
+                s["fixed_margin_per_lot"] = _ov_fix
+        else:
+            if _ov_lev > 0:
+                s["leverage"] = _ov_lev
+            if _ov_pct > 0:
+                s["margin_percentage"] = _ov_pct
     if is_expiry_today:
         expiry_margin = float(
             s.get("expiry_intraday_margin")

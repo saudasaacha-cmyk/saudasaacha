@@ -512,25 +512,17 @@ async def open_positions(user: CurrentUser):
             try:
                 mode = s.get("margin_calc_mode") or "times"
                 if _recompute_overnight_holding(r.product_type, mode):
-                    avg_native = float(str(r.avg_price))
-                    qty_abs = abs(float(r.quantity))
-                    notional = avg_native * qty_abs
-                    ovn_fixed = float(s.get("overnight_fixed_margin_per_lot") or 0)
-                    if mode == "fixed" and ovn_fixed > 0:
-                        lot_size = max(1, int(getattr(r.instrument, "lot_size", 1) or 1))
-                        lots = qty_abs / lot_size
-                        cf = ovn_fixed * lots
-                    else:
-                        ovn_pct = float(s.get("overnight_margin_percentage") or 100.0) / 100.0
-                        ovn_lev = float(s.get("overnight_leverage") or 1.0) or 1.0
-                        cf = notional * ovn_pct / ovn_lev
-                        # USD-quoted instruments — convert to INR like the
-                        # validator does at order time (fixed-per-lot is
-                        # already admin-entered in INR so it's skipped).
-                        if market_data_service.is_usd_quoted_segment(r.segment_type) or \
-                                market_data_service.is_usd_quoted_segment(r.instrument.segment):
-                            cf = cf * market_data_service.get_usd_inr_rate()
-                    holding_margin = round(cf, 2)
+                    # The SAME function the EOD gate calls, at the same live
+                    # mark. This was a second copy of the formula, and a
+                    # screen that quotes a different requirement from the one
+                    # that acts on it is how a user tops up by the figure
+                    # shown and is squared off anyway.
+                    _m = to_decimal(d.get("ltp") or 0) or to_decimal(r.ltp or 0)
+                    holding_margin = float(
+                        position_service.overnight_margin_for(
+                            r, s, mark=_m if _m > 0 else None
+                        )
+                    )
             except Exception:
                 pass
         d["holding_margin"] = f"{holding_margin:.2f}"
